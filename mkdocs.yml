@@ -1,0 +1,226 @@
+site_name: nonebot-plugin-htmlrender Documentation
+site_url:
+  !ENV [DOCS_SITE_URL, "https://kexue-z.github.io/nonebot-plugin-htmlrender/"]
+site_description: >-
+  nonebot-plugin-htmlrender 文档
+
+# Repository
+repo_name: kexue-z/nonebot-plugin-htmlrender
+repo_url: https://github.com/kexue-z/nonebot-plugin-htmlrender
+edit_uri: https://github.com/kexue-z/nonebot-plugin-htmlrender/docs/edit/master/docs/
+
+# Copyright
+copyright: "&copy; 2026 kexue-z"
+
+# Configuration
+theme:
+  variant: modern
+  custom_dir: docs/overrides
+  features:
+    - announce.dismiss
+    - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    - content.code.select
+    - content.footnote.tooltips
+    - content.tabs.link
+    - content.tooltips
+    - navigation.footer
+    - navigation.indexes
+    - navigation.path
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: lucide/sun-moon
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: red
+      accent: red
+      toggle:
+        icon: lucide/sun
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: red
+      accent: red
+      toggle:
+        icon: lucide/moon-star
+        name: Switch to system preference
+  favicon: assets/logo.png
+  logo: assets/nonebot_plugin.svg
+  icon:
+    tag:
+      default: lucide/hash
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - assets/javascripts/mermaid-11.16.0.min.js
+
+# Plugins
+plugins:
+  - search
+  - tags
+
+# Additional configuration
+extra:
+  homepage: https://github.com/kexue-z/nonebot-plugin-htmlrender
+  scope: !ENV [DOCS_SCOPE, "/"]
+  version:
+    provider: !ENV [DOCS_VERSION_PROVIDER, "mike"]
+    default: latest
+    alias: true
+  annotate:
+    json: [.s2]
+  status:
+    new: Recently added
+    deprecated: Deprecated
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/kexue-z/nonebot-plugin-htmlrender
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/nonebot-plugin-htmlrender/
+  tags:
+    default: default
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:zensical.extensions.emoji.to_svg
+      emoji_index: !!python/name:zensical.extensions.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      normalize_issue_symbols: true
+      repo_url_shorthand: true
+      user: zensical
+      repo: zensical
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+  - pymdownx.blocks.caption
+  - zensical.extensions.glightbox:
+      auto_caption: true
+
+# Validation
+validation:
+  unresolved_references: true
+  unresolved_footnotes: true
+  unused_definitions: true
+  unused_footnotes: true
+  shadowed_definitions: true
+  shadowed_footnotes: true
+  invalid_links: true
+  invalid_link_anchors: true
+
+# Page tree
+nav:
+  - 首页: index.md
+  - 指南:
+      - 指南总览: guides/index.md
+      - 开始使用:
+          - 入门路径: start/index.md
+          - 快速开始: start/quickstart.md
+          - 选择渲染后端: start/choosing-provider.md
+      - 渲染任务:
+          - 渲染内容: guides/rendering-content.md
+          - 模板与资源: guides/templates-and-resources.md
+          - 操作浏览器页面: guides/browser-automation.md
+          - 绘制 RasterScene: guides/raster-scenes.md
+          - 最佳实践: guides/best-practices.md
+      - 部署与运维:
+          - 远程 Playwright: configuration/remote-playwright.md
+          - 缓存组件与调优: guides/cache-lifecycle.md
+          - 安全须知: configuration/security.md
+          - 故障排查: configuration/troubleshooting.md
+          - 常见问题: configuration/faq.md
+      - 升级与迁移:
+          - 迁移索引: guides/migration/index.md
+          - v0.8 迁移指南: guides/migration/v0.8.md
+          - v0.7.2 迁移说明: guides/migration/v0.7.2.md
+  - 参考:
+      - 参考总览: reference/index.md
+      - 术语表: reference/glossary.md
+      - 配置参考:
+          - 配置总览: configuration/index.md
+          - 核心配置:
+              - .env 配置: configuration/dotenv.md
+              - 启动与生命周期: configuration/lifecycle.md
+              - HTML 渲染预算: configuration/html-rendering.md
+              - 资源与访问策略: configuration/resources.md
+              - 可选依赖与可观测性: configuration/observability.md
+          - 后端配置:
+              - HTML 后端:
+                  - HTML 后端总览: configuration/providers/index.md
+                  - Playwright: configuration/providers/playwright.md
+                  - HTMLKit: configuration/providers/htmlkit.md
+                  - Takumi: configuration/providers/takumi.md
+              - Graphics 后端:
+                  - Graphics 总览: configuration/graphics/index.md
+                  - Pillow: configuration/graphics/pillow.md
+                  - Skia: configuration/graphics/skia.md
+      - API 参考:
+          - 渲染 API: reference/rendering.md
+          - Preparation 与资源 API: reference/preparation.md
+          - Application API: reference/application.md
+          - Capability 参考: reference/capabilities.md
+  - 原理与扩展:
+      - 概览: extensions/index.md
+      - 设计原理:
+          - 分层架构: extensions/architecture.md
+          - 资源管线: extensions/resource-pipeline.md
+      - Provider 扩展:
+          - Provider 契约: extensions/provider-contract.md
+          - Provider 开发指南: extensions/provider-development.md
+  - 项目:
+      - 项目维护总览: project/index.md
+      - 参与贡献:
+          - 贡献指南: project/contributing.md
+          - 工程协作流程: project/engineering-workflow.md
+          - 编码规范: project/coding-standards.md
+          - 提交消息指南: project/commit-messages.md
+          - Pull Request 生命周期: project/pull-requests.md
+      - 质量与发布:
+          - 测试矩阵: project/testing.md
+          - CI Actions: project/ci.md
+          - 仓库治理与保护: project/governance.md
+          - 发布流程: project/release.md
+          - 文档版本管理: project/documentation-versioning.md

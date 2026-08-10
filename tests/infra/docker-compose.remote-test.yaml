@@ -1,0 +1,44 @@
+services:
+  render:
+    image: ${RENDER_IMAGE:-htmlrender-remote-test:local}
+    build:
+      context: ../..
+      dockerfile: tests/infra/dockerfile.remote-test
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.12-bookworm}
+        UV_VERSION: ${UV_VERSION:-0.11.28}
+    container_name: htmlrender-remote-test
+    depends_on:
+      playwright:
+        condition: service_healthy
+    working_dir: /app
+    volumes:
+      - ../..:/app
+    environment:
+      PLAYWRIGHT_WS_ENDPOINT: ws://playwright:53333/playwright
+      FILEHOST_PUBLIC_URL: http://render:9012/_htmlrender/assets/
+      FILEHOST_BIND_PORT: "9012"
+    expose:
+      - "9012"
+    command:
+      - sh
+      - -lc
+      - |
+        set -e
+        uv pip install --python /venv/bin/python --no-deps -e /app
+        REMOTE_RESOURCE_POLICY=memory /venv/bin/python tests/remote_smoke.py
+        REMOTE_RESOURCE_POLICY=filehost /venv/bin/python tests/remote_smoke.py
+
+  playwright:
+    image: ${PLAYWRIGHT_IMAGE:-htmlrender-playwright:local}
+    build:
+      context: ../..
+      dockerfile: tests/infra/dockerfile.playwright-server
+      args:
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-1.60.0}
+    container_name: htmlrender-playwright
+    environment:
+      BROWSER_PORT: "53333"
+      BROWSER_WS_ENDPOINT: /playwright
+    ports:
+      - "53333:53333"
