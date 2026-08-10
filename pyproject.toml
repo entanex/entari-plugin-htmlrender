@@ -272,3 +272,63 @@ deprecated = "ignore"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+    "/.artifacts",
+    "/.bzr",
+    "/.cache",
+    "/.coverage*",
+    "/.entari",
+    "/.git",
+    "/.hatch",
+    "/.hg",
+    "/.idea",
+    "/.jj",
+    "/.mypy_cache",
+    "/.nox",
+    "/.pytest_cache",
+    "/.ruff_cache",
+    "/.svn",
+    "/.tox",
+    "/.venv",
+    "/.vscode",
+    "/build",
+    "/dist",
+    "/htmlcov",
+    "/site",
+    "**/__pycache__",
+    "**/*.egg-info",
+    "**/*.pyc",
+    "**/*.pyo",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/entari_plugin_htmlrender"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/.github",
+    "/docs",
+    "/examples",
+    "/scripts",
+    "/src",
+    "/tests",
+    "/typings",
+    "/.gitignore",
+    "/.markdownlint.json",
+    "/.python-version",
+    "/CODE_OF_CONDUCT.md",
+    "/CODING_STANDARDS.md",
+    "/COMMIT_MESSAGE.md",
+    "/CONTRIBUTING.md",
+    "/LICENSE",
+    "/Makefile",
+    "/README.md",
+    "/SECURITY.md",
+    "/docker-compose.dev.yaml",
+    "/mkdocs.yml",
+    "/prek.toml",
+    "/pyproject.toml",
+    "/uv.lock",
+]

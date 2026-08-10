@@ -15,8 +15,13 @@ from entari_plugin_htmlrender.providers.sdk import (
     EngineBindings,
     ProviderAvailability,
 )
-from entari_plugin_htmlrender.rendering import ProviderLifecycleError
+from entari_plugin_htmlrender.rendering import (
+    ProviderLifecycleError,
+    RenderedImage,
+    RenderHtmlRequest,
+)
 from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -24,7 +29,10 @@ if TYPE_CHECKING:
     from launart.status import Phase
 
     from entari_plugin_htmlrender.adapters.resources import HostedAssetHttpServer
+    from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
     from entari_plugin_htmlrender.providers.sdk import ProviderDependencies
+    from entari_plugin_htmlrender.rendering.ports import PreparedHtmlExecutor
+    from entari_plugin_htmlrender.rendering.requests import ResourcePolicy
     from entari_plugin_htmlrender.runtime import RenderRuntime
 
 
@@ -54,8 +62,13 @@ class _Lifecycle:
 class _Provider:
     id = "fake"
 
-    def __init__(self, lifecycle: _Lifecycle) -> None:
+    def __init__(
+        self,
+        lifecycle: _Lifecycle,
+        executor: PreparedHtmlExecutor | None = None,
+    ) -> None:
         self._lifecycle = lifecycle
+        self._executor = executor
 
     def parse_settings(self, raw: Mapping[str, object]) -> object:
         return dict(raw)
@@ -74,7 +87,32 @@ class _Provider:
         dependencies: ProviderDependencies,
     ) -> EngineBindings:
         del settings, dependencies
-        return EngineBindings(lifecycle=self._lifecycle)
+        return EngineBindings(
+            lifecycle=self._lifecycle,
+            prepared_html_executor=self._executor,
+        )
+
+
+@dataclass
+class _BlockingExecutor:
+    events: list[str]
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def execute(
+        self,
+        prepared: PreparedHtml,
+        options: RasterOptions,
+        *,
+        resource_policy: ResourcePolicy | None = None,
+        timeout_seconds: float | None = None,
+    ) -> RenderedImage:
+        del prepared, options, resource_policy, timeout_seconds
+        self.events.append("render.enter")
+        self.entered.set()
+        await self.release.wait()
+        self.events.append("render.exit")
+        return rendered_image()
 
 
 @dataclass
@@ -117,12 +155,13 @@ class _SentinelService(Service):
 def _service(
     startup: str,
     lifecycle: _Lifecycle | None = None,
+    executor: PreparedHtmlExecutor | None = None,
 ) -> tuple[HtmlRenderService, RenderRuntime, _Lifecycle]:
     owned_lifecycle = lifecycle or _Lifecycle()
     settings = RenderSettings.model_validate({"provider": "fake", "startup": startup})
     composition = compose_runtime(
         settings,
-        explicit_providers=[_Provider(owned_lifecycle)],
+        explicit_providers=[_Provider(owned_lifecycle, executor)],
     )
     runtime = composition.build_runtime()
     return HtmlRenderService(runtime, settings), runtime, owned_lifecycle
@@ -281,6 +320,52 @@ async def test_shutdown_aggregates_runtime_and_server_failures() -> None:
     assert len(captured.value.exceptions) == 2
     assert events == ["runtime.aclose", "server.aclose"]
     await service.aclose()
+
+
+async def test_cancelled_runtime_drain_keeps_filehost_open_for_retry() -> None:
+    events: list[str] = []
+    lifecycle = _Lifecycle(events=events)
+    executor = _BlockingExecutor(events)
+    service, runtime, _ = _service("off", lifecycle, executor)
+    server = _HostedAssetServer(events)
+    service = HtmlRenderService(
+        runtime,
+        service.settings,
+        hosted_asset_server=cast("HostedAssetHttpServer", server),
+    )
+
+    render_task = asyncio.create_task(
+        runtime.renderer.render_html(RenderHtmlRequest(html="<p>in flight</p>"))
+    )
+    await asyncio.wait_for(executor.entered.wait(), timeout=5)
+
+    close_task = asyncio.create_task(service.aclose())
+
+    async def wait_for_runtime_drain() -> None:
+        while True:
+            try:
+                runtime.resources.should_resolve()
+            except ProviderLifecycleError:
+                return
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_runtime_drain(), timeout=5)
+    close_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await close_task
+
+    assert events == ["render.enter"]
+
+    executor.release.set()
+    await asyncio.wait_for(render_task, timeout=5)
+    await service.aclose()
+
+    assert events == [
+        "render.enter",
+        "render.exit",
+        "runtime.aclose",
+        "server.aclose",
+    ]
 
 
 async def test_hot_unload_runs_cleanup_before_service_is_removed() -> None:

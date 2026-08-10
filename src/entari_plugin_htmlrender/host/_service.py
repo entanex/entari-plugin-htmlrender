@@ -86,6 +86,11 @@ class HtmlRenderService(Service):
             errors: list[BaseException] = []
             try:
                 await self._runtime.aclose()
+            except asyncio.CancelledError:
+                # The runtime may still be draining admitted operations.  Its
+                # close transition is retryable, but the filehost must remain
+                # available until that drain has completed successfully.
+                raise
             except BaseException as error:
                 errors.append(error)
             if self._hosted_asset_server is not None:

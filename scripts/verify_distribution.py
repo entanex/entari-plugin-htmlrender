@@ -10,7 +10,7 @@ from email import message_from_bytes
 from hashlib import sha256
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -71,6 +71,34 @@ PACKAGE_RESOURCES: Final = (
     "entari_plugin_htmlrender/templates/text/text.css",
     "entari_plugin_htmlrender/templates/text/text.html",
 )
+FORBIDDEN_ARCHIVE_PATH_PARTS: Final = frozenset(
+    {
+        ".artifacts",
+        ".bzr",
+        ".cache",
+        ".entari",
+        ".git",
+        ".hatch",
+        ".hg",
+        ".idea",
+        ".jj",
+        ".mypy_cache",
+        ".nox",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".svn",
+        ".tox",
+        ".venv",
+        ".vscode",
+        "__pycache__",
+        "build",
+        "dist",
+        "htmlcov",
+        "site",
+    }
+)
+FORBIDDEN_ARCHIVE_FILES: Final = frozenset({".coverage", ".ds_store"})
+FORBIDDEN_ARCHIVE_SUFFIXES: Final = (".pyc", ".pyo")
 
 _BASE_SMOKE = r"""
 import asyncio
@@ -325,6 +353,34 @@ def _read_archive_member(archive: tarfile.TarFile, member: tarfile.TarInfo) -> b
     return file.read()
 
 
+def _validate_archive_paths(names: list[str], *, artifact: Path) -> None:
+    forbidden: list[str] = []
+    for name in names:
+        path = PurePosixPath(name.replace("\\", "/"))
+        parts = path.parts
+        folded_parts = tuple(part.casefold() for part in parts)
+        leaf = folded_parts[-1] if folded_parts else ""
+        if (
+            path.is_absolute()
+            or ".." in parts
+            or any(part in FORBIDDEN_ARCHIVE_PATH_PARTS for part in folded_parts)
+            or any(part.endswith(".egg-info") for part in folded_parts)
+            or leaf in FORBIDDEN_ARCHIVE_FILES
+            or leaf.startswith(".coverage.")
+            or leaf.endswith(FORBIDDEN_ARCHIVE_SUFFIXES)
+        ):
+            forbidden.append(name)
+
+    if forbidden:
+        sample = ", ".join(repr(name) for name in sorted(forbidden)[:10])
+        remainder = len(forbidden) - 10
+        suffix = f" (and {remainder} more)" if remainder > 0 else ""
+        raise DistributionVerificationError(
+            f"{artifact.name} contains forbidden VCS, cache, or build artifacts: "
+            f"{sample}{suffix}."
+        )
+
+
 def _validate_metadata(
     metadata: Message,
     *,
@@ -417,6 +473,7 @@ def _verify_wheel(wheel: Path, *, expected_version: str) -> dict[str, bytes]:
                 f"Wheel member is corrupt: {corrupt!r}."
             )
         names = archive.namelist()
+        _validate_archive_paths(names, artifact=wheel)
         metadata_path = _only_artifact(
             [Path(name) for name in names if name.endswith(".dist-info/METADATA")],
             "wheel METADATA file",
@@ -462,6 +519,10 @@ def _verify_sdist(
 ) -> None:
     with tarfile.open(sdist, mode="r:gz") as archive:
         members = archive.getmembers()
+        _validate_archive_paths(
+            [member.name for member in members],
+            artifact=sdist,
+        )
         metadata_member = _only_artifact(
             [
                 Path(member.name)

@@ -72,3 +72,7 @@ plugins:
 | `resources.filehost.max_bytes` | `268435456` |
 
 filehost 由 `HtmlRenderService` 在 Launart preparing 启动、cleanup 关闭，不依赖Entari 的 HTTP server 或路由 mount。
+
+### Satori upload 不是 filehost
+
+Satori `upload.create` 面向当前事件账号，并把资源交给外部 Satori Server 管理。其协议不提供租约、续期、显式删除、容量预算或可观察的 TTL，也无法在本插件热卸载时确定性清理，因此不实现 `AssetPublisher` 的生命周期契约。需要向消息平台上传最终产物时，应在 handler 中显式使用当前 `Session`；不要把该 API 作为渲染输入资源的 filehost。

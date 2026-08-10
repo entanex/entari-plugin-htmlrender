@@ -10,7 +10,7 @@ description: htmlrender 当前架构中的稳定术语
 | `RenderRuntime` | 一次 composition 的 host-neutral 聚合根，拥有 renderer、preparation、resources、extensions 与 lifecycle |
 | `HtmlRenderer` | 执行 typed、跨 HTML Provider request 的 facade |
 | `RuntimeResolver` | 同步返回已组合 `RenderRuntime` 的结构化协议；不得执行 I/O 或 startup |
-| `RuntimeSource` | `RenderRuntime | RuntimeResolver` |
+| `RuntimeSource` | `RenderRuntime \| RuntimeResolver` |
 | `HtmlRenderService` | Entari/Launart 拥有的 service，同时实现 `RuntimeResolver` |
 | `PreparedHtml` | markup 解析后的不可变中立文档，包含 base、structure、stylesheets、assets 与 requirements |
 | Provider | 发现、解析专属配置并组合一个 HTML executor/lifecycle 的扩展 |

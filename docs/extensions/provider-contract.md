@@ -9,7 +9,7 @@ description: 第三方 HTML Provider 的发现、设置、资源策略与 compos
 
 | 成员 | 要求 |
 | --- | --- |
-| `id` | 非空、稳定的开放 Provider ID |
+| `id` | 稳定的 lowercase ASCII ID；仅允许 `[a-z0-9._-]`，且首尾必须是字母或数字 |
 | `parse_settings(raw)` | 把 `provider_config` 变成 typed settings，拒绝未知键 |
 | `availability(settings)` | 无副作用检查依赖与平台，返回 `ProviderAvailability` |
 | `resource_strategy(settings)` | 在接线前声明不可变 `ResourceStrategy` |
