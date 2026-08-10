@@ -1,57 +1,64 @@
-from __future__ import annotations
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager
+from ipaddress import IPv4Address, IPv6Address
+from pathlib import Path
+from typing import Any, ParamSpec, Protocol, TypeVar
 
-from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping, Sequence
-    from ipaddress import IPv4Address, IPv6Address
-    from pathlib import Path
-
-    from .config import ResourceStrategy
-    from .models import (
-        NotModified,
-        PublishedResource,
-        ResourceContent,
-        ResourceRef,
-        ResourceRevision,
-    )
-    from .templating import ExtensionSpec, FilterCallable, TemplateSource
+from .config import ResourceStrategy
+from .models import (
+    InlineResource,
+    NotModified,
+    PublicationLeaseId,
+    PublishedResource,
+    ResourceContent,
+    ResourceRef,
+    ResourceRevision,
+)
+from .templating import ExtensionSpec, FilterCallable, TemplateSource
 
 R = TypeVar("R")
 P = ParamSpec("P")
 
 
-class ResourceReader(Protocol):
-    async def read(
+class ResourceFetcher(Protocol):
+    """Fetch content for explicit resource locators.
+
+    This source-side port does not accept :class:`InlineResource`, because an
+    inline payload has no source to fetch or revalidate.
+    """
+
+    async def fetch(
         self,
         reference: ResourceRef,
         *,
         refresh: bool = False,
     ) -> ResourceContent: ...
 
-    async def read_conditional(
+    async def fetch_if_changed(
         self,
         reference: ResourceRef,
         revision: ResourceRevision,
     ) -> ResourceContent | NotModified:
-        """Read only when the source moved past ``revision``.
+        """Fetch only when the source moved past ``revision``.
 
         The caller supplies the revision it already holds; the reader maps
         it to a source-native conditional read (``If-None-Match`` /
         ``If-Modified-Since`` for HTTP, a stat compare for files) and
         returns :class:`NotModified` when the cached bytes are still
-        current. Readers keep no validator state of their own.
+        current. Fetchers keep no validator state of their own.
         """
         ...
 
-    async def revision(self, reference: ResourceRef) -> ResourceRevision | None: ...
+    async def fetch_revision(
+        self, reference: ResourceRef
+    ) -> ResourceRevision | None: ...
 
     async def invalidate(self, reference: ResourceRef) -> None: ...
 
     async def clear(self) -> None: ...
 
 
-class ProviderResources(Protocol):
+class ProviderResourceAccess(Protocol):
     """Policy-bound resource operations available to engine providers."""
 
     @property
@@ -59,9 +66,9 @@ class ProviderResources(Protocol):
 
     def authorize_local(self, path: Path) -> Path: ...
 
-    async def read_bytes(
+    async def fetch_bytes(
         self,
-        reference: str | Path | ResourceRef,
+        resource: ResourceRef,
         *,
         refresh: bool = False,
     ) -> bytes: ...
@@ -92,15 +99,22 @@ class RemoteAccessPolicy(Protocol):
 
 
 class AssetPublisher(Protocol):
-    def create_lease(self) -> str: ...
+    """Internal multi-asset publication backend.
 
-    async def release(self, lease_id: str) -> None: ...
+    Provider integrations may group many assets under one lease.  Callers do
+    not receive this ownership API; :class:`ResourceAccess.publish` exposes a
+    scoped publication instead.
+    """
+
+    def create_lease(self) -> PublicationLeaseId: ...
+
+    async def release(self, lease_id: PublicationLeaseId) -> None: ...
 
     async def publish(
         self,
-        value: str | Path | bytes,
+        content: ResourceContent | InlineResource,
         *,
-        lease_id: str | None = None,
+        lease_id: PublicationLeaseId | None = None,
         suffix: str | None = None,
     ) -> PublishedResource: ...
 
@@ -136,28 +150,77 @@ class TemplateCompiler(Protocol):
     async def clear(self) -> None: ...
 
 
-class ResourceResolver(Protocol):
-    """Custom per-call resolution hook accepted by the resource service.
+class ResourceMaterializer(Protocol):
+    """Asynchronously materialize one document-local value."""
 
-    ``resolve`` may be synchronous or return an awaitable; the service awaits
-    the result when needed.
-    """
-
-    def resolve(
+    async def materialize(
         self,
         value: object,
         *,
         template_base: Path | None = None,
-    ) -> object | Awaitable[object]: ...
+    ) -> object: ...
+
+
+class ResourceAccess(Protocol):
+    """Minimal caller contract for fetching and scoped publication."""
+
+    async def fetch(
+        self,
+        resource: ResourceRef,
+        *,
+        refresh: bool = False,
+    ) -> ResourceContent: ...
+
+    async def fetch_bytes(
+        self,
+        resource: ResourceRef,
+        *,
+        refresh: bool = False,
+    ) -> bytes: ...
+
+    async def fetch_text(
+        self,
+        resource: ResourceRef,
+        *,
+        encoding: str = "utf-8",
+        errors: str = "strict",
+        refresh: bool = False,
+    ) -> str: ...
+
+    def publish(
+        self,
+        content: ResourceContent | InlineResource,
+        *,
+        suffix: str | None = None,
+    ) -> AbstractAsyncContextManager[PublishedResource]: ...
+
+
+class PreparationResourceAccess(
+    ResourceAccess,
+    ProviderResourceAccess,
+    Protocol,
+):
+    """Internal preparation contract; never exposed as runtime caller API."""
+
+    async def materialize_template_variables(
+        self,
+        variables: Mapping[str, object],
+        *,
+        materializer: ResourceMaterializer,
+        strict: bool,
+        template_base: Path | None,
+    ) -> dict[str, object]: ...
 
 
 __all__ = [
     "AssetPublisher",
     "LocalAccessPolicy",
-    "ProviderResources",
+    "PreparationResourceAccess",
+    "ProviderResourceAccess",
     "RemoteAccessPolicy",
-    "ResourceReader",
-    "ResourceResolver",
+    "ResourceAccess",
+    "ResourceFetcher",
+    "ResourceMaterializer",
     "TemplateCompiler",
     "WorkerExecutor",
 ]

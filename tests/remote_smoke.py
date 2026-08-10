@@ -15,14 +15,13 @@ from urllib.request import urlopen
 from PIL import Image, ImageChops, ImageStat
 
 from entari_plugin_htmlrender import (
-    ResourcePolicy,
-    render_html,
-    render_markdown,
-    render_template,
-    render_text,
+    RasterOptions,
+    ResourceMaterializationPolicy,
+    TemplateRef,
 )
-from entari_plugin_htmlrender.host.composition import compose_runtime
-from entari_plugin_htmlrender.host.config import RenderSettings
+from entari_plugin_htmlrender.composition import build_runtime_plan
+from entari_plugin_htmlrender.config import HtmlRenderConfig
+from entari_plugin_htmlrender.resources import FileResourceRef
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -214,7 +213,7 @@ async def _main() -> None:
     with TemporaryDirectory(prefix=f"htmlrender-{policy}-smoke-") as temporary:
         fixture_root = Path(temporary)
         markdown_path, stylesheet_path = _prepare_local_fixtures(fixture_root)
-        settings = RenderSettings.model_validate(
+        config = HtmlRenderConfig.model_validate(
             {
                 "provider": "playwright",
                 "startup": "off",
@@ -231,7 +230,7 @@ async def _main() -> None:
                 },
             }
         )
-        plan = compose_runtime(settings)
+        plan = build_runtime_plan(config)
         runtime = plan.build_runtime()
         filehost_server = plan.hosted_asset_server
 
@@ -241,16 +240,15 @@ async def _main() -> None:
         filehost_assets = 0
         try:
             await runtime.startup()
-            html_artifact = await render_html(
+            html_artifact = await runtime.renderer.rasterize_html(
                 "<html><body><h1>remote smoke</h1></body></html>",
-                device_pixel_ratio=1.0,
-                runtime=runtime,
+                raster=RasterOptions(device_pixel_ratio=1.0),
             )
             html_bytes = bytes(html_artifact)
             _assert_png(html_bytes, label="plain HTML")
 
             asset_graph_bytes = bytes(
-                await render_html(
+                await runtime.renderer.rasterize_html(
                     """
                     <html>
                       <head><link rel="stylesheet" href="text.css" /></head>
@@ -258,11 +256,12 @@ async def _main() -> None:
                     </html>
                     """,
                     base_url=f"{fixture_root.as_uri().rstrip('/')}/",
-                    width=1200,
-                    height=600,
-                    device_pixel_ratio=1.0,
-                    resource_policy=ResourcePolicy.STRICT,
-                    runtime=runtime,
+                    raster=RasterOptions(
+                        width=1200,
+                        height=600,
+                        device_pixel_ratio=1.0,
+                    ),
+                    materialization_policy=ResourceMaterializationPolicy.STRICT,
                 )
             )
             _assert_png(asset_graph_bytes, label="linked CSS asset graph")
@@ -271,23 +270,19 @@ async def _main() -> None:
             )
 
             text_bytes = bytes(
-                await render_text(
+                await runtime.renderer.rasterize_text(
                     "remote font and background smoke",
-                    css_path=str(stylesheet_path),
-                    width=1200,
-                    device_pixel_ratio=1.0,
-                    runtime=runtime,
+                    stylesheet=FileResourceRef(stylesheet_path),
+                    raster=RasterOptions(width=1200, device_pixel_ratio=1.0),
                 )
             )
             _assert_png(text_bytes, label="text CSS assets")
             (_ARTIFACT_DIR / f"remote_{policy}_text.png").write_bytes(text_bytes)
 
             markdown_bytes = bytes(
-                await render_markdown(
-                    markdown_path=str(markdown_path),
-                    width=1200,
-                    device_pixel_ratio=1.0,
-                    runtime=runtime,
+                await runtime.renderer.rasterize_markdown(
+                    FileResourceRef(markdown_path),
+                    raster=RasterOptions(width=1200, device_pixel_ratio=1.0),
                 )
             )
             markdown_rendered = _assert_png(
@@ -305,18 +300,18 @@ async def _main() -> None:
             )
 
             template_bytes = bytes(
-                await render_template(
-                    fixture_root,
-                    "remote_filehost.html.jinja2",
+                await runtime.renderer.rasterize_template(
+                    TemplateRef(fixture_root, "remote_filehost.html.jinja2"),
                     {
                         "title": "remote template resource smoke",
-                        "avatar": "relative.png",
+                        "avatar": Path("relative.png"),
                     },
-                    width=1200,
-                    height=600,
-                    device_pixel_ratio=1.0,
-                    resource_policy=ResourcePolicy.STRICT,
-                    runtime=runtime,
+                    raster=RasterOptions(
+                        width=1200,
+                        height=600,
+                        device_pixel_ratio=1.0,
+                    ),
+                    materialization_policy=ResourceMaterializationPolicy.STRICT,
                 )
             )
             (_ARTIFACT_DIR / f"remote_{policy}_template.png").write_bytes(

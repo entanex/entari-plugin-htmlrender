@@ -12,13 +12,15 @@ from entari_plugin_htmlrender.adapters.takumi.runtime import (
 from entari_plugin_htmlrender.providers.sdk import (
     TAKUMI_PROVIDER_ID,
     ProviderAvailability,
+    ProviderAvailable,
+    ProviderUnavailable,
 )
 from entari_plugin_htmlrender.rendering.observers import observe_operation
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.rendering.ports import OperationObserver
     from entari_plugin_htmlrender.resources.observation import CacheObserver
-    from entari_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
 
     from .config import TakumiConfig
     from .runtime import TakumiRuntimeState
@@ -37,7 +39,7 @@ class TakumiEngine:
         config: TakumiConfig,
         operation_observer: OperationObserver,
         cache_observer: CacheObserver,
-        resources: ProviderResources,
+        resources: ProviderResourceAccess,
     ) -> None:
         self._config = config
         self._operation_observer = operation_observer
@@ -75,33 +77,29 @@ class TakumiEngine:
 def takumi_availability() -> ProviderAvailability:
     try:
         if find_spec("takumi_py") is None:
-            return ProviderAvailability(
-                available=False,
+            return ProviderUnavailable(
                 reason="Optional dependency `takumi-py==0.2.0` is not installed.",
             )
     except (ImportError, ValueError) as error:
-        return ProviderAvailability(
-            available=False,
+        return ProviderUnavailable(
             reason=f"Cannot locate takumi_py: {error}",
         )
 
     try:
         installed_version = version("takumi-py")
     except PackageNotFoundError:
-        return ProviderAvailability(
-            available=False,
+        return ProviderUnavailable(
             reason="Distribution metadata for `takumi-py` is unavailable.",
         )
     if installed_version != _SUPPORTED_TAKUMI_VERSION:
-        return ProviderAvailability(
-            available=False,
+        return ProviderUnavailable(
             reason=(
                 f"Unsupported takumi-py version {installed_version!r}; "
                 f"expected {_SUPPORTED_TAKUMI_VERSION!r}."
             ),
         )
 
-    return ProviderAvailability(available=True)
+    return ProviderAvailable()
 
 
 __all__ = ["OBSERVATION_ATTRIBUTES", "TakumiEngine", "takumi_availability"]

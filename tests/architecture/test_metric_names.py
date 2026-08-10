@@ -1,7 +1,7 @@
 """Characterization of exported telemetry metric names and label sets.
 
 Dashboards and alerting depend on these literals. The Entari namespace is the
-post-migration contract; later changes need an explicit dashboard migration.
+published contract; later changes require explicit dashboard versioning.
 """
 
 from __future__ import annotations

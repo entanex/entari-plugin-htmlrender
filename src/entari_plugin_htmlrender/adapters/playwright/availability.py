@@ -12,7 +12,11 @@ import shutil
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from entari_plugin_htmlrender.providers.sdk import ProviderAvailability
+from entari_plugin_htmlrender.providers.sdk import (
+    ProviderAvailability,
+    ProviderAvailable,
+    ProviderUnavailable,
+)
 
 if TYPE_CHECKING:
     from .config import PlaywrightConfig
@@ -62,8 +66,7 @@ def _has_available_channel_browser(channel: str) -> bool:
 def playwright_availability(config: PlaywrightConfig) -> ProviderAvailability:
     """Return an actionable status without importing the heavy backend first."""
     if not _playwright_is_installed():
-        return ProviderAvailability(
-            available=False,
+        return ProviderUnavailable(
             reason=(
                 "Optional dependency `playwright` is not installed; install "
                 "`entari-plugin-htmlrender[playwright]`."
@@ -75,37 +78,33 @@ def playwright_availability(config: PlaywrightConfig) -> ProviderAvailability:
             config.connect_cdp.endpoint,
             schemes={"http", "https", "ws", "wss"},
         ):
-            return ProviderAvailability(
-                available=False,
+            return ProviderUnavailable(
                 reason="Configured CDP endpoint is invalid.",
             )
-        return ProviderAvailability(available=True)
+        return ProviderAvailable()
 
     if config.connect_ws.endpoint:
         if not _has_valid_remote_endpoint(
             config.connect_ws.endpoint,
             schemes={"ws", "wss"},
         ):
-            return ProviderAvailability(
-                available=False,
+            return ProviderUnavailable(
                 reason="Configured WebSocket endpoint is invalid.",
             )
-        return ProviderAvailability(available=True)
+        return ProviderAvailable()
 
     if config.executable_path is not None:
         executable_path = config.executable_path.expanduser()
         if executable_path.is_file():
-            return ProviderAvailability(available=True)
-        return ProviderAvailability(
-            available=False,
+            return ProviderAvailable()
+        return ProviderUnavailable(
             reason=f"Configured executable does not exist: {executable_path}",
         )
 
     if config.channel is not None:
         if _has_available_channel_browser(config.channel.value):
-            return ProviderAvailability(available=True)
-        return ProviderAvailability(
-            available=False,
+            return ProviderAvailable()
+        return ProviderUnavailable(
             reason=(
                 f"Configured browser channel `{config.channel.value}` is not "
                 "available on PATH."
@@ -113,7 +112,7 @@ def playwright_availability(config: PlaywrightConfig) -> ProviderAvailability:
         )
 
     if not config.skip_browser_install:
-        return ProviderAvailability(available=True)
+        return ProviderAvailable()
 
     try:
         from .install_state import (  # noqa: PLC0415
@@ -121,8 +120,7 @@ def playwright_availability(config: PlaywrightConfig) -> ProviderAvailability:
             has_installed_browser,
         )
     except (ImportError, ModuleNotFoundError, ValueError) as error:
-        return ProviderAvailability(
-            available=False,
+        return ProviderUnavailable(
             reason=f"Playwright runtime could not be inspected: {error}",
         )
 
@@ -130,10 +128,9 @@ def playwright_availability(config: PlaywrightConfig) -> ProviderAvailability:
         config.engine,
         storage_path=get_playwright_storage_path(config),
     ):
-        return ProviderAvailability(available=True)
+        return ProviderAvailable()
 
-    return ProviderAvailability(
-        available=False,
+    return ProviderUnavailable(
         reason=(
             f"No installed Playwright browser was found for `{config.engine.value}` "
             "while `skip_browser_install=true`."

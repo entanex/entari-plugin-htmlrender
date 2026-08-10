@@ -1,117 +1,58 @@
 from __future__ import annotations
 
-import ast
-from pathlib import Path
+import inspect
+from typing import get_type_hints
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOT = PROJECT_ROOT / "src" / "entari_plugin_htmlrender"
-CONTRACT_PATH = PACKAGE_ROOT / "capabilities" / "takumi.py"
-ADAPTER_PATH = PACKAGE_ROOT / "adapters" / "takumi" / "api.py"
-DOCUMENTATION_PATH = PROJECT_ROOT / "docs/reference/capabilities.md"
+from entari_plugin_htmlrender.capabilities import TakumiCapability, TakumiSession
+from entari_plugin_htmlrender.capabilities.takumi import ImageInput
 
-EXPECTED_METHOD_GROUPS: dict[str, frozenset[str]] = {
-    "compile": frozenset(
-        {
-            "compile_html",
-            "compile_keyframes",
-            "compile_node",
-            "compile_stylesheet",
-        }
-    ),
-    "raster": frozenset({"render_compiled", "render_html", "render_node"}),
-    "measure": frozenset({"measure_compiled", "measure_html", "measure_node"}),
-    "svg": frozenset({"render_svg_compiled", "render_svg_html", "render_svg_node"}),
-    "animation": frozenset(
-        {"encode_frames", "render_animation", "render_sequence_at_time"}
-    ),
-    "font": frozenset({"register_font", "register_font_file", "register_fonts"}),
+MANAGED_METHODS = {
+    "register_font_file",
+    "render_html",
+    "render_svg_html",
 }
-EXPECTED_PROPERTIES = frozenset({"compiled_cache_stats", "registered_font_families"})
-EXPECTED_METHODS = frozenset().union(*EXPECTED_METHOD_GROUPS.values())
-EXPECTED_TELEMETRY = {name: f"takumi.api.{name}" for name in EXPECTED_METHODS}
-# Preserve the established shorter operation name for observability consumers.
-EXPECTED_TELEMETRY["render_sequence_at_time"] = "takumi.api.render_sequence"
+NATIVE_ONLY_METHODS = {
+    "compile_html",
+    "compile_keyframes",
+    "compile_node",
+    "compile_stylesheet",
+    "encode_frames",
+    "measure_compiled",
+    "measure_html",
+    "measure_node",
+    "render_animation",
+    "render_compiled",
+    "render_node",
+    "render_sequence_at_time",
+    "render_svg_compiled",
+    "render_svg_node",
+}
 
 
-def _class(path: Path, name: str) -> ast.ClassDef:
-    tree = ast.parse(path.read_text("utf-8"), filename=str(path))
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == name:
-            return node
-    raise AssertionError(f"{name} is not defined in {path}")
+def test_managed_takumi_session_is_small_async_and_native_free() -> None:
+    methods = {
+        name
+        for name, value in vars(TakumiSession).items()
+        if callable(value) and not name.startswith("_")
+    }
 
-
-def _is_property(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    return any(
-        isinstance(decorator, ast.Name) and decorator.id == "property"
-        for decorator in node.decorator_list
+    assert methods == MANAGED_METHODS
+    assert NATIVE_ONLY_METHODS.isdisjoint(vars(TakumiSession))
+    assert all(
+        inspect.iscoroutinefunction(getattr(TakumiSession, name)) for name in methods
     )
 
 
-def _public_members(
-    node: ast.ClassDef,
-) -> tuple[set[str], set[str], dict[str, ast.AsyncFunctionDef]]:
-    methods: set[str] = set()
-    properties: set[str] = set()
-    async_methods: dict[str, ast.AsyncFunctionDef] = {}
-    for child in node.body:
-        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if child.name.startswith("_"):
-            continue
-        if _is_property(child):
-            properties.add(child.name)
-        else:
-            methods.add(child.name)
-        if isinstance(child, ast.AsyncFunctionDef):
-            async_methods[child.name] = child
-    return methods, properties, async_methods
+def test_takumi_protocol_annotations_are_runtime_resolvable() -> None:
+    assert ImageInput is not object
+    for name in MANAGED_METHODS:
+        assert get_type_hints(getattr(TakumiSession, name))
+    assert get_type_hints(TakumiCapability.lease_session)
+    assert get_type_hints(TakumiCapability.lease_native_renderer)
 
 
-def _tracked_operation(node: ast.AsyncFunctionDef) -> str | None:
-    for decorator in node.decorator_list:
-        if not (
-            isinstance(decorator, ast.Call)
-            and isinstance(decorator.func, ast.Name)
-            and decorator.func.id == "_tracked"
-            and decorator.args
-            and isinstance(decorator.args[0], ast.Constant)
-            and isinstance(decorator.args[0].value, str)
-        ):
-            continue
-        return decorator.args[0].value
-    return None
-
-
-def test_takumi_protocol_and_adapter_match_the_native_contract_matrix() -> None:
-    contract_methods, contract_properties, _ = _public_members(
-        _class(CONTRACT_PATH, "TakumiAPI")
-    )
-    adapter_methods, adapter_properties, adapter_async = _public_members(
-        _class(ADAPTER_PATH, "TakumiAPIAdapter")
-    )
-
-    assert contract_methods == EXPECTED_METHODS
-    assert adapter_methods == EXPECTED_METHODS
-    assert contract_properties == EXPECTED_PROPERTIES
-    assert adapter_properties == EXPECTED_PROPERTIES
-    assert set(adapter_async) == EXPECTED_METHODS
-
-
-def test_every_takumi_operation_has_a_stable_telemetry_name() -> None:
-    _, _, adapter_async = _public_members(_class(ADAPTER_PATH, "TakumiAPIAdapter"))
-
-    actual = {name: _tracked_operation(node) for name, node in adapter_async.items()}
-
-    assert actual == EXPECTED_TELEMETRY
-
-
-def test_takumi_capability_reference_documents_the_complete_matrix() -> None:
-    documentation = DOCUMENTATION_PATH.read_text("utf-8")
-
-    for group, methods in EXPECTED_METHOD_GROUPS.items():
-        assert f"<!-- takumi:{group} -->" in documentation
-        for method in methods:
-            assert f"`{method}`" in documentation
-    for name in EXPECTED_PROPERTIES:
-        assert f"`{name}`" in documentation
+def test_native_access_is_explicitly_leased() -> None:
+    assert "lease_session" in vars(TakumiCapability)
+    assert "lease_native_renderer" in vars(TakumiCapability)
+    assert "api" not in vars(TakumiCapability)
+    assert "renderer" not in vars(TakumiCapability)

@@ -5,10 +5,10 @@ from html import unescape
 from typing import TYPE_CHECKING
 
 from entari_plugin_htmlrender.preparation import (
+    DocumentRequirement,
     PreparedAsset,
     PreparedHtml,
     PreparedStylesheet,
-    RenderRequirement,
 )
 from entari_plugin_htmlrender.preparation.assets import PreparedAssetIndex
 from entari_plugin_htmlrender.preparation.materialize import (
@@ -19,7 +19,7 @@ from entari_plugin_htmlrender.preparation.references import (
     css_at_rules,
     css_resource_references,
 )
-from entari_plugin_htmlrender.resources.config import ResourceResolveMode
+from entari_plugin_htmlrender.resources.config import ResourceMaterializationPolicy
 
 from .errors import TakumiResourceError, TakumiUnsupportedError
 from .types import (
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from entari_plugin_htmlrender.preparation.models import DocumentStructureSnapshot
-    from entari_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +105,8 @@ def _merge_image_candidates(
             return
         if existing.asset.data != candidate.asset.data:
             raise TakumiResourceError(
-                f"Takumi image source {source!r} has conflicting byte payloads."
+                f"Takumi image source {source!r} has conflicting byte payloads.",
+                reference=source,
             )
         if (
             existing.explicit
@@ -113,7 +114,8 @@ def _merge_image_candidates(
             and existing.cache != candidate.cache
         ):
             raise TakumiResourceError(
-                f"Takumi image source {source!r} has conflicting cache modes."
+                f"Takumi image source {source!r} has conflicting cache modes.",
+                reference=source,
             )
         if candidate.explicit:
             candidates[source] = candidate
@@ -173,20 +175,23 @@ def _validate_stylesheet(stylesheet: PreparedStylesheet, *, field: str) -> None:
     ensure_utf8(stylesheet.css, field=f"{field}.css")
     if stylesheet.media is not None:
         raise TakumiUnsupportedError(
+            "media_condition",
             f"{field}.media={stylesheet.media!r} cannot be represented by Takumi; "
-            "remove the media condition or use Playwright."
+            "remove the media condition or use Playwright.",
         )
     at_rules = frozenset(css_at_rules(stylesheet.css))
     if "import" in at_rules:
         raise TakumiUnsupportedError(
+            "css_import",
             f"{field} contains CSS @import, which Takumi cannot resolve; inline "
-            "the imported stylesheet."
+            "the imported stylesheet.",
         )
     if "font-face" in at_rules:
         raise TakumiUnsupportedError(
+            "font_face",
             f"{field} contains @font-face, which Takumi cannot load; register font "
             "bytes through the Takumi extension or "
-            "provider_config.fonts."
+            "provider_config.fonts.",
         )
 
 
@@ -207,15 +212,17 @@ def _inspect_document(
         raise ValueError("HTML content cannot be empty")
     snapshot = prepared.structure
     document_base = prepared.document_base.resolve()
-    if snapshot.has_script or RenderRequirement.JAVASCRIPT in prepared.requirements:
+    if snapshot.has_script or DocumentRequirement.JAVASCRIPT in prepared.requirements:
         raise TakumiUnsupportedError(
+            "javascript",
             "Takumi does not execute JavaScript; remove <script> elements or use "
-            "the Playwright backend."
+            "the Playwright backend.",
         )
     if snapshot.linked_stylesheets:
         raise TakumiUnsupportedError(
+            "linked_stylesheet",
             "Takumi cannot load <link rel='stylesheet'> resources; provide CSS "
-            "content through PreparedStylesheet or an explicit stylesheet string."
+            "content through PreparedStylesheet or an explicit stylesheet string.",
         )
     return snapshot, document_base
 
@@ -223,10 +230,10 @@ def _inspect_document(
 async def materialize_takumi_document(
     prepared: PreparedHtml,
     *,
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
     stylesheets: Sequence[str] = (),
     images: Sequence[object] | None = None,
-    resolve_mode: ResourceResolveMode | None = None,
+    resolve_mode: ResourceMaterializationPolicy | None = None,
 ) -> TakumiDocument:
     """Apply the effective resource mode before native Takumi validation."""
 
@@ -253,8 +260,8 @@ async def materialize_takumi_document(
                 ),
             ),
         )
-    mode = resolve_mode or resources.strategy.resolve_mode
-    if mode is ResourceResolveMode.OFF:
+    mode = resolve_mode or resources.strategy.materialization_policy
+    if mode is ResourceMaterializationPolicy.OFF:
         return _build_takumi_document(
             staged,
             snapshot=snapshot,
@@ -266,7 +273,7 @@ async def materialize_takumi_document(
         materialized = await materialize_local_assets(
             staged,
             resources=resources,
-            strict=mode is ResourceResolveMode.STRICT,
+            strict=mode is ResourceMaterializationPolicy.STRICT,
         )
     except AssetMaterializationError as error:
         raise TakumiResourceError(
@@ -278,7 +285,7 @@ async def materialize_takumi_document(
         snapshot=snapshot,
         document_base=document_base,
         images=images,
-        strict=mode is ResourceResolveMode.STRICT,
+        strict=mode is ResourceMaterializationPolicy.STRICT,
     )
 
 
@@ -361,17 +368,19 @@ def _build_takumi_document(
             raise TakumiResourceError(
                 f"Takumi resource key {reference!r} resolves to conflicting assets "
                 "under different document or stylesheet bases. Use distinct source "
-                "keys or inline one resource."
+                "keys or inline one resource.",
+                reference=reference,
             )
         selected.setdefault(reference, resource)
 
     if unresolved and strict:
-        unique = tuple(dict.fromkeys(unresolved))
+        unique: tuple[str, ...] = tuple(dict.fromkeys(unresolved))
         preview = ", ".join(repr(value) for value in unique[:3])
         suffix = " ..." if len(unique) > 3 else ""
         raise TakumiResourceError(
             "Takumi performs no network or filesystem fetches. Materialize every "
-            f"referenced image as bytes; unresolved resources: {preview}{suffix}"
+            f"referenced image as bytes; unresolved resources: {preview}{suffix}",
+            reference=next(iter(unique), None),
         )
 
     return TakumiDocument(

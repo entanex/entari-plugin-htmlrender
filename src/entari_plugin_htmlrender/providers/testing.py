@@ -12,15 +12,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeAlias
 
-from entari_plugin_htmlrender.providers.sdk import EngineProvider
-from entari_plugin_htmlrender.rendering import (
-    ProviderLifecycleError,
-    RenderedImage,
-    RenderHtmlRequest,
+from entari_plugin_htmlrender.errors import (
+    RuntimeUnavailableError,
 )
+from entari_plugin_htmlrender.providers.sdk import RenderProvider
+from entari_plugin_htmlrender.rendering import RenderedImage
 from entari_plugin_htmlrender.runtime import RenderRuntime
 
-RuntimeFactory: TypeAlias = Callable[[EngineProvider[Any]], RenderRuntime]
+RuntimeFactory: TypeAlias = Callable[[RenderProvider[Any]], RenderRuntime]
 
 
 class ProviderConformanceError(AssertionError):
@@ -33,7 +32,7 @@ def _require(*, condition: bool, message: str) -> None:
 
 
 async def run_provider_lifecycle_conformance(
-    provider: EngineProvider[Any],
+    provider: RenderProvider[Any],
     compose: RuntimeFactory,
 ) -> None:
     """Exercise the fault-free lifecycle invariants of one provider.
@@ -57,9 +56,7 @@ async def run_provider_lifecycle_conformance(
     await runtime.probe()
     await runtime.probe()
 
-    artifact = await runtime.renderer.render_html(
-        RenderHtmlRequest(html="<p>conformance</p>")
-    )
+    artifact = await runtime.renderer.rasterize_html("<p>conformance</p>")
     _require(
         condition=isinstance(artifact, RenderedImage),
         message="render_html must return a typed RenderedImage artifact",
@@ -76,15 +73,15 @@ async def run_provider_lifecycle_conformance(
     # A closed runtime refuses to start again.
     try:
         await runtime.startup()
-    except ProviderLifecycleError:
+    except RuntimeUnavailableError:
         return
     raise ProviderConformanceError(
-        "a closed runtime must reject a fresh startup with ProviderLifecycleError"
+        "a closed runtime must reject a fresh startup with RuntimeUnavailableError"
     )
 
 
 async def run_provider_startup_retry_conformance(
-    provider: EngineProvider[Any],
+    provider: RenderProvider[Any],
     compose: RuntimeFactory,
     *,
     fail_once: Callable[[], None],
@@ -109,7 +106,7 @@ async def run_provider_startup_retry_conformance(
 
     try:
         await runtime.startup()
-        await runtime.renderer.render_html(RenderHtmlRequest(html="<p>ok</p>"))
+        await runtime.renderer.rasterize_html("<p>ok</p>")
     finally:
         await runtime.aclose()
 

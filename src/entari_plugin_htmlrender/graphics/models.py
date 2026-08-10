@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Literal, TypeAlias
+from dataclasses import dataclass
+from typing import Final, Literal, TypeAlias
 
-from entari_plugin_htmlrender.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.errors import InvalidRenderInputError
 from entari_plugin_htmlrender.raster import RasterImageFormat  # noqa: TC001
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 GraphicsBackendName: TypeAlias = Literal["pillow", "skia"]
 
 
 def _require_int(name: str, value: object) -> int:
     if type(value) is not int:
-        raise InvalidRenderRequest(f"{name} must be an integer")
+        raise InvalidRenderInputError(
+            f"{name} must be an integer",
+            operation=RenderOperation.RASTER_SCENE_TO_IMAGE.value,
+            field=name,
+        )
     return value
+
+
+def _invalid(field: str, message: str) -> InvalidRenderInputError:
+    return InvalidRenderInputError(
+        message,
+        operation=RenderOperation.RASTER_SCENE_TO_IMAGE.value,
+        field=field,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +52,7 @@ class RGBAColor:
         ):
             channel = _require_int(name, value)
             if not 0 <= channel <= 255:
-                raise InvalidRenderRequest(f"{name} must be between 0 and 255")
+                raise _invalid(name, f"{name} must be between 0 and 255")
 
     def as_tuple(self) -> tuple[int, int, int, int]:
         return self.red, self.green, self.blue, self.alpha
@@ -67,14 +80,14 @@ class PixelRect:
         ):
             _require_int(name, value)
         if self.width <= 0 or self.height <= 0:
-            raise InvalidRenderRequest("rectangle dimensions must be positive")
+            raise _invalid("rect", "rectangle dimensions must be positive")
 
     def clipped_to(self, width: int, height: int) -> PixelRect | None:
         """Intersect this rectangle with a canvas using half-open bounds."""
         canvas_width = _require_int("canvas width", width)
         canvas_height = _require_int("canvas height", height)
         if canvas_width <= 0 or canvas_height <= 0:
-            raise InvalidRenderRequest("canvas dimensions must be positive")
+            raise _invalid("scene", "canvas dimensions must be positive")
         left = max(0, self.x)
         top = max(0, self.y)
         right = min(canvas_width, self.x + self.width)
@@ -98,9 +111,9 @@ class FillRect:
 
     def __post_init__(self) -> None:
         if not isinstance(self.rect, PixelRect):
-            raise InvalidRenderRequest("FillRect.rect must be a PixelRect")
+            raise _invalid("rect", "FillRect.rect must be a PixelRect")
         if not isinstance(self.color, RGBAColor):
-            raise InvalidRenderRequest("FillRect.color must be an RGBAColor")
+            raise _invalid("color", "FillRect.color must be an RGBAColor")
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,13 +137,16 @@ class RasterScene:
         canvas_width = _require_int("scene width", self.width)
         canvas_height = _require_int("scene height", self.height)
         if canvas_width <= 0 or canvas_height <= 0:
-            raise InvalidRenderRequest("scene dimensions must be positive")
+            raise _invalid("scene", "scene dimensions must be positive")
         if not isinstance(self.background, RGBAColor):
-            raise InvalidRenderRequest("scene background must be an RGBAColor")
+            raise _invalid("background", "scene background must be an RGBAColor")
         if not isinstance(self.commands, tuple) or not all(
             isinstance(command, FillRect) for command in self.commands
         ):
-            raise InvalidRenderRequest("scene commands must be a tuple of FillRect")
+            raise _invalid(
+                "commands",
+                "scene commands must be a tuple of FillRect",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,20 +164,26 @@ class RasterEncodeOptions:
 
     def __post_init__(self) -> None:
         if self.format not in {"png", "jpeg"}:
-            raise InvalidRenderRequest("format must be 'png' or 'jpeg'")
+            raise _invalid("format", "format must be 'png' or 'jpeg'")
         if self.quality is not None:
             quality = _require_int("quality", self.quality)
             if self.format != "jpeg":
-                raise InvalidRenderRequest("quality is only supported for JPEG output")
+                raise _invalid(
+                    "quality",
+                    "quality is only supported for JPEG output",
+                )
             if not 0 <= quality <= 100:
-                raise InvalidRenderRequest("quality must be between 0 and 100")
+                raise _invalid("quality", "quality must be between 0 and 100")
         if self.matte is not None:
             if not isinstance(self.matte, RGBAColor):
-                raise InvalidRenderRequest("matte must be an RGBAColor")
+                raise _invalid("matte", "matte must be an RGBAColor")
             if self.format != "jpeg":
-                raise InvalidRenderRequest("matte is only supported for JPEG output")
+                raise _invalid(
+                    "matte",
+                    "matte is only supported for JPEG output",
+                )
             if self.matte.alpha != 255:
-                raise InvalidRenderRequest("JPEG matte must be opaque")
+                raise _invalid("matte", "JPEG matte must be opaque")
 
     @property
     def jpeg_quality(self) -> int:
@@ -174,21 +196,11 @@ class RasterEncodeOptions:
         return OPAQUE_WHITE if self.matte is None else self.matte
 
 
-@dataclass(frozen=True, slots=True)
-class RenderRasterSceneRequest:
-    """One complete raster-scene render request."""
-
-    scene: RasterScene
-    output: RasterEncodeOptions = field(default_factory=RasterEncodeOptions)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.scene, RasterScene):
-            raise InvalidRenderRequest("scene must be a RasterScene")
-        if not isinstance(self.output, RasterEncodeOptions):
-            raise InvalidRenderRequest("output must be RasterEncodeOptions")
+DEFAULT_RASTER_ENCODE_OPTIONS: Final = RasterEncodeOptions()
 
 
 __all__ = [
+    "DEFAULT_RASTER_ENCODE_OPTIONS",
     "OPAQUE_WHITE",
     "TRANSPARENT",
     "FillRect",
@@ -197,5 +209,4 @@ __all__ = [
     "RGBAColor",
     "RasterEncodeOptions",
     "RasterScene",
-    "RenderRasterSceneRequest",
 ]

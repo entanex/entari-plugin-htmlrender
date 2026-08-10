@@ -1,21 +1,26 @@
 from entari_plugin_htmlrender.adapters.resources.reader import (
     AnyioWorkerExecutor,
-    CompositeResourceReader,
+    CompositeResourceFetcher,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
 )
-from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.resources.config import (
+    LocalResourceStrategy,
+    ResourceStrategy,
+)
 from entari_plugin_htmlrender.resources.service import ResourceService
 
 
 def resource_service(*, strategy: ResourceStrategy | None = None) -> ResourceService:
+    local_access = ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True)
     return ResourceService(
-        reader=CompositeResourceReader(
+        fetcher=CompositeResourceFetcher(
             AnyioWorkerExecutor(),
+            local_access=local_access,
             remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
         ),
-        local_access=ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True),
-        strategy=strategy or ResourceStrategy(),
+        local_access=local_access,
+        strategy=strategy or LocalResourceStrategy(),
     )
 
 

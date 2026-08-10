@@ -17,6 +17,7 @@ error. TTLs govern reuse freshness in the publisher, never capacity.
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Iterable, Mapping  # noqa: TC003
 from dataclasses import dataclass, field
 import mimetypes
 from pathlib import Path
@@ -32,23 +33,32 @@ from exceptiongroup import BaseExceptionGroup
 
 from entari_plugin_htmlrender._logging import logger
 from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
-from entari_plugin_htmlrender.resources.errors import ResourceResolutionError
+from entari_plugin_htmlrender.resources.errors import (
+    ResourcePublishError,
+    ResourceTooLargeError,
+)
 from entari_plugin_htmlrender.resources.headers import (
     RequestHeaderConflict,
     combine_request_capabilities,
 )
+from entari_plugin_htmlrender.resources.models import PublicationLeaseId  # noqa: TC001
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-
     from aiohttp.web import Request, StreamResponse
     from aiohttp.web_runner import AppRunner
 
 HOSTED_ASSET_MOUNT = "/_htmlrender/assets"
 
 
-class HostedAssetCapacityError(ResourceResolutionError):
+class HostedAssetCapacityError(ResourcePublishError):
     """The hosted asset budget is exhausted by lease-pinned assets."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            reference=None,
+            operation="publish",
+        )
 
 
 @dataclass(slots=True)
@@ -59,7 +69,7 @@ class _HostedAsset:
     size: int
     media_type: str | None
     headers: Mapping[str, str]
-    leases: set[str] = field(default_factory=set)
+    leases: set[PublicationLeaseId] = field(default_factory=set)
 
 
 @final
@@ -89,7 +99,11 @@ class HostedAssetStore:
             if self._directory is not None:
                 return
             if self._closed:
-                raise ProviderLifecycleError("The hosted asset store is closed.")
+                raise ProviderLifecycleError(
+                    "The hosted asset store is closed.",
+                    provider_id=None,
+                    operation="startup",
+                )
             self._directory = await run_sync(_create_temp_directory)
 
     def open_namespace(
@@ -113,9 +127,13 @@ class HostedAssetStore:
     def _evict_locked(self, incoming_bytes: int) -> list[Path]:
         """Reserve room for one incoming asset, returning files to delete."""
         if incoming_bytes > self._max_bytes:
-            raise HostedAssetCapacityError(
+            raise ResourceTooLargeError(
                 "Hosted asset exceeds the configured "
-                f"{self._max_bytes}-byte publish budget."
+                f"{self._max_bytes}-byte publish budget.",
+                reference=None,
+                operation="publish",
+                actual_size=incoming_bytes,
+                maximum_size=self._max_bytes,
             )
         removed: list[Path] = []
 
@@ -153,7 +171,7 @@ class HostedAssetStore:
         data: bytes,
         *,
         headers: Mapping[str, str],
-        lease_ids: Iterable[str] = (),
+        lease_ids: Iterable[PublicationLeaseId] = (),
     ) -> None:
         """Admit one content-addressed asset under the capacity budget.
 
@@ -164,20 +182,29 @@ class HostedAssetStore:
         size = len(data)
         async with self._lock:
             if self._closed:
-                raise ProviderLifecycleError("The hosted asset store is closed.")
+                raise ResourcePublishError(
+                    "The hosted asset store is closed.",
+                    reference=key,
+                    operation="publish",
+                )
             directory = self._directory
             if directory is None:
-                raise ProviderLifecycleError(
-                    "The hosted asset store has not been started."
+                raise ResourcePublishError(
+                    "The hosted asset store has not been started.",
+                    reference=key,
+                    operation="publish",
                 )
+            path = _contained_asset_path(directory, namespace, name)
             existing = self._entries.get(key)
             if existing is not None:
                 try:
                     combine_request_capabilities(existing.headers, headers)
                 except RequestHeaderConflict as error:
-                    raise ResourceResolutionError(
+                    raise ResourcePublishError(
                         "Conflicting request capabilities for one hosted "
                         "asset identity.",
+                        reference=key,
+                        operation="publish",
                         source=error,
                     ) from error
                 existing.leases.update(lease_ids)
@@ -189,7 +216,6 @@ class HostedAssetStore:
         try:
             for stale in removed:
                 await run_sync(_unlink_quietly, stale)
-            path = directory / namespace / name
             await run_sync(_write_asset_file, path, data)
         except BaseException:
             async with self._lock:
@@ -201,7 +227,11 @@ class HostedAssetStore:
             self._reserved_bytes -= size
             if self._closed:
                 await run_sync(_unlink_quietly, path)
-                raise ProviderLifecycleError("The hosted asset store is closed.")
+                raise ResourcePublishError(
+                    "The hosted asset store is closed.",
+                    reference=key,
+                    operation="publish",
+                )
             self._entries[key] = _HostedAsset(
                 namespace=namespace,
                 name=name,
@@ -214,7 +244,12 @@ class HostedAssetStore:
             self._resident_bytes += size
             self._entries.move_to_end(key)
 
-    async def attach(self, namespace: str, name: str, lease_id: str) -> bool:
+    async def attach(
+        self,
+        namespace: str,
+        name: str,
+        lease_id: PublicationLeaseId,
+    ) -> bool:
         """Pin a resident asset to a lease; ``False`` when it was evicted."""
         async with self._lock:
             asset = self._entries.get((namespace, name))
@@ -232,7 +267,11 @@ class HostedAssetStore:
             self._entries.move_to_end((namespace, name))
             return True
 
-    async def release(self, namespace: str, lease_id: str) -> None:
+    async def release(
+        self,
+        namespace: str,
+        lease_id: PublicationLeaseId,
+    ) -> None:
         async with self._lock:
             for asset in self._entries.values():
                 if asset.namespace == namespace:
@@ -302,7 +341,7 @@ class HostedAssetNamespace:
         name: str,
         data: bytes,
         *,
-        lease_ids: Iterable[str] = (),
+        lease_ids: Iterable[PublicationLeaseId] = (),
     ) -> str:
         await self._store.put(
             self._namespace,
@@ -313,13 +352,13 @@ class HostedAssetNamespace:
         )
         return self.url_for(name)
 
-    async def attach(self, name: str, lease_id: str) -> bool:
+    async def attach(self, name: str, lease_id: PublicationLeaseId) -> bool:
         return await self._store.attach(self._namespace, name, lease_id)
 
     async def touch(self, name: str) -> bool:
         return await self._store.touch(self._namespace, name)
 
-    async def release(self, lease_id: str) -> None:
+    async def release(self, lease_id: PublicationLeaseId) -> None:
         await self._store.release(self._namespace, lease_id)
 
     async def clear(self) -> None:
@@ -332,6 +371,46 @@ class HostedAssetNamespace:
 def _write_asset_file(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
+
+
+def _contained_asset_path(directory: Path, namespace: str, name: str) -> Path:
+    if (
+        not isinstance(namespace, str)
+        or not isinstance(name, str)
+        or not namespace
+        or not name
+        or "/" in namespace
+        or "\\" in namespace
+        or "/" in name
+        or "\\" in name
+        or namespace in {".", ".."}
+        or name in {".", ".."}
+        or any(ord(character) < 32 or ord(character) == 127 for character in name)
+        or any(ord(character) < 32 or ord(character) == 127 for character in namespace)
+    ):
+        raise ResourcePublishError(
+            "Hosted asset identity must contain single path segments.",
+            reference=(namespace, name),
+            operation="publish",
+        )
+    try:
+        store_root = directory.resolve()
+        namespace_root = (store_root / namespace).resolve()
+        path = (namespace_root / name).resolve()
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ResourcePublishError(
+            "Hosted asset path could not be validated.",
+            reference=(namespace, name),
+            operation="publish",
+            source=error,
+        ) from error
+    if namespace_root.parent != store_root or path.parent != namespace_root:
+        raise ResourcePublishError(
+            "Hosted asset path escapes its publication namespace.",
+            reference=(namespace, name),
+            operation="publish",
+        )
+    return path
 
 
 def _create_temp_directory() -> Path:
@@ -380,13 +459,19 @@ class HostedAssetHttpServer:
             if self._runner is not None:
                 return
             if self._closed:
-                raise ProviderLifecycleError("The hosted asset server is closed.")
+                raise ProviderLifecycleError(
+                    "The hosted asset server is closed.",
+                    provider_id=None,
+                    operation="startup",
+                )
             await self._store.startup()
             try:
                 from aiohttp import web  # noqa: PLC0415
             except ImportError as error:
                 raise ProviderLifecycleError(
                     "Filehost serving requires the `filehost` extra.",
+                    provider_id=None,
+                    operation="startup",
                     source=error,
                 ) from error
 

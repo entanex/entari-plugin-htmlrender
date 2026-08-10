@@ -8,6 +8,7 @@ from urllib.parse import urldefrag, urlsplit, urlunsplit
 
 from anyio import CancelScope
 
+from entari_plugin_htmlrender.errors import ResourcePublishError
 from entari_plugin_htmlrender.preparation.assets import (
     PreparedAssetIndex,
     resolve_document_reference,
@@ -21,12 +22,15 @@ from entari_plugin_htmlrender.preparation.references import (
     css_resource_references,
     rewrite_css_references,
 )
-from entari_plugin_htmlrender.rendering.errors import ResourceResolutionError
 from entari_plugin_htmlrender.resources import PackageResourceSource
 from entari_plugin_htmlrender.resources.config import (
     LocalLocalResourcePolicy,
     RemoteLocalResourcePolicy,
-    ResourceResolveMode,
+    ResourceMaterializationPolicy,
+)
+from entari_plugin_htmlrender.resources.models import (
+    InlineResource,
+    PublicationLeaseId,
 )
 
 from ._page import (
@@ -53,7 +57,7 @@ if TYPE_CHECKING:
     from entari_plugin_htmlrender.preparation import PreparedAsset, PreparedHtml
     from entari_plugin_htmlrender.resources.ports import (
         AssetPublisher,
-        ProviderResources,
+        ProviderResourceAccess,
     )
 
     from .render import PlaywrightLease
@@ -79,12 +83,12 @@ def _document_url_for_render(
 
 
 def _local_resource_policy(
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
     *,
     remote_mode: bool,
 ) -> LocalLocalResourcePolicy | RemoteLocalResourcePolicy:
-    strategy = resources.strategy
-    return strategy.remote_local_policy if remote_mode else strategy.local_local_policy
+    del remote_mode
+    return resources.strategy.local_resource_policy
 
 
 def _prepared_references(
@@ -180,7 +184,7 @@ async def _publish_prepared_assets(
     prepared: PreparedHtml,
     *,
     publisher: AssetPublisher,
-    lease_id: str,
+    lease_id: PublicationLeaseId,
 ) -> tuple[dict[str, str], dict[str, Mapping[str, str]]]:
     """Publish an asset graph bottom-up, rewriting CSS children to hosted URLs.
 
@@ -234,7 +238,7 @@ async def _publish_prepared_assets(
 
                 payload = rewrite_css_references(css, rewrite_child).encode("utf-8")
         result = await publisher.publish(
-            payload,
+            InlineResource(payload, _asset_media_type(asset)),
             lease_id=lease_id,
             suffix=_asset_suffix(asset),
         )
@@ -306,18 +310,18 @@ async def render_prepared_html(
     content: ContentConfig,
     render: RenderConfig,
     lease: PlaywrightLease,
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
     asset_publisher: AssetPublisher | None,
-    resolve_mode: ResourceResolveMode | None = None,
-    filehost_lease_id: str | None = None,
+    resolve_mode: ResourceMaterializationPolicy | None = None,
+    filehost_lease_id: PublicationLeaseId | None = None,
     telemetry_op: str = "playwright.html_render.render_html",
 ) -> bytes:
     """Apply local-resource policy and render a prepared document."""
     remote_mode = _is_remote_lease(lease)
-    mode = resolve_mode or resources.strategy.resolve_mode
+    mode = resolve_mode or resources.strategy.materialization_policy
     policy = (
         RemoteLocalResourcePolicy.PASSTHROUGH
-        if mode is ResourceResolveMode.OFF
+        if mode is ResourceMaterializationPolicy.OFF
         else _local_resource_policy(resources, remote_mode=remote_mode)
     )
     document_url = _document_url_for_render(render)
@@ -328,7 +332,7 @@ async def render_prepared_html(
         and urlsplit(document_url).scheme in {"http", "https"}
         else None
     )
-    strict = mode is ResourceResolveMode.STRICT
+    strict = mode is ResourceMaterializationPolicy.STRICT
     asset_urls: dict[str, str] | None = None
     filehost_authorization: dict[str, Mapping[str, str]] = {}
     owns_lease = False
@@ -349,8 +353,10 @@ async def render_prepared_html(
             )
             if prepared.assets:
                 if asset_publisher is None:
-                    raise ResourceResolutionError(
-                        "The filehost resource policy requires an AssetPublisher."
+                    raise ResourcePublishError(
+                        "The filehost resource policy requires an AssetPublisher.",
+                        reference=None,
+                        operation="publish",
                     )
                 if filehost_lease_id is None:
                     filehost_lease_id = asset_publisher.create_lease()

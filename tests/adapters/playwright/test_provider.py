@@ -15,26 +15,29 @@ from entari_plugin_htmlrender.adapters.playwright.provider import (
     PROVIDER,
     PlaywrightProvider,
 )
+from entari_plugin_htmlrender.errors import (
+    ProviderConfigurationError,
+    ProviderExecutionError,
+    ResourceFetchError,
+)
 from entari_plugin_htmlrender.preparation import parse_html
 from entari_plugin_htmlrender.preparation.materialize import (
     AssetMaterializationError,
 )
 from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
 from entari_plugin_htmlrender.providers.sdk import (
-    ProviderAvailability,
+    LocalResourceStrategy,
     ProviderDependencies,
+    ProviderUnavailable,
 )
 from entari_plugin_htmlrender.rendering import (
     OperationAdmissionGate,
-    ProviderExecutionError,
     RenderedImage,
-    ResourcePolicy,
-    ResourceResolutionError,
+    RenderOperation,
 )
 from entari_plugin_htmlrender.rendering.observers import NoopCacheObserver
 from entari_plugin_htmlrender.resources.config import (
-    ResourceResolveMode,
-    ResourceStrategy,
+    ResourceMaterializationPolicy,
 )
 from tests.image_fixtures import encoded_image, rendered_image
 
@@ -42,38 +45,38 @@ if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
     from entari_plugin_htmlrender.adapters.playwright.render import PlaywrightLease
-    from entari_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
     from tests.adapters.conftest import RecordingOperationObserver
 
 PREPARED = parse_html("<p>prepared</p>")
 
 
 def _dependencies(observer: RecordingOperationObserver) -> ProviderDependencies:
-    resources = SimpleNamespace(strategy=ResourceStrategy())
+    resources = SimpleNamespace(strategy=LocalResourceStrategy())
     return ProviderDependencies(
         operation_observer=observer,
         operation_admission=OperationAdmissionGate(),
         cache_observer=NoopCacheObserver(),
-        resources=cast("ProviderResources", resources),
+        resources=cast("ProviderResourceAccess", resources),
         asset_publisher=None,
     )
 
 
-def test_parse_settings_validates_via_pydantic() -> None:
-    settings = PROVIDER.parse_settings({"skip_browser_install": True})
+def test_parse_config_validates_via_pydantic() -> None:
+    settings = PROVIDER.parse_config({"skip_browser_install": True})
 
     assert isinstance(settings, PlaywrightConfig)
     assert settings.skip_browser_install is True
     with pytest.raises(ValidationError):
-        PROVIDER.parse_settings({"engine": "definitely-not-a-browser"})
+        PROVIDER.parse_config({"engine": "definitely-not-a-browser"})
 
 
 def test_availability_uses_parsed_settings(mocker: MockerFixture) -> None:
     seen: list[PlaywrightConfig] = []
 
-    def fake_available(cfg: PlaywrightConfig) -> ProviderAvailability:
+    def fake_available(cfg: PlaywrightConfig) -> ProviderUnavailable:
         seen.append(cfg)
-        return ProviderAvailability(available=False, reason="nope")
+        return ProviderUnavailable(reason="nope")
 
     mocker.patch(
         "entari_plugin_htmlrender.adapters.playwright.availability.playwright_availability",
@@ -81,9 +84,9 @@ def test_availability_uses_parsed_settings(mocker: MockerFixture) -> None:
     )
     config = PlaywrightConfig()
 
-    result = PROVIDER.availability(config)
+    result = PROVIDER.check_availability(config)
 
-    assert result.available is False
+    assert isinstance(result, ProviderUnavailable)
     assert result.reason == "nope"
     assert seen == [config]
 
@@ -96,10 +99,10 @@ def test_availability_reports_missing_playwright_extra(
         return_value=False,
     )
 
-    result = PROVIDER.availability(PlaywrightConfig())
+    result = PROVIDER.check_availability(PlaywrightConfig())
 
-    assert result.available is False
-    assert "[playwright]" in (result.reason or "")
+    assert isinstance(result, ProviderUnavailable)
+    assert "[playwright]" in result.reason
 
 
 def test_compose_uses_constructor_injected_settings(
@@ -158,7 +161,11 @@ async def test_standard_raster_uses_injected_operation_observer(
     executor = bindings.prepared_html_executor
     assert executor is not None
 
-    result = await executor.execute(PREPARED, RasterOptions())
+    result = await executor.execute(
+        PREPARED,
+        RasterOptions(),
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
 
     assert result is expected
     rasterize.assert_awaited_once()
@@ -168,7 +175,7 @@ async def test_standard_raster_uses_injected_operation_observer(
 def test_compose_rejects_foreign_settings(
     operation_observer: RecordingOperationObserver,
 ) -> None:
-    with pytest.raises(ProviderExecutionError, match="parse_settings"):
+    with pytest.raises(ProviderConfigurationError, match="parse_config"):
         PROVIDER.compose(
             cast("PlaywrightConfig", object()),
             _dependencies(operation_observer),
@@ -194,9 +201,11 @@ async def test_rasterize_maps_raster_options(mocker: MockerFixture) -> None:
 
     lease = cast("PlaywrightLease", object())
     resources = cast(
-        "ProviderResources",
+        "ProviderResourceAccess",
         SimpleNamespace(
-            strategy=ResourceStrategy(resolve_mode=ResourceResolveMode.STRICT)
+            strategy=LocalResourceStrategy(
+                materialization_policy=ResourceMaterializationPolicy.STRICT
+            )
         ),
     )
 
@@ -204,7 +213,7 @@ async def test_rasterize_maps_raster_options(mocker: MockerFixture) -> None:
         lease,
         PREPARED,
         RasterOptions(width=640, height=None, format="jpeg", quality=70),
-        ResourcePolicy.AUTO,
+        ResourceMaterializationPolicy.AUTO,
         resources=resources,
         asset_publisher=None,
     )
@@ -217,7 +226,7 @@ async def test_rasterize_maps_raster_options(mocker: MockerFixture) -> None:
     assert captured["lease"] is lease
     assert captured["resources"] is resources
     assert captured["asset_publisher"] is None
-    assert captured["resolve_mode"] is ResourceResolveMode.AUTO
+    assert captured["resolve_mode"] is ResourceMaterializationPolicy.AUTO
     assert captured["telemetry_op"] == "playwright.html_render.rasterize_html"
     render_config = captured["render"]
     page = getattr(render_config, "page", None)
@@ -241,8 +250,8 @@ async def test_rasterize_rejects_encoded_format_mismatch(
     )
     lease = cast("PlaywrightLease", object())
     resources = cast(
-        "ProviderResources",
-        SimpleNamespace(strategy=ResourceStrategy()),
+        "ProviderResourceAccess",
+        SimpleNamespace(strategy=LocalResourceStrategy()),
     )
 
     with pytest.raises(ValueError, match="format mismatch"):
@@ -264,7 +273,7 @@ def test_translate_maps_native_errors() -> None:
         raise PlaywrightError("render failed")
 
     with (
-        pytest.raises(ResourceResolutionError, match="missing asset"),
+        pytest.raises(ResourceFetchError, match="missing asset"),
         provider_module._translate("render", ProviderExecutionError),
     ):
         raise AssetMaterializationError("missing asset")

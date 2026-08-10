@@ -8,9 +8,10 @@ can opt into revalidation where appropriate.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path, PurePosixPath
 
-from .models import PackageResourceRef
+from .models import FileResourceRef, PackageResourceRef
 
 
 def _logical_parts(name: str | PurePosixPath) -> tuple[str, ...]:
@@ -55,20 +56,23 @@ class FilesystemResourceSource:
     root: Path
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "root", self.root.expanduser().resolve())
+        root = Path(os.path.normpath(self.root))
+        if not root.is_absolute():
+            raise ValueError("Filesystem resource sources require an absolute root.")
+        object.__setattr__(self, "root", root)
 
     @property
     def identity(self) -> tuple[str, str]:
         return ("filesystem", str(self.root))
 
-    def resource(self, name: str | PurePosixPath) -> Path:
+    def resource(self, name: str | PurePosixPath) -> FileResourceRef:
         parts = _logical_parts(name)
-        candidate = self.root.joinpath(*parts).resolve()
+        candidate = Path(os.path.normpath(self.root.joinpath(*parts)))
         try:
             candidate.relative_to(self.root)
         except ValueError as error:
             raise ValueError(f"Resource escapes filesystem root: {name!r}") from error
-        return candidate
+        return FileResourceRef(candidate)
 
 
 __all__ = [

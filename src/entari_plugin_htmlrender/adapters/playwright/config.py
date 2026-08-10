@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from entari_plugin_htmlrender.resources.config import (
     LocalLocalResourcePolicy,
     RemoteLocalResourcePolicy,
-    ResourceResolveMode,
+    ResourceMaterializationPolicy,
 )
 
 __all__ = [
@@ -88,10 +88,11 @@ class PlaywrightConfig(BaseModel):
     install_mirror: str | None = Field(default=None)
     install_proxy: str | None = Field(default=None)
     skip_browser_install: bool = Field(default=False)
-    cleanup_legacy_cache: bool = Field(default=False)
     close_on_exit: bool = Field(default=True)
     storage_path: Path | None = Field(default=None)
-    resource_resolve_mode: ResourceResolveMode = Field(default=ResourceResolveMode.AUTO)
+    materialization_policy: ResourceMaterializationPolicy = Field(
+        default=ResourceMaterializationPolicy.AUTO
+    )
     remote_local_resource_policy: RemoteLocalResourcePolicy = Field(
         default=RemoteLocalResourcePolicy.MEMORY
     )

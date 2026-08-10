@@ -1,52 +1,63 @@
-"""Stable rendering error taxonomy and bounded cause snapshots."""
+"""Stable rendering errors carry fields callers can recover from."""
 
 from __future__ import annotations
 
-from exceptiongroup import ExceptionGroup
+from typing import cast
 
-from entari_plugin_htmlrender.rendering import (
-    CapabilityUnavailable,
+from exceptiongroup import ExceptionGroup
+import pytest
+
+from entari_plugin_htmlrender.errors import (
     ErrorCause,
-    InvalidRenderRequest,
-    PreparationError,
+    HtmlRenderError,
+    InvalidRenderInputError,
     ProviderExecutionError,
     ProviderLifecycleError,
-    ProviderNotFound,
-    ProviderUnavailable,
-    RenderingError,
-    ResourceAccessDenied,
-    ResourceNotFound,
-    ResourceResolutionError,
-    ResourceSizeExceeded,
-    RuntimeNotBound,
-    UnsupportedRenderOption,
-    UnsupportedRequirement,
+    RenderTimeoutError,
+    RuntimeUnavailableError,
+    UnsupportedDocumentFeatureError,
+    UnsupportedOperationError,
+    UnsupportedRasterOptionError,
 )
+from entari_plugin_htmlrender.preparation import DocumentRequirement
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 
-def test_error_taxonomy_roots_at_rendering_error() -> None:
+def test_rendering_error_taxonomy_roots_at_html_render_error() -> None:
     for error_type in (
-        RuntimeNotBound,
-        InvalidRenderRequest,
-        PreparationError,
-        CapabilityUnavailable,
-        UnsupportedRenderOption,
-        UnsupportedRequirement,
-        ProviderNotFound,
-        ProviderUnavailable,
+        InvalidRenderInputError,
+        UnsupportedOperationError,
+        UnsupportedRasterOptionError,
+        UnsupportedDocumentFeatureError,
+        RenderTimeoutError,
+        RuntimeUnavailableError,
         ProviderExecutionError,
         ProviderLifecycleError,
-        ResourceResolutionError,
     ):
-        assert issubclass(error_type, RenderingError)
-    for error_type in (ResourceAccessDenied, ResourceNotFound, ResourceSizeExceeded):
-        assert issubclass(error_type, ResourceResolutionError)
+        assert issubclass(error_type, HtmlRenderError)
 
 
-def test_rendering_error_captures_bounded_structured_cause() -> None:
+def test_unsupported_document_feature_preserves_domain_identity() -> None:
+    error = UnsupportedDocumentFeatureError(
+        RenderOperation.PREPARED_HTML_TO_IMAGE.value,
+        DocumentRequirement.JAVASCRIPT.value,
+        provider_id="native",
+    )
+
+    assert error.operation == RenderOperation.PREPARED_HTML_TO_IMAGE.value
+    assert error.feature == DocumentRequirement.JAVASCRIPT.value
+    assert error.provider_id == "native"
+
+
+def test_error_captures_bounded_structured_cause() -> None:
     source = RuntimeError(f"\x1b[31mnative\x1b[0m\n{'x' * 300}")
 
-    error = ProviderExecutionError("  Provider   failed.  ", source=source)
+    error = ProviderExecutionError(
+        "Provider failed.",
+        provider_id="browser",
+        operation=RenderOperation.HTML_TO_IMAGE.value,
+        source=source,
+    )
 
     assert error.message == "Provider failed."
     assert error.causes == (
@@ -59,16 +70,20 @@ def test_rendering_error_captures_bounded_structured_cause() -> None:
     assert not error.message_truncated
     assert not error.causes_truncated
     assert "\x1b" not in str(error)
-    assert not hasattr(error, "source")
 
 
-def test_rendering_error_flattens_and_limits_exception_groups() -> None:
+def test_error_flattens_and_limits_exception_groups() -> None:
     source = ExceptionGroup(
         "native failures",
         [ValueError(str(index)) for index in range(5)],
     )
 
-    error = ProviderLifecycleError("Startup failed.", source=source)
+    error = ProviderLifecycleError(
+        "Startup failed.",
+        provider_id="browser",
+        operation="startup",
+        source=source,
+    )
 
     assert error.causes == (
         ErrorCause("ExceptionGroup", "native failures"),
@@ -76,26 +91,62 @@ def test_rendering_error_flattens_and_limits_exception_groups() -> None:
         ErrorCause("ValueError", "1"),
     )
     assert error.causes_truncated
-    assert str(error).endswith("ValueError: 1; …")
 
 
-def test_rendering_error_reuses_already_cropped_leaf_causes() -> None:
-    inner = PreparationError("Preparation failed.", source=ValueError("invalid"))
+def test_error_cause_walk_is_cycle_safe() -> None:
+    first = RuntimeError("first")
+    second = ValueError("second")
+    first.__cause__ = second
+    second.__cause__ = first
 
-    outer = ProviderExecutionError("Render failed.", source=inner)
-
-    assert outer.causes is inner.causes
-    assert str(outer) == "Render failed. Caused by ValueError: invalid"
-
-
-def test_rendering_error_preserves_bounded_native_cause_chain() -> None:
-    native = OSError("connection refused")
-    wrapper = RuntimeError("browser startup failed")
-    wrapper.__cause__ = native
-
-    error = ProviderLifecycleError("Startup failed.", source=wrapper)
+    error = ProviderExecutionError(
+        "Provider failed.",
+        provider_id="browser",
+        operation=RenderOperation.HTML_TO_IMAGE.value,
+        source=first,
+    )
 
     assert error.causes == (
-        ErrorCause("RuntimeError", "browser startup failed"),
-        ErrorCause("OSError", "connection refused"),
+        ErrorCause("RuntimeError", "first"),
+        ErrorCause("ValueError", "second"),
     )
+    assert not error.causes_truncated
+
+
+def test_nested_detailed_error_respects_outer_cause_budget() -> None:
+    nested = ProviderExecutionError(
+        "Native failures.",
+        provider_id="browser",
+        operation=RenderOperation.HTML_TO_IMAGE.value,
+        source=ExceptionGroup(
+            "native failures",
+            [ValueError(str(index)) for index in range(5)],
+        ),
+    )
+    wrapper = RuntimeError("provider wrapper")
+    wrapper.__cause__ = nested
+
+    error = ProviderLifecycleError(
+        "Startup failed.",
+        provider_id="browser",
+        operation="startup",
+        source=wrapper,
+    )
+
+    assert error.causes == (
+        ErrorCause("RuntimeError", "provider wrapper"),
+        ErrorCause("ExceptionGroup", "native failures"),
+        ErrorCause("ValueError", "0"),
+    )
+    assert error.causes_truncated
+
+
+@pytest.mark.parametrize("feature", ["", None, 1])
+def test_unsupported_document_feature_rejects_unstable_identity(
+    feature: object,
+) -> None:
+    with pytest.raises(ValueError, match="non-empty string"):
+        UnsupportedDocumentFeatureError(
+            RenderOperation.PREPARED_HTML_TO_IMAGE.value,
+            cast("str", feature),
+        )

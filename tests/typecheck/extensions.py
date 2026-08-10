@@ -1,43 +1,47 @@
-"""Static probes for the public first-party extension completion chain."""
+"""Static probes for the public first-party capability completion chain."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from typing_extensions import assert_type
 
-from playwright.async_api import Browser, Page, Response
-from takumi_py import Renderer as TakumiRenderer
-
 from entari_plugin_htmlrender.capabilities import (
-    PlaywrightAccess,
-    TakumiAccess,
-    TakumiAPI,
+    PlaywrightCapability,
+    TakumiCapability,
+    TakumiSession,
 )
-from entari_plugin_htmlrender.graphics import RasterSceneRenderer
+from entari_plugin_htmlrender.graphics import GraphicsRenderer
 
 if TYPE_CHECKING:
+    from playwright.async_api import Browser, Page
+    from takumi_py import Renderer as TakumiRenderer
+
     from entari_plugin_htmlrender.runtime import RenderRuntime
 
 
 async def _probe(runtime: RenderRuntime) -> None:
-    playwright = assert_type(runtime.extensions.playwright, PlaywrightAccess)
-    async with playwright.page(viewport={"width": 800, "height": 600}) as page:
-        assert_type(page, Page)
-        assert_type(await page.goto("https://example.com"), Response | None)
+    playwright = assert_type(
+        runtime.capabilities.playwright,
+        PlaywrightCapability,
+    )
+    async with playwright.lease_page(
+        viewport={"width": 800, "height": 600}
+    ) as native_page:
+        page = cast("Page", native_page)
+        await page.goto("https://example.com")
         assert_type(await page.locator("main").screenshot(type="png"), bytes)
 
-    async with playwright.browser() as browser:
-        assert_type(browser, Browser)
+    async with playwright.lease_browser() as native_browser:
+        browser = cast("Browser", native_browser)
         await browser.new_context(locale="zh-CN")
 
-    takumi = assert_type(runtime.extensions.takumi, TakumiAccess)
-    async with takumi.api() as api:
-        assert_type(api, TakumiAPI)
-        assert_type(await api.render_html("<strong>Hello</strong>"), bytes)
+    takumi = assert_type(runtime.capabilities.takumi, TakumiCapability)
+    async with takumi.lease_session() as session:
+        assert_type(session, TakumiSession)
+        assert_type(await session.render_html("<strong>Hello</strong>"), bytes)
 
-    async with takumi.renderer() as renderer:
-        assert_type(renderer, TakumiRenderer)
+    async with takumi.lease_native_renderer() as native_renderer:
+        renderer = cast("TakumiRenderer", native_renderer)
         renderer.render_node({"type": "container"}, width=320, height=180)
 
-    assert_type(runtime.extensions.pillow, RasterSceneRenderer)
-    assert_type(runtime.extensions.skia, RasterSceneRenderer)
+    assert_type(runtime.graphics, GraphicsRenderer)

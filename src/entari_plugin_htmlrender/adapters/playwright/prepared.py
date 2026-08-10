@@ -294,15 +294,9 @@ async def install_browser_asset_routes(page: Page, plan: BrowserLoadPlan) -> Non
     await page.route(f"{_MEMORY_ASSET_PREFIX}**", handle)
 
 
-def materialize_prepared_html(prepared: PreparedHtml) -> str:
-    """Compatibility helper returning the document portion of a browser plan."""
-    return build_browser_load_plan(prepared).html
-
-
 __all__ = [
     "BrowserAssetRoute",
     "BrowserLoadPlan",
     "build_browser_load_plan",
     "install_browser_asset_routes",
-    "materialize_prepared_html",
 ]

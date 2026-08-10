@@ -5,12 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from entari_plugin_htmlrender import RenderedImage, render_template, render_text
+from entari_plugin_htmlrender import (
+    RasterOptions,
+    RenderedImage,
+    TemplateRef,
+)
 
 if TYPE_CHECKING:
-    from entari_plugin_htmlrender.host import HtmlRenderService
+    from entari_plugin_htmlrender.entari import HtmlRenderService
 
 TEMPLATE_DIR = Path(__file__).with_name("templates")
+PROFILE_TEMPLATE = TemplateRef(TEMPLATE_DIR, "profile.html")
 
 
 async def render_profile(
@@ -18,9 +23,8 @@ async def render_profile(
     username: str,
 ) -> RenderedImage:
     """Render a profile from a service injected by an Entari handler."""
-    return await render_template(
-        TEMPLATE_DIR,
-        "profile.html",
+    return await service.renderer.rasterize_template(
+        PROFILE_TEMPLATE,
         {
             "avatar_text": username[:1].upper() or "?",
             "username": username,
@@ -32,10 +36,11 @@ async def render_profile(
                 {"label": "Messages", "value": "3.2k"},
             ),
         },
-        width=440,
-        height=None,
-        device_pixel_ratio=1.0,
-        runtime=service,
+        raster=RasterOptions(
+            width=440,
+            height=None,
+            device_pixel_ratio=1.0,
+        ),
     )
 
 
@@ -43,9 +48,7 @@ async def render_plain_text(
     service: HtmlRenderService,
     content: str,
 ) -> RenderedImage:
-    return await render_text(
+    return await service.renderer.rasterize_text(
         content,
-        width=600,
-        device_pixel_ratio=1.0,
-        runtime=service,
+        raster=RasterOptions(width=600, device_pixel_ratio=1.0),
     )

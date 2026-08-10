@@ -4,19 +4,19 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from entari_plugin_htmlrender.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.errors import (
+    GraphicsBackendUnavailableError,
+    GraphicsError,
+    InvalidRenderInputError,
+)
 from entari_plugin_htmlrender.graphics import (
     FillRect,
     PixelRect,
     RasterEncodeOptions,
     RasterScene,
-    RenderRasterSceneRequest,
     RGBAColor,
 )
-from entari_plugin_htmlrender.graphics.errors import (
-    RasterBackendExecutionError,
-    RasterBackendUnavailable,
-)
+from entari_plugin_htmlrender.graphics.errors import RasterBackendExecutionError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,25 +51,34 @@ def test_scene_is_deeply_immutable_and_uses_half_open_clipping() -> None:
 def test_invalid_scene_values_fail_at_the_contract_boundary(
     factory: Callable[[], object],
 ) -> None:
-    with pytest.raises(InvalidRenderRequest):
+    with pytest.raises(InvalidRenderInputError):
         factory()
 
 
 def test_jpeg_defaults_are_backend_independent() -> None:
     output = RasterEncodeOptions(format="jpeg")
-    request = RenderRasterSceneRequest(RasterScene(4, 3), output)
 
-    assert request.output.jpeg_quality == 90
-    assert request.output.jpeg_matte == RGBAColor(255, 255, 255)
+    assert output.jpeg_quality == 90
+    assert output.jpeg_matte == RGBAColor(255, 255, 255)
 
 
-@pytest.mark.parametrize(
-    "error_type",
-    [RasterBackendExecutionError, RasterBackendUnavailable],
-)
-def test_raster_backend_errors_preserve_typed_backend_name(
-    error_type: type[RasterBackendExecutionError | RasterBackendUnavailable],
-) -> None:
-    error = error_type("pillow", "missing")
+def test_raster_backend_execution_error_preserves_backend_name() -> None:
+    error = RasterBackendExecutionError("pillow", "failed")
+
+    assert isinstance(error, GraphicsError)
+    assert error.backend == "pillow"
+    assert error.operation == "raster_scene_to_image"
+    assert error.retryable is False
+
+
+def test_graphics_backend_unavailable_error_is_structured() -> None:
+    error = GraphicsBackendUnavailableError(
+        "pillow",
+        "missing",
+        retryable=True,
+    )
 
     assert error.backend == "pillow"
+    assert error.operation == "raster_scene_to_image"
+    assert error.reason == "missing"
+    assert error.retryable is True

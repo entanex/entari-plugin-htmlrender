@@ -1,56 +1,56 @@
-"""Resource domain models, ports, policies, and composition-owned service."""
+"""Curated resource-domain contract surface."""
 
-from .errors import ResourceAccessDenied as ResourceAccessDenied
-from .errors import ResourceNotFound as ResourceNotFound
-from .errors import ResourceResolutionError as ResourceResolutionError
-from .errors import ResourceSizeExceeded as ResourceSizeExceeded
+from .config import ResourceMaterializationPolicy as ResourceMaterializationPolicy
+from .errors import ResourceAccessDeniedError as ResourceAccessDeniedError
+from .errors import ResourceAuthenticationError as ResourceAuthenticationError
+from .errors import ResourceError as ResourceError
+from .errors import ResourceFetchError as ResourceFetchError
+from .errors import ResourceNetworkError as ResourceNetworkError
+from .errors import ResourceNotFoundError as ResourceNotFoundError
+from .errors import ResourcePublishError as ResourcePublishError
+from .errors import ResourceRemoteResponseError as ResourceRemoteResponseError
+from .errors import ResourceTimeoutError as ResourceTimeoutError
+from .errors import ResourceTooLargeError as ResourceTooLargeError
 from .models import (
     FileResourceRef,
-    InlineResourceRef,
-    NotModified,
+    InlineResource,
     PackageResourceRef,
     PublishedResource,
     RemoteResourceRef,
     ResourceContent,
     ResourceRef,
-    ResourceResolution,
     ResourceRevision,
 )
 from .ports import (
-    AssetPublisher,
-    LocalAccessPolicy,
-    ProviderResources,
-    ResourceReader,
-    ResourceResolver,
-    TemplateCompiler,
-    WorkerExecutor,
+    ResourceAccess,
+    ResourceFetcher,
+    ResourceMaterializer,
 )
-from .service import ResourceService
 from .source import FilesystemResourceSource, PackageResourceSource
 
 __all__ = [
-    "AssetPublisher",
     "FileResourceRef",
     "FilesystemResourceSource",
-    "InlineResourceRef",
-    "LocalAccessPolicy",
-    "NotModified",
+    "InlineResource",
     "PackageResourceRef",
     "PackageResourceSource",
-    "ProviderResources",
     "PublishedResource",
     "RemoteResourceRef",
-    "ResourceAccessDenied",
+    "ResourceAccess",
+    "ResourceAccessDeniedError",
+    "ResourceAuthenticationError",
     "ResourceContent",
-    "ResourceNotFound",
-    "ResourceReader",
+    "ResourceError",
+    "ResourceFetchError",
+    "ResourceFetcher",
+    "ResourceMaterializationPolicy",
+    "ResourceMaterializer",
+    "ResourceNetworkError",
+    "ResourceNotFoundError",
+    "ResourcePublishError",
     "ResourceRef",
-    "ResourceResolution",
-    "ResourceResolutionError",
-    "ResourceResolver",
+    "ResourceRemoteResponseError",
     "ResourceRevision",
-    "ResourceService",
-    "ResourceSizeExceeded",
-    "TemplateCompiler",
-    "WorkerExecutor",
+    "ResourceTimeoutError",
+    "ResourceTooLargeError",
 ]

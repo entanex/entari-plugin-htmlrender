@@ -10,7 +10,6 @@ import anyio
 from playwright.async_api import Browser, Page, Route
 
 from entari_plugin_htmlrender._logging import logger
-from entari_plugin_htmlrender.capabilities.playwright import _page_signature
 from entari_plugin_htmlrender.resources.headers import merge_request_headers
 
 from .telemetry import detach_page, instrument_page
@@ -49,7 +48,6 @@ class PageContext:
     def __init__(self, lease: PlaywrightLease) -> None:
         self._lease = lease
 
-    @_page_signature
     @asynccontextmanager
     async def open(self, **kwargs: Any) -> AsyncIterator[Page]:
         browser = self._lease.browser

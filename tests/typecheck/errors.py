@@ -2,10 +2,11 @@
 
 from typing_extensions import assert_type
 
-from entari_plugin_htmlrender import ErrorCause, RenderingError
+from entari_plugin_htmlrender import HtmlRenderError
+from entari_plugin_htmlrender.errors import ErrorCause
 
 
-def _probe(error: RenderingError) -> None:
+def _probe(error: HtmlRenderError) -> None:
     assert_type(error.message, str)
     assert_type(error.message_truncated, bool)
     causes = assert_type(error.causes, tuple[ErrorCause, ...])

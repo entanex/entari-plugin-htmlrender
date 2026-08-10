@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
-from entari_plugin_htmlrender.capabilities.takumi import (
-    AnimationImageFormat as AnimationImageFormat,
-)
 from entari_plugin_htmlrender.capabilities.takumi import (
     ImageCacheMode as ImageCacheMode,
 )
@@ -21,9 +18,9 @@ from entari_plugin_htmlrender.capabilities.takumi import (
     TakumiImageResourceLike as TakumiImageResourceLike,
 )
 
-if TYPE_CHECKING:
-    from typing import TypeAlias
+AnimationImageFormat: TypeAlias = Literal["webp", "apng", "gif"]
 
+if TYPE_CHECKING:
     from takumi_py import CompiledHtml, Renderer
 
     NativeCompiledHtml: TypeAlias = CompiledHtml

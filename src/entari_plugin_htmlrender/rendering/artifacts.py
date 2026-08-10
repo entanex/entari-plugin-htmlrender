@@ -216,6 +216,10 @@ class RenderedHtml:
 
     content: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.content, str):
+            raise TypeError("RenderedHtml content must be a string.")
+
     def __str__(self) -> str:
         return self.content
 

@@ -15,7 +15,7 @@ from .models import PreparedAsset
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from entari_plugin_htmlrender.resources.service import ResourceService
+    from entari_plugin_htmlrender.resources.ports import PreparationResourceAccess
 
 
 class _PreparedAssetResolver:
@@ -23,7 +23,7 @@ class _PreparedAssetResolver:
         self._assets: dict[str, PreparedAsset] = {}
         self._lock = anyio.Lock()
 
-    async def resolve(
+    async def materialize(
         self,
         value: object,
         *,
@@ -62,19 +62,19 @@ async def stage_template_variables(
     variables: Mapping[str, Any],
     *,
     template_base: str | Path,
-    resources: ResourceService,
+    resources: PreparationResourceAccess,
     strict: bool,
 ) -> tuple[dict[str, Any], tuple[PreparedAsset, ...]]:
     """Replace Path/binary variables with stable URL identifiers and assets."""
 
     resolver = _PreparedAssetResolver()
-    resolved = await resources.resolve_template_vars(
+    resolved = await resources.materialize_template_variables(
         dict(variables),
-        template_base=template_base,
+        template_base=Path(template_base),
         strict=strict,
-        resolver=resolver,
+        materializer=resolver,
     )
-    return resolved.value, resolver.assets()
+    return resolved, resolver.assets()
 
 
 __all__ = ["stage_template_variables"]

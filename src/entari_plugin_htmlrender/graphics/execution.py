@@ -7,8 +7,13 @@ from typing import TYPE_CHECKING, final
 
 import anyio
 
-from entari_plugin_htmlrender.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.errors import InvalidRenderInputError
 from entari_plugin_htmlrender.graphics.errors import RasterBackendExecutionError
+from entari_plugin_htmlrender.graphics.models import (
+    RasterEncodeOptions,
+    RasterScene,
+)
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 from entari_plugin_htmlrender.rendering.observers import observe_operation
 
 if TYPE_CHECKING:
@@ -19,7 +24,7 @@ if TYPE_CHECKING:
     from entari_plugin_htmlrender.rendering.ports import OperationObserver
     from entari_plugin_htmlrender.resources.ports import WorkerExecutor
 
-    from .models import GraphicsBackendName, RasterScene, RenderRasterSceneRequest
+    from .models import GraphicsBackendName
 
 
 @final
@@ -61,24 +66,29 @@ class RasterWorkBudget:
         """Validate one scene before reserving a shared native-work slot."""
         pixels = scene.width * scene.height
         if pixels > self._max_pixels:
-            raise InvalidRenderRequest(
+            raise InvalidRenderInputError(
                 f"Raster scene contains {pixels} pixels, exceeding the configured "
-                f"limit of {self._max_pixels}."
+                f"limit of {self._max_pixels}.",
+                operation=RenderOperation.RASTER_SCENE_TO_IMAGE.value,
+                field="scene",
             )
         command_count = len(scene.commands)
         if command_count > self._max_commands:
-            raise InvalidRenderRequest(
+            raise InvalidRenderInputError(
                 f"Raster scene contains {command_count} draw commands, exceeding "
-                f"the configured limit of {self._max_commands}."
+                f"the configured limit of {self._max_commands}.",
+                operation=RenderOperation.RASTER_SCENE_TO_IMAGE.value,
+                field="scene.commands",
             )
         async with self._slots:
             yield
 
 
-async def run_raster_backend(
+async def rasterize_with_backend(
     backend: GraphicsBackendName,
-    request: RenderRasterSceneRequest,
-    render_sync: Callable[[RenderRasterSceneRequest], RenderedImage],
+    scene: RasterScene,
+    output: RasterEncodeOptions,
+    rasterize_sync: Callable[[RasterScene, RasterEncodeOptions], RenderedImage],
     *,
     worker: WorkerExecutor,
     observer: OperationObserver,
@@ -87,25 +97,40 @@ async def run_raster_backend(
 ) -> RenderedImage:
     """Admission, budgeting, observation, and error translation for one scene.
 
-    Backend adapters only supply their synchronous ``render_sync`` body.
+    Backend adapters only supply their synchronous ``rasterize_sync`` body.
     """
-    async with operation_admission.operation(), budget.reserve(request.scene):
-        with observe_operation(
-            observer,
-            f"graphics.{backend}.render_scene",
-            {
-                "render.backend": backend,
-                "render.format": request.output.format,
-            },
-        ):
-            try:
-                return await worker.run_sync(render_sync, request)
-            except Exception as error:
-                raise RasterBackendExecutionError(
-                    backend,
-                    "native render operation failed",
-                    source=error,
-                ) from error
+    async with (
+        operation_admission.operation(RenderOperation.RASTER_SCENE_TO_IMAGE.value),
+    ):
+        if not isinstance(scene, RasterScene):
+            raise InvalidRenderInputError(
+                "scene must be a RasterScene value.",
+                operation=RenderOperation.RASTER_SCENE_TO_IMAGE.value,
+                field="scene",
+            )
+        if not isinstance(output, RasterEncodeOptions):
+            raise InvalidRenderInputError(
+                "output must be a RasterEncodeOptions value.",
+                operation=RenderOperation.RASTER_SCENE_TO_IMAGE.value,
+                field="output",
+            )
+        async with budget.reserve(scene):
+            with observe_operation(
+                observer,
+                f"graphics.{backend}.rasterize",
+                {
+                    "render.backend": backend,
+                    "render.format": output.format,
+                },
+            ):
+                try:
+                    return await worker.run_sync(rasterize_sync, scene, output)
+                except Exception as error:
+                    raise RasterBackendExecutionError(
+                        backend,
+                        "native rasterization failed",
+                        source=error,
+                    ) from error
 
 
-__all__ = ["RasterWorkBudget", "run_raster_backend"]
+__all__ = ["RasterWorkBudget", "rasterize_with_backend"]

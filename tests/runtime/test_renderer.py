@@ -1,48 +1,49 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from inspect import signature
+from pathlib import Path
+from typing import TYPE_CHECKING, cast, get_type_hints
 
 import anyio
 import pytest
 
-from entari_plugin_htmlrender.preparation import parse_html
-from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
-from entari_plugin_htmlrender.rendering import (
-    CapabilityUnavailable,
-    OperationAdmissionGate,
-    ProviderExecutionError,
-    RasterizeHtmlRequest,
-    RenderCommand,
-    RenderedImage,
-    RenderHtmlRequest,
-    RenderMarkdownRequest,
-    RenderTemplateHtmlRequest,
-    RenderTemplateRequest,
-    RenderTextRequest,
-    ResourcePolicy,
+from entari_plugin_htmlrender.errors import (
+    InvalidRenderInputError,
+    RenderTimeoutError,
+    UnsupportedOperationError,
 )
-from entari_plugin_htmlrender.resources.config import ResourceResolveMode
-from entari_plugin_htmlrender.runtime import (
-    HtmlRenderer,
-    HtmlRendererBindings,
-    RasterizeHtml,
-    RenderHtml,
-    RenderMarkdown,
-    RenderTemplate,
-    RenderTemplateHtml,
-    RenderText,
+from entari_plugin_htmlrender.preparation import (
+    PreparedHtml,
+    RasterOptions,
+    TemplateRef,
+    parse_html,
+)
+from entari_plugin_htmlrender.rendering import OperationAdmissionGate, RenderedImage
+from entari_plugin_htmlrender.rendering.contracts import HtmlRenderer, TemplateRenderer
+from entari_plugin_htmlrender.rendering.models import RenderOperation
+from entari_plugin_htmlrender.resources.config import (
+    ResourceMaterializationPolicy,
+)
+from entari_plugin_htmlrender.resources.models import FileResourceRef, ResourceRef
+from entari_plugin_htmlrender.runtime.bindings import _HtmlRendererBindings
+from entari_plugin_htmlrender.runtime.renderer import (
+    _DefaultHtmlRenderer,
+    _DefaultTemplateRenderer,
+)
+from entari_plugin_htmlrender.runtime.use_cases import (
+    _RasterizeHtml,
+    _RasterizeMarkdown,
+    _RasterizePrepared,
+    _RasterizeTemplate,
+    _RasterizeText,
+    _RenderTemplate,
 )
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-    from pathlib import Path
+    from collections.abc import Mapping
 
-    from entari_plugin_htmlrender.resources.templating import (
-        ExtensionSpec,
-        FilterCallable,
-    )
 
 PREPARED = parse_html("<p>prepared</p>")
 
@@ -50,9 +51,9 @@ PREPARED = parse_html("<p>prepared</p>")
 @dataclass
 class _ExecutorCall:
     prepared: PreparedHtml
-    options: RasterOptions
-    resource_policy: ResourcePolicy | None
-    timeout_seconds: float | None
+    raster: RasterOptions
+    operation: RenderOperation
+    materialization_policy: ResourceMaterializationPolicy | None
 
 
 @dataclass
@@ -61,17 +62,23 @@ class _FakeExecutor:
         default_factory=lambda: rendered_image("png", width=1600, height=713)
     )
     calls: list[_ExecutorCall] = field(default_factory=list)
+    delay: float = 0
+    failure: BaseException | None = None
 
     async def execute(
         self,
         prepared: PreparedHtml,
         options: RasterOptions,
         *,
-        resource_policy: ResourcePolicy | None = None,
-        timeout_seconds: float | None = None,
+        operation: RenderOperation,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> RenderedImage:
+        if self.delay:
+            await anyio.sleep(self.delay)
+        if self.failure is not None:
+            raise self.failure
         self.calls.append(
-            _ExecutorCall(prepared, options, resource_policy, timeout_seconds)
+            _ExecutorCall(prepared, options, operation, materialization_policy)
         )
         return self.result
 
@@ -80,8 +87,12 @@ class _FakeExecutor:
 class _FakePreparer:
     prepared: PreparedHtml = PREPARED
     html_content: str = "<p>template html</p>"
-    prepare_calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
-    prepare_delay: float = 0
+    calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
+    delay: float = 0
+
+    async def _wait(self) -> None:
+        if self.delay:
+            await anyio.sleep(self.delay)
 
     async def prepare_html(
         self,
@@ -89,36 +100,35 @@ class _FakePreparer:
         *,
         base_url: str | None = None,
     ) -> PreparedHtml:
-        if self.prepare_delay:
-            await anyio.sleep(self.prepare_delay)
-        self.prepare_calls.append(("html", {"html": html, "base_url": base_url}))
+        await self._wait()
+        self.calls.append(("html", {"html": html, "base_url": base_url}))
         return self.prepared
 
     async def prepare_text(
         self,
         text: str,
         *,
-        css_path: str = "",
+        stylesheet: ResourceRef | None = None,
     ) -> PreparedHtml:
-        self.prepare_calls.append(("text", {"text": text, "css_path": css_path}))
+        await self._wait()
+        self.calls.append(("text", {"text": text, "stylesheet": stylesheet}))
         return self.prepared
 
     async def prepare_markdown(
         self,
-        markdown_text: str = "",
+        source: str | ResourceRef,
         *,
-        markdown_path: str = "",
-        css_path: str = "",
-        resource_mode: ResourceResolveMode | None = None,
+        stylesheet: ResourceRef | None = None,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml:
-        self.prepare_calls.append(
+        await self._wait()
+        self.calls.append(
             (
                 "markdown",
                 {
-                    "markdown_text": markdown_text,
-                    "markdown_path": markdown_path,
-                    "css_path": css_path,
-                    "resource_mode": resource_mode,
+                    "source": source,
+                    "stylesheet": stylesheet,
+                    "materialization_policy": materialization_policy,
                 },
             )
         )
@@ -126,263 +136,289 @@ class _FakePreparer:
 
     async def prepare_template(
         self,
-        template_path: str | Path,
-        template_name: str,
+        template: TemplateRef,
         variables: Mapping[str, object],
         *,
-        filters: Mapping[str, FilterCallable] | None = None,
-        extensions: Sequence[ExtensionSpec] = (),
-        resource_mode: ResourceResolveMode | None = None,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml:
-        self.prepare_calls.append(
+        await self._wait()
+        self.calls.append(
             (
                 "template",
                 {
-                    "template_path": template_path,
-                    "template_name": template_name,
+                    "template": template,
                     "variables": dict(variables),
-                    "filters": filters,
-                    "extensions": tuple(extensions),
-                    "resource_mode": resource_mode,
+                    "materialization_policy": materialization_policy,
                 },
             )
         )
         return self.prepared
 
-    async def render_template_html(
+    async def render_template(
         self,
-        template_path: str | Path,
-        template_name: str,
+        template: TemplateRef,
         variables: Mapping[str, object],
-        *,
-        filters: Mapping[str, FilterCallable] | None = None,
-        extensions: Sequence[ExtensionSpec] = (),
     ) -> str:
-        self.prepare_calls.append(
+        await self._wait()
+        self.calls.append(
             (
                 "template_html",
-                {
-                    "template_path": template_path,
-                    "template_name": template_name,
-                    "variables": dict(variables),
-                    "filters": filters,
-                    "extensions": tuple(extensions),
-                },
+                {"template": template, "variables": dict(variables)},
             )
         )
         return self.html_content
 
 
-def _full_renderer(
+def _full_renderers(
     result: RenderedImage | None = None,
-) -> tuple[HtmlRenderer, _FakePreparer, _FakeExecutor]:
+    *,
+    provider_id: str = "test-provider",
+) -> tuple[
+    _DefaultHtmlRenderer,
+    _DefaultTemplateRenderer,
+    _FakePreparer,
+    _FakeExecutor,
+]:
     preparer = _FakePreparer()
     executor = _FakeExecutor() if result is None else _FakeExecutor(result=result)
-    bindings = HtmlRendererBindings(
-        render_html=RenderHtml(preparer=preparer, executor=executor),
-        render_text=RenderText(preparer=preparer, executor=executor),
-        render_markdown=RenderMarkdown(preparer=preparer, executor=executor),
-        render_template=RenderTemplate(preparer=preparer, executor=executor),
-        render_template_html=RenderTemplateHtml(preparer=preparer),
-        rasterize_html=RasterizeHtml(executor=executor),
-    )
-    return (
-        HtmlRenderer(
-            bindings,
-            operation_admission=OperationAdmissionGate(),
+    gate = OperationAdmissionGate()
+    renderer = _DefaultHtmlRenderer(
+        _HtmlRendererBindings(
+            rasterize_html=_RasterizeHtml(
+                preparer=preparer,
+                executor=executor,
+            ),
+            rasterize_text=_RasterizeText(
+                preparer=preparer,
+                executor=executor,
+            ),
+            rasterize_markdown=_RasterizeMarkdown(
+                preparer=preparer,
+                executor=executor,
+            ),
+            rasterize_template=_RasterizeTemplate(
+                preparer=preparer,
+                executor=executor,
+            ),
+            rasterize_prepared=_RasterizePrepared(executor=executor),
         ),
-        preparer,
-        executor,
+        operation_admission=gate,
+        provider_id=provider_id,
     )
+    templates = _DefaultTemplateRenderer(
+        _RenderTemplate(preparer=preparer),
+        operation_admission=gate,
+        provider_id=provider_id,
+    )
+    return renderer, templates, preparer, executor
 
 
-async def test_render_html_returns_typed_artifact() -> None:
+async def test_caller_first_raster_operations_return_typed_artifacts(
+    tmp_path: Path,
+) -> None:
     expected = rendered_image("jpeg", width=1280, height=960)
-    renderer, preparer, executor = _full_renderer(expected)
-    request = RenderHtmlRequest(
-        html="<p>hi</p>",
-        raster=RasterOptions(width=640, height=480, format="jpeg", quality=80),
-        base_url="https://example.invalid/",
-        resource_policy=ResourcePolicy.STRICT,
-        timeout_seconds=2.5,
+    renderer, _, preparer, executor = _full_renderers(expected)
+    stylesheet = FileResourceRef(tmp_path / "theme.css")
+    markdown = FileResourceRef(tmp_path / "readme.md")
+    template = TemplateRef(tmp_path, "card.html")
+    raster = RasterOptions(
+        width=640,
+        height=480,
+        format="jpeg",
+        quality=80,
     )
 
-    artifact = await renderer.render_html(request)
-
-    assert artifact is expected
-    assert artifact.format == "jpeg"
-    assert artifact.width == 1280
-    assert artifact.height == 960
-    assert preparer.prepare_calls == [
-        ("html", {"html": "<p>hi</p>", "base_url": "https://example.invalid/"})
-    ]
-    call = executor.calls[0]
-    assert call.prepared is PREPARED
-    assert call.options.width == 640
-    assert call.resource_policy is ResourcePolicy.STRICT
-    assert call.timeout_seconds == 2.5
-
-
-async def test_render_timeout_includes_preparation() -> None:
-    renderer, preparer, executor = _full_renderer()
-    preparer.prepare_delay = 0.1
-
-    with pytest.raises(ProviderExecutionError, match="timed out"):
-        await renderer.render_html(
-            RenderHtmlRequest(html="<p>slow</p>", timeout_seconds=0.01)
-        )
-
-    assert executor.calls == []
-
-
-async def test_render_text_flows_through_executor() -> None:
-    renderer, preparer, executor = _full_renderer()
-
-    artifact = await renderer.render_text(
-        RenderTextRequest(
-            text="hello",
-            css_path="style.css",
-            resource_policy=ResourcePolicy.STRICT,
-        )
-    )
-
-    assert artifact.format == "png"
-    assert artifact.width == 1600
-    assert artifact.height == 713
-    assert preparer.prepare_calls == [
-        ("text", {"text": "hello", "css_path": "style.css"})
-    ]
-    assert executor.calls[0].resource_policy is ResourcePolicy.STRICT
-
-
-@pytest.mark.parametrize(
-    ("policy", "expected_mode"),
-    [
-        (None, None),
-        (ResourcePolicy.OFF, ResourceResolveMode.OFF),
-        (ResourcePolicy.AUTO, ResourceResolveMode.AUTO),
-        (ResourcePolicy.STRICT, ResourceResolveMode.STRICT),
-    ],
-)
-async def test_render_markdown_maps_policy_to_preparation_mode(
-    policy: ResourcePolicy | None,
-    expected_mode: ResourceResolveMode | None,
-) -> None:
-    renderer, preparer, executor = _full_renderer()
-
-    await renderer.render_markdown(
-        RenderMarkdownRequest(markdown="# title", resource_policy=policy)
-    )
-
-    kind, arguments = preparer.prepare_calls[0]
-    assert kind == "markdown"
-    assert arguments["resource_mode"] == expected_mode
-    assert executor.calls[0].resource_policy is policy
-
-
-@pytest.mark.parametrize(
-    ("policy", "expected_mode"),
-    [
-        (None, None),
-        (ResourcePolicy.OFF, ResourceResolveMode.OFF),
-        (ResourcePolicy.AUTO, ResourceResolveMode.AUTO),
-        (ResourcePolicy.STRICT, ResourceResolveMode.STRICT),
-    ],
-)
-async def test_render_template_maps_policy_to_preparation_mode(
-    policy: ResourcePolicy | None,
-    expected_mode: ResourceResolveMode | None,
-) -> None:
-    renderer, preparer, executor = _full_renderer()
-
-    await renderer.render_template(
-        RenderTemplateRequest(
-            template_path="templates",
-            template_name="page.html",
-            variables={"title": "hi"},
-            resource_policy=policy,
-        )
-    )
-
-    kind, arguments = preparer.prepare_calls[0]
-    assert kind == "template"
-    assert arguments["resource_mode"] is expected_mode
-    assert executor.calls[0].resource_policy is policy
-
-
-async def test_render_template_and_template_html() -> None:
-    renderer, preparer, executor = _full_renderer()
-
-    image = await renderer.render_template(
-        RenderTemplateRequest(
-            template_path="templates",
-            template_name="page.html",
-            variables={"title": "hi"},
-        )
-    )
-    html = await renderer.render_template_html(
-        RenderTemplateHtmlRequest(
-            template_path="templates",
-            template_name="page.html",
-            variables={"title": "hi"},
-        )
-    )
-
-    assert image is executor.result
-    assert str(html) == "<p>template html</p>"
-    kinds = [kind for kind, _ in preparer.prepare_calls]
-    assert kinds == ["template", "template_html"]
-
-
-async def test_rasterize_html_passes_prepared_through() -> None:
-    renderer, _, executor = _full_renderer()
-    prepared = parse_html("<p>direct</p>")
-
-    artifact = await renderer.rasterize_html(
-        RasterizeHtmlRequest(prepared=prepared, options=RasterOptions(width=320))
-    )
-
-    assert artifact.width == 1600
-    assert artifact.height == 713
-    assert executor.calls[0].prepared is prepared
-
-
-async def test_missing_binding_raises_capability_unavailable() -> None:
-    renderer = HtmlRenderer(
-        HtmlRendererBindings(),
-        operation_admission=OperationAdmissionGate(),
-    )
-
-    assert renderer.supported_commands == frozenset()
-    assert not renderer.supports(RenderCommand.HTML)
-    with pytest.raises(CapabilityUnavailable) as exc_info:
-        await renderer.render_html(RenderHtmlRequest(html="<p>hi</p>"))
-    assert exc_info.value.capability == "render_html"
-
-
-def test_supports_rejects_untyped_command_names() -> None:
-    renderer = HtmlRenderer(
-        HtmlRendererBindings(),
-        operation_admission=OperationAdmissionGate(),
-    )
-
-    with pytest.raises(TypeError, match="RenderCommand"):
-        renderer.supports(cast("RenderCommand", "render_html"))
-
-
-def test_capabilities_derived_from_bindings() -> None:
-    preparer = _FakePreparer()
-    executor = _FakeExecutor()
-    renderer = HtmlRenderer(
-        HtmlRendererBindings(
-            render_text=RenderText(preparer=preparer, executor=executor),
-            rasterize_html=RasterizeHtml(executor=executor),
+    artifacts = [
+        await renderer.rasterize_html(
+            "<p>hi</p>",
+            raster=raster,
+            base_url="https://example.invalid/",
+            materialization_policy=ResourceMaterializationPolicy.STRICT,
         ),
+        await renderer.rasterize_text(
+            "hello",
+            stylesheet=stylesheet,
+            raster=raster,
+        ),
+        await renderer.rasterize_markdown(
+            markdown,
+            stylesheet=stylesheet,
+            raster=raster,
+        ),
+        await renderer.rasterize_template(
+            template,
+            {"title": "hello"},
+            raster=raster,
+        ),
+        await renderer.rasterize_prepared(PREPARED, raster=raster),
+    ]
+
+    assert artifacts == [expected] * 5
+    assert [kind for kind, _ in preparer.calls] == [
+        "html",
+        "text",
+        "markdown",
+        "template",
+    ]
+    assert preparer.calls[2][1]["source"] is markdown
+    assert preparer.calls[2][1]["stylesheet"] is stylesheet
+    assert preparer.calls[3][1]["template"] == template
+    assert executor.calls[0].materialization_policy is (
+        ResourceMaterializationPolicy.STRICT
+    )
+    assert all(call.raster is raster for call in executor.calls)
+    assert [call.operation for call in executor.calls] == [
+        RenderOperation.HTML_TO_IMAGE,
+        RenderOperation.TEXT_TO_IMAGE,
+        RenderOperation.MARKDOWN_TO_IMAGE,
+        RenderOperation.TEMPLATE_TO_IMAGE,
+        RenderOperation.PREPARED_HTML_TO_IMAGE,
+    ]
+
+
+async def test_markdown_string_is_always_inline_even_when_empty() -> None:
+    renderer, _, preparer, _ = _full_renderers()
+
+    await renderer.rasterize_markdown("")
+    await renderer.rasterize_markdown("notes/readme.md")
+
+    assert [call[1]["source"] for call in preparer.calls] == [
+        "",
+        "notes/readme.md",
+    ]
+
+
+async def test_template_renderer_returns_rendered_html() -> None:
+    _, templates, preparer, _ = _full_renderers()
+    template = TemplateRef(Path("templates"), "card.html")
+
+    artifact = await templates.render(template, {"name": "Akashina"})
+
+    assert str(artifact) == "<p>template html</p>"
+    assert preparer.calls == [
+        (
+            "template_html",
+            {"template": template, "variables": {"name": "Akashina"}},
+        )
+    ]
+
+
+@pytest.mark.parametrize("phase", ["preparation", "execution"])
+async def test_total_deadline_has_one_public_error_taxonomy(phase: str) -> None:
+    renderer, _, preparer, executor = _full_renderers()
+    if phase == "preparation":
+        preparer.delay = 0.1
+    else:
+        executor.delay = 0.1
+
+    with pytest.raises(RenderTimeoutError) as exc_info:
+        await renderer.rasterize_html(
+            "<p>slow</p>",
+            timeout_seconds=0.01,
+        )
+
+    assert exc_info.value.operation == RenderOperation.HTML_TO_IMAGE.value
+    assert exc_info.value.timeout_seconds == 0.01
+
+
+async def test_inner_timeout_is_not_misclassified_as_public_deadline() -> None:
+    renderer, _, _, executor = _full_renderers()
+    executor.failure = TimeoutError("provider timeout")
+
+    with pytest.raises(TimeoutError, match="provider timeout"):
+        await renderer.rasterize_html("<p>failure</p>", timeout_seconds=1)
+
+
+async def test_missing_binding_preserves_provider_identity() -> None:
+    renderer = _DefaultHtmlRenderer(
+        _HtmlRendererBindings(),
         operation_admission=OperationAdmissionGate(),
+        provider_id="minimal-provider",
     )
 
-    assert renderer.supported_commands == frozenset(
-        {RenderCommand.TEXT, RenderCommand.RASTERIZE_HTML}
+    with pytest.raises(UnsupportedOperationError) as exc_info:
+        await renderer.rasterize_markdown("# unavailable")
+
+    assert exc_info.value.operation == RenderOperation.MARKDOWN_TO_IMAGE.value
+    assert exc_info.value.provider_id == "minimal-provider"
+
+
+async def test_invalid_caller_values_use_structured_error() -> None:
+    renderer, _, _, _ = _full_renderers()
+
+    with pytest.raises(InvalidRenderInputError) as exc_info:
+        await renderer.rasterize_html(
+            "<p>bad raster</p>",
+            raster=cast("RasterOptions", object()),
+        )
+
+    assert exc_info.value.operation == RenderOperation.HTML_TO_IMAGE.value
+    assert exc_info.value.field == "raster"
+
+
+@pytest.mark.parametrize("timeout_value", [True, "1", object()])
+async def test_timeout_rejects_invalid_runtime_types(timeout_value: object) -> None:
+    renderer, _, _, _ = _full_renderers()
+
+    with pytest.raises(InvalidRenderInputError) as exc_info:
+        await renderer.rasterize_html(
+            "<p>bad timeout</p>",
+            timeout_seconds=cast("float", timeout_value),
+        )
+
+    assert exc_info.value.operation == RenderOperation.HTML_TO_IMAGE.value
+    assert exc_info.value.field == "timeout_seconds"
+
+
+def test_default_implementations_satisfy_public_protocols() -> None:
+    renderer, templates, _, _ = _full_renderers()
+
+    assert isinstance(renderer, HtmlRenderer)
+    assert isinstance(templates, TemplateRenderer)
+    assert renderer.supported_operations == frozenset(
+        {
+            RenderOperation.HTML_TO_IMAGE,
+            RenderOperation.TEXT_TO_IMAGE,
+            RenderOperation.MARKDOWN_TO_IMAGE,
+            RenderOperation.TEMPLATE_TO_IMAGE,
+            RenderOperation.PREPARED_HTML_TO_IMAGE,
+        }
     )
-    assert renderer.supports(RenderCommand.RASTERIZE_HTML)
-    assert not renderer.supports(RenderCommand.MARKDOWN)
+    assert renderer.supports(RenderOperation.MARKDOWN_TO_IMAGE)
+    assert not renderer.supports(RenderOperation.TEMPLATE_TO_HTML)
+
+
+def test_public_contract_annotations_are_runtime_resolvable() -> None:
+    for method_name in (
+        "rasterize_html",
+        "rasterize_text",
+        "rasterize_markdown",
+        "rasterize_template",
+        "rasterize_prepared",
+    ):
+        hints = get_type_hints(getattr(HtmlRenderer, method_name))
+        assert hints["return"] is RenderedImage
+
+    template_hints = get_type_hints(TemplateRenderer.render)
+    assert template_hints["template"] is TemplateRef
+
+
+def test_public_contract_has_no_request_or_jinja_extension_surface() -> None:
+    for method_name in (
+        "rasterize_html",
+        "rasterize_text",
+        "rasterize_markdown",
+        "rasterize_template",
+        "rasterize_prepared",
+    ):
+        parameters = signature(getattr(HtmlRenderer, method_name)).parameters
+        assert "request" not in parameters
+        assert "filters" not in parameters
+        assert "extensions" not in parameters
+        assert "width" not in parameters
+        assert "height" not in parameters
+        assert "raster" in parameters
+
+    template_parameters = signature(TemplateRenderer.render).parameters
+    assert "filters" not in template_parameters
+    assert "extensions" not in template_parameters

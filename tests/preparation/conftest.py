@@ -31,11 +31,11 @@ def resources(local_access: ConfiguredLocalAccessPolicy) -> ResourceService:
     from entari_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
         AnyioWorkerExecutor,
         RemoteTransportExecutor,
-        build_resource_reader,
+        build_resource_fetcher,
     )
     from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
+        LocalResourceStrategy,
         ResourceCacheSettings,
-        ResourceStrategy,
     )
     from entari_plugin_htmlrender.resources.observation import (  # noqa: PLC0415
         NoopCacheObserver,
@@ -46,16 +46,17 @@ def resources(local_access: ConfiguredLocalAccessPolicy) -> ResourceService:
 
     observer = NoopCacheObserver()
     worker = AnyioWorkerExecutor()
-    reader = build_resource_reader(
+    fetcher = build_resource_fetcher(
         ResourceCacheSettings(),
         observer,
         worker,
+        local_access=local_access,
         remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
     )
     return ResourceService(
-        reader=reader,
+        fetcher=fetcher,
         local_access=local_access,
-        strategy=ResourceStrategy(),
+        strategy=LocalResourceStrategy(),
     )
 
 

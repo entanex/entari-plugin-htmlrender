@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 import jinja2
 
-from entari_plugin_htmlrender.errors import PreparationError, RenderingError
+from entari_plugin_htmlrender.errors import (
+    HtmlRenderError,
+    InvalidRenderInputError,
+    ResourceNotFoundError,
+)
 from entari_plugin_htmlrender.resources.source import (
     FilesystemResourceSource,
     PackageResourceSource,
@@ -218,11 +222,20 @@ class JinjaTemplateCompiler:
                 )
             )
             return await template.render_async(**dict(variables))
-        except RenderingError:
+        except HtmlRenderError:
             raise
+        except jinja2.TemplateNotFound as error:
+            raise ResourceNotFoundError(
+                f"Template {template_name!r} was not found.",
+                reference=template_name,
+                operation="template.render",
+                source=error,
+            ) from error
         except Exception as error:
-            raise PreparationError(
-                "Template rendering failed.",
+            raise InvalidRenderInputError(
+                "Template input could not be rendered.",
+                operation="template.render",
+                field="template",
                 source=error,
             ) from error
 

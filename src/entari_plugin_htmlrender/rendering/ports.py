@@ -13,13 +13,18 @@ from entari_plugin_htmlrender.preparation.models import (  # noqa: TC001
     PreparedHtml,
     RasterOptions,
 )
+from entari_plugin_htmlrender.rendering.models import (  # noqa: TC001
+    RenderOperation,
+)
+from entari_plugin_htmlrender.resources.config import (  # noqa: TC001
+    ResourceMaterializationPolicy,
+)
 from entari_plugin_htmlrender.resources.observation import (
     CacheObserver as CacheObserver,
 )
 
 # Public protocol annotations must remain resolvable through get_type_hints().
 from .artifacts import RenderedImage  # noqa: TC001
-from .requests import ResourcePolicy  # noqa: TC001
 
 
 class PreparedHtmlExecutor(Protocol):
@@ -30,8 +35,8 @@ class PreparedHtmlExecutor(Protocol):
         prepared: PreparedHtml,
         options: RasterOptions,
         *,
-        resource_policy: ResourcePolicy | None = None,
-        timeout_seconds: float | None = None,
+        operation: RenderOperation,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> RenderedImage: ...
 
 
@@ -54,9 +59,12 @@ class OperationAdmission(Protocol):
     its ``aclose`` stops admission and drains every such lease before return.
     """
 
-    def ensure_accepting(self) -> None: ...
+    def ensure_accepting(self, operation: str | None = None) -> None: ...
 
-    def operation(self) -> AbstractAsyncContextManager[None]: ...
+    def operation(
+        self,
+        operation: str | None = None,
+    ) -> AbstractAsyncContextManager[None]: ...
 
 
 class RuntimeLifecycle(Protocol):
@@ -64,8 +72,9 @@ class RuntimeLifecycle(Protocol):
 
     Contract for provider adapters:
 
-    - ``compose`` (upstream of this port) performs no I/O and acquires no
-      runtime resources; only ``startup`` may.
+    - ``compose`` and availability checks perform no I/O and acquire no
+      runtime resources. ``startup`` or the first admitted provider operation
+      may acquire them; startup policy ``off`` therefore means lazy startup.
     - ``startup`` is failure-atomic and retryable: on error the provider is
       left equivalent to not started, and a later ``startup`` may succeed as
       long as any rollback fully succeeded. If rollback itself fails the

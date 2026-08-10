@@ -545,7 +545,8 @@ async def test_font_file_cache_defaults_and_per_font_override(
         ]
     )
     resources = mocker.Mock()
-    resources.read_bytes = mocker.AsyncMock(return_value=b"font")
+    resources.authorize_local.side_effect = lambda path: path
+    resources.fetch_bytes = mocker.AsyncMock(return_value=b"font")
 
     payloads = await takumi_runtime._load_font_payloads(
         config.fonts,
@@ -555,7 +556,7 @@ async def test_font_file_cache_defaults_and_per_font_override(
 
     assert payloads == (b"font", b"font")
     refresh_values = {
-        call.kwargs["refresh"] for call in resources.read_bytes.await_args_list
+        call.kwargs["refresh"] for call in resources.fetch_bytes.await_args_list
     }
     assert refresh_values == {True, False}
 
@@ -571,7 +572,8 @@ async def test_dynamic_fonts_are_idempotent_and_changed_content_requires_rebuild
     state = _state(renderer)
     font_path = tmp_path / "font.ttf"
     resources = mocker.Mock()
-    resources.read_bytes = mocker.AsyncMock(side_effect=[b"same", b"same", b"changed"])
+    resources.authorize_local.side_effect = lambda path: path
+    resources.fetch_bytes = mocker.AsyncMock(side_effect=[b"same", b"same", b"changed"])
     state.resources = resources
 
     first = await state.register_font_file(
@@ -594,7 +596,7 @@ async def test_dynamic_fonts_are_idempotent_and_changed_content_requires_rebuild
             cache_policy=FileCachePolicy.REVALIDATE,
         )
     assert len(renderer.font_registrations) == 1
-    assert resources.read_bytes.await_count == 3
+    assert resources.fetch_bytes.await_count == 3
 
 
 @pytest.mark.anyio

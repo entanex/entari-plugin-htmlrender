@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import platform
-import shutil
 import sys
 from typing import TYPE_CHECKING, TypedDict
 
@@ -81,20 +80,6 @@ def get_playwright_storage_path(config: PlaywrightConfig) -> Path:
     if configured is not None:
         return Path(configured).expanduser()
     return _default_playwright_cache_path()
-
-
-def get_legacy_playwright_cache_path() -> Path | None:
-    """获取旧版 Playwright 缓存路径（按操作系统区分）。"""
-    system = platform.system()
-    home_dir = Path.home()
-
-    if system == "Windows":
-        return home_dir / "AppData" / "Local" / "ms-playwright"
-    if system == "Darwin":
-        return home_dir / "Library" / "Caches" / "ms-playwright"
-    if system == "Linux":
-        return home_dir / ".cache" / "ms-playwright"
-    return None
 
 
 def _browser_directory_name(name: str, revision: str) -> str:
@@ -207,15 +192,6 @@ def _runtime_state_path(config: PlaywrightConfig) -> Path:
     return get_playwright_storage_path(config).parent / _PLAYWRIGHT_RUNTIME_STATE_FILE
 
 
-def _iter_browser_cache_paths(storage_path: Path) -> list[Path]:
-    """列出所有浏览器缓存路径候选。"""
-    candidates = [storage_path]
-    legacy_cache_path = get_legacy_playwright_cache_path()
-    if legacy_cache_path is not None:
-        candidates.append(legacy_cache_path)
-    return candidates
-
-
 def _installed_browser_directories(
     base_path: Path, engine: BrowserEngine
 ) -> tuple[str, ...]:
@@ -239,34 +215,19 @@ def _browser_cache_snapshot(
     storage_path: Path,
 ) -> dict[str, object]:
     """构建浏览器缓存状态快照。"""
-    paths: list[dict[str, object]] = []
-    available = False
-    for base_path in _iter_browser_cache_paths(storage_path):
-        installed_directories = _installed_browser_directories(base_path, engine)
-        matched = tuple(
-            next(
-                (
-                    directory
-                    for directory in directory_group
-                    if directory in installed_directories
-                ),
-                "",
-            )
-            for directory_group in expected_directory_groups
+    installed_directories = _installed_browser_directories(storage_path, engine)
+    matched = tuple(
+        next(
+            (
+                directory
+                for directory in directory_group
+                if directory in installed_directories
+            ),
+            "",
         )
-        path_available = bool(expected_directory_groups) and all(matched)
-        available = available or path_available
-        paths.append(
-            {
-                "path": str(base_path),
-                "exists": base_path.exists(),
-                "available": path_available,
-                "installed_directories": list(installed_directories),
-                "matched_directories": [
-                    directory for directory in matched if directory
-                ],
-            }
-        )
+        for directory_group in expected_directory_groups
+    )
+    available = bool(expected_directory_groups) and all(matched)
 
     return {
         "available": available,
@@ -276,7 +237,17 @@ def _browser_cache_snapshot(
         "browser_versions": {
             name: metadata.get(name, {}) for name in _BROWSER_NAMES_BY_ENGINE[engine]
         },
-        "paths": paths,
+        "paths": [
+            {
+                "path": str(storage_path),
+                "exists": storage_path.exists(),
+                "available": available,
+                "installed_directories": list(installed_directories),
+                "matched_directories": [
+                    directory for directory in matched if directory
+                ],
+            }
+        ],
     }
 
 
@@ -447,15 +418,12 @@ def has_installed_browser(
         )
         return False
 
-    for base_path in _iter_browser_cache_paths(storage_path):
-        if not base_path.exists():
-            continue
-        if all(
-            any((base_path / directory).is_dir() for directory in directory_group)
-            for directory_group in expected_directory_groups
-        ):
-            return True
-    return False
+    if not storage_path.exists():
+        return False
+    return all(
+        any((storage_path / directory).is_dir() for directory in directory_group)
+        for directory_group in expected_directory_groups
+    )
 
 
 @contextmanager
@@ -484,46 +452,3 @@ def browsers_path_scope(config: PlaywrightConfig) -> Iterator[None]:
             os.environ[_BROWSERS_PATH_VAR] = original_value
         else:
             os.environ.pop(_BROWSERS_PATH_VAR, None)
-
-
-def _normalize_cache_path(path: Path) -> Path:
-    """规范化缓存路径，便于比较当前路径与 legacy 路径。"""
-    return path.expanduser().resolve()
-
-
-def reconcile_legacy_playwright_cache(
-    config: PlaywrightConfig,
-    *,
-    cleanup: bool,
-) -> None:
-    """检查旧版 Playwright 缓存目录，并按显式策略决定是否删除。"""
-    cache_path = get_legacy_playwright_cache_path()
-    if cache_path is None:
-        return
-
-    normalized_cache_path = _normalize_cache_path(cache_path)
-    normalized_storage_path = _normalize_cache_path(get_playwright_storage_path(config))
-    if normalized_cache_path == normalized_storage_path:
-        return
-
-    if normalized_cache_path.exists():
-        logger.warning(
-            "Since v0.7.0, entari-plugin-htmlrender has moved the Playwright "
-            "cache path. Executable files are now stored and managed by the "
-            "the configured provider cache under "
-            f"{normalized_storage_path}. "
-            "You can change this path via the provider option "
-            "`provider_config.storage_path`. "
-            "Legacy cache remains at "
-            f"{normalized_cache_path}. "
-            "Set `provider_config.cleanup_legacy_cache=true` to remove "
-            "it automatically during startup."
-        )
-        if not cleanup:
-            return
-        try:
-            logger.info(f"Deleting Playwright directory at {normalized_cache_path}")
-            shutil.rmtree(str(normalized_cache_path))
-            logger.info("Playwright was cleaned successfully.")
-        except Exception as e:
-            logger.error(f"Failed to delete Playwright: {e}")

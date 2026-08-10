@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 from collections import OrderedDict
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -9,21 +8,24 @@ import mimetypes
 import os
 from pathlib import Path, PurePosixPath
 import time
-from typing import TYPE_CHECKING, ParamSpec, TypeVar, final
+from typing import ParamSpec, TypeVar, final
 
 import anyio
 from anyio.to_thread import run_sync
 
-from entari_plugin_htmlrender.resources.config import RemoteAccessSettings
+from entari_plugin_htmlrender.resources.config import (
+    RemoteAccessSettings,
+    ResourceCacheSettings,
+)
 from entari_plugin_htmlrender.resources.errors import (
-    ResourceAccessDenied,
-    ResourceNotFound,
-    ResourceResolutionError,
-    ResourceSizeExceeded,
+    ResourceAccessDeniedError,
+    ResourceError,
+    ResourceFetchError,
+    ResourceNotFoundError,
+    ResourceTooLargeError,
 )
 from entari_plugin_htmlrender.resources.models import (
     FileResourceRef,
-    InlineResourceRef,
     NotModified,
     PackageResourceRef,
     RemoteResourceRef,
@@ -31,25 +33,21 @@ from entari_plugin_htmlrender.resources.models import (
     ResourceRef,
     ResourceRevision,
 )
+from entari_plugin_htmlrender.resources.observation import CacheObserver
 from entari_plugin_htmlrender.resources.path_guard import validate_local_access
+from entari_plugin_htmlrender.resources.ports import (
+    LocalAccessPolicy,
+    RemoteAccessPolicy,
+    ResourceFetcher,
+    WorkerExecutor,
+)
 
 from .remote import (
     ConfiguredRemoteAccessPolicy,
     RemoteTransportExecutor,
+    fetch_remote,
     read_bounded,
-    read_remote,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Sequence
-
-    from entari_plugin_htmlrender.resources.config import ResourceCacheSettings
-    from entari_plugin_htmlrender.resources.observation import CacheObserver
-    from entari_plugin_htmlrender.resources.ports import (
-        RemoteAccessPolicy,
-        ResourceReader,
-        WorkerExecutor,
-    )
 
 R = TypeVar("R")
 P = ParamSpec("P")
@@ -81,13 +79,19 @@ class ConfiguredLocalAccessPolicy:
                 path,
                 allowed_roots=self._allowed_roots,
                 allow_any=self._allow_any,
-                on_deny=ResourceAccessDenied,
+                on_deny=lambda message: ResourceAccessDeniedError(
+                    message,
+                    reference=path,
+                    operation="authorize",
+                ),
             )
-        except ResourceResolutionError:
+        except ResourceError:
             raise
         except (OSError, RuntimeError, ValueError) as error:
-            raise ResourceResolutionError(
+            raise ResourceAccessDeniedError(
                 "Could not normalize local resource path.",
+                reference=path,
+                operation="authorize",
                 source=error,
             ) from error
 
@@ -104,9 +108,13 @@ def _read_file(path: Path, max_resource_bytes: int) -> ResourceContent:
         with path.open("rb") as stream:
             before = os.fstat(stream.fileno())
             if max_resource_bytes > 0 and before.st_size > max_resource_bytes:
-                raise ResourceSizeExceeded(
+                raise ResourceTooLargeError(
                     f"Resource {path} exceeds the configured "
-                    f"{max_resource_bytes}-byte read limit."
+                    f"{max_resource_bytes}-byte fetch limit.",
+                    reference=FileResourceRef(path),
+                    operation="fetch",
+                    actual_size=before.st_size,
+                    maximum_size=max_resource_bytes,
                 )
             data = read_bounded(stream.read, max_resource_bytes, str(path))
             after = os.fstat(stream.fileno())
@@ -146,27 +154,29 @@ def _read_package(
 
 
 @final
-class CompositeResourceReader:
+class CompositeResourceFetcher:
     """Dispatch concrete resource refs to source-specific adapters."""
 
     def __init__(
         self,
         worker: WorkerExecutor,
         *,
+        local_access: LocalAccessPolicy,
         remote_transport: RemoteTransportExecutor,
         max_resource_bytes: int = 64 * 1024 * 1024,
         remote_access: RemoteAccessPolicy | None = None,
         remote_timeout_seconds: float = 30.0,
     ) -> None:
         if max_resource_bytes < 0:
-            raise ValueError("Resource read limit must not be negative.")
+            raise ValueError("Resource fetch limit must not be negative.")
         self._worker = worker
+        self._local_access = local_access
         self._max_resource_bytes = max_resource_bytes
         self._remote_access = remote_access or ConfiguredRemoteAccessPolicy()
         self._remote_transport = remote_transport
         self._remote_timeout_seconds = remote_timeout_seconds
 
-    async def read(
+    async def fetch(
         self,
         reference: ResourceRef,
         *,
@@ -175,9 +185,10 @@ class CompositeResourceReader:
         del refresh
         try:
             if isinstance(reference, FileResourceRef):
+                path = self._local_access.authorize(reference.path)
                 return await self._worker.run_sync(
                     _read_file,
-                    reference.path,
+                    path,
                     self._max_resource_bytes,
                 )
             if isinstance(reference, PackageResourceRef):
@@ -189,54 +200,59 @@ class CompositeResourceReader:
             if isinstance(reference, RemoteResourceRef):
                 # Remote transport owns its own bounded, cancellable executor;
                 # it must not borrow the shared completion-bound worker pool.
-                return await read_remote(
+                return await fetch_remote(
                     reference,
                     policy=self._remote_access,
                     transport=self._remote_transport,
                     max_resource_bytes=self._max_resource_bytes,
                     request_timeout_seconds=self._remote_timeout_seconds,
                 )
-            if isinstance(reference, InlineResourceRef):
-                if (
-                    self._max_resource_bytes > 0
-                    and len(reference.data) > self._max_resource_bytes
-                ):
-                    raise ResourceSizeExceeded(
-                        "Inline resource exceeds the configured "
-                        f"{self._max_resource_bytes}-byte read limit."
-                    )
-                return ResourceContent(
-                    reference.data,
-                    reference.media_type,
-                    ResourceRevision(reference.digest),
-                )
-        except ResourceResolutionError:
+        except ResourceError:
             raise
         except FileNotFoundError as error:
-            raise ResourceNotFound("Resource was not found.", source=error) from error
-        except PermissionError as error:
-            raise ResourceAccessDenied(
-                "Resource access was denied.", source=error
-            ) from error
-        except OSError as error:
-            raise ResourceResolutionError(
-                "Resource read failed.", source=error
-            ) from error
-        except Exception as error:
-            raise ResourceResolutionError(
-                f"Could not read resource {reference!r}.",
+            raise ResourceNotFoundError(
+                "Resource was not found.",
+                reference=reference,
+                operation="fetch",
                 source=error,
             ) from error
-        raise ResourceResolutionError(f"Unsupported resource reference: {reference!r}")
+        except PermissionError as error:
+            raise ResourceAccessDeniedError(
+                "Resource access was denied.",
+                reference=reference,
+                operation="fetch",
+                source=error,
+            ) from error
+        except OSError as error:
+            raise ResourceFetchError(
+                "Resource fetch failed.",
+                reference=reference,
+                operation="fetch",
+                retryable=isinstance(reference, RemoteResourceRef),
+                source=error,
+            ) from error
+        except Exception as error:
+            raise ResourceFetchError(
+                f"Could not fetch resource {reference!r}.",
+                reference=reference,
+                operation="fetch",
+                retryable=isinstance(reference, RemoteResourceRef),
+                source=error,
+            ) from error
+        raise ResourceFetchError(
+            f"Unsupported resource reference: {reference!r}",
+            reference=reference,
+            operation="fetch",
+        )
 
-    async def read_conditional(
+    async def fetch_if_changed(
         self,
         reference: ResourceRef,
         revision: ResourceRevision,
     ) -> ResourceContent | NotModified:
         if isinstance(reference, RemoteResourceRef):
             try:
-                return await read_remote(
+                return await fetch_remote(
                     reference,
                     policy=self._remote_access,
                     transport=self._remote_transport,
@@ -244,47 +260,64 @@ class CompositeResourceReader:
                     request_timeout_seconds=self._remote_timeout_seconds,
                     conditional_revision=revision,
                 )
-            except ResourceResolutionError:
+            except ResourceError:
                 raise
             except OSError as error:
-                raise ResourceResolutionError(
-                    "Conditional resource read failed.", source=error
-                ) from error
-            except Exception as error:
-                raise ResourceResolutionError(
-                    f"Could not read resource {reference!r}.",
+                raise ResourceFetchError(
+                    "Conditional resource fetch failed.",
+                    reference=reference,
+                    operation="fetch_if_changed",
+                    retryable=True,
                     source=error,
                 ) from error
-        current = await self.revision(reference)
+            except Exception as error:
+                raise ResourceFetchError(
+                    f"Could not fetch resource {reference!r}.",
+                    reference=reference,
+                    operation="fetch_if_changed",
+                    retryable=True,
+                    source=error,
+                ) from error
+        current = await self.fetch_revision(reference)
         if current is not None and current == revision:
             return NotModified(revision)
-        return await self.read(reference)
+        return await self.fetch(reference)
 
-    async def revision(self, reference: ResourceRef) -> ResourceRevision | None:
+    async def fetch_revision(self, reference: ResourceRef) -> ResourceRevision | None:
         if isinstance(reference, FileResourceRef):
             try:
-                return await self._worker.run_sync(_file_revision, reference.path)
+                path = self._local_access.authorize(reference.path)
+                return await self._worker.run_sync(_file_revision, path)
             except FileNotFoundError as error:
-                raise ResourceNotFound(
-                    "Resource was not found.", source=error
+                raise ResourceNotFoundError(
+                    "Resource was not found.",
+                    reference=reference,
+                    operation="fetch_revision",
+                    source=error,
                 ) from error
             except PermissionError as error:
-                raise ResourceAccessDenied(
-                    "Resource access was denied.", source=error
+                raise ResourceAccessDeniedError(
+                    "Resource access was denied.",
+                    reference=reference,
+                    operation="fetch_revision",
+                    source=error,
                 ) from error
             except OSError as error:
-                raise ResourceResolutionError(
-                    "Resource revision inspection failed.", source=error
+                raise ResourceFetchError(
+                    "Resource revision inspection failed.",
+                    reference=reference,
+                    operation="fetch_revision",
+                    source=error,
                 ) from error
             except Exception as error:
-                raise ResourceResolutionError(
+                raise ResourceFetchError(
                     f"Could not inspect resource {reference!r}.",
+                    reference=reference,
+                    operation="fetch_revision",
                     source=error,
                 ) from error
         if isinstance(reference, PackageResourceRef):
             return ResourceRevision(f"package:{reference.package}:{reference.name}")
-        if isinstance(reference, InlineResourceRef):
-            return ResourceRevision(reference.digest)
         return None
 
     async def invalidate(self, reference: ResourceRef) -> None:
@@ -316,12 +349,12 @@ class _LoadSlot:
 
 
 @final
-class CachingResourceReader:
+class CachingResourceFetcher:
     """Bounded, byte-weighted LRU decorator with source revalidation."""
 
     def __init__(
         self,
-        inner: ResourceReader,
+        inner: ResourceFetcher,
         *,
         settings: ResourceCacheSettings,
         observer: CacheObserver,
@@ -386,13 +419,13 @@ class CachingResourceReader:
                     return _LoadSlot(inflight, entry, owner=True)
             await reset.wait()
 
-    async def read(
+    async def fetch(
         self,
         reference: ResourceRef,
         *,
         refresh: bool = False,
     ) -> ResourceContent:
-        key = reference.cache_key
+        key = reference.identity
         while True:
             acquired = await self._acquire(key, refresh=refresh)
             if isinstance(acquired, ResourceContent):
@@ -417,16 +450,16 @@ class CachingResourceReader:
                     # The reader maps the held revision to a source-native
                     # conditional read (HTTP validators, stat compare); a
                     # NotModified outcome reuses the cached bytes.
-                    outcome = await self._inner.read_conditional(reference, known)
+                    outcome = await self._inner.fetch_if_changed(reference, known)
                     if isinstance(outcome, NotModified):
                         content = stale.content
                         cache_hit = True
                     else:
                         content = outcome
                 else:
-                    content = await self._inner.read(reference)
+                    content = await self._inner.fetch(reference)
             else:
-                content = await self._inner.read(reference, refresh=refresh)
+                content = await self._inner.fetch(reference, refresh=refresh)
 
             with anyio.CancelScope(shield=True):
                 async with self._lock:
@@ -488,18 +521,18 @@ class CachingResourceReader:
             evictions += 1
         return evictions
 
-    async def read_conditional(
+    async def fetch_if_changed(
         self,
         reference: ResourceRef,
         revision: ResourceRevision,
     ) -> ResourceContent | NotModified:
-        return await self._inner.read_conditional(reference, revision)
+        return await self._inner.fetch_if_changed(reference, revision)
 
-    async def revision(self, reference: ResourceRef) -> ResourceRevision | None:
-        return await self._inner.revision(reference)
+    async def fetch_revision(self, reference: ResourceRef) -> ResourceRevision | None:
+        return await self._inner.fetch_revision(reference)
 
     async def invalidate(self, reference: ResourceRef) -> None:
-        key = reference.cache_key
+        key = reference.identity
         async with self._reset_lock:
             reset = anyio.Event()
             async with self._lock:
@@ -537,34 +570,37 @@ class CachingResourceReader:
                         reset.set()
 
 
-def build_resource_reader(
+def build_resource_fetcher(
     settings: ResourceCacheSettings,
     observer: CacheObserver,
     worker: WorkerExecutor,
     *,
+    local_access: LocalAccessPolicy,
     remote_transport: RemoteTransportExecutor,
     remote_access: RemoteAccessPolicy | None = None,
     remote_timeout_seconds: float = 30.0,
-) -> CachingResourceReader:
-    direct = CompositeResourceReader(
+) -> CachingResourceFetcher:
+    direct = CompositeResourceFetcher(
         worker,
+        local_access=local_access,
         max_resource_bytes=settings.max_resource_bytes,
         remote_access=remote_access,
         remote_transport=remote_transport,
         remote_timeout_seconds=remote_timeout_seconds,
     )
-    return CachingResourceReader(direct, settings=settings, observer=observer)
+    return CachingResourceFetcher(direct, settings=settings, observer=observer)
 
 
 @asynccontextmanager
-async def open_resource_reader(
+async def open_resource_fetcher(
     settings: ResourceCacheSettings,
     observer: CacheObserver,
     worker: WorkerExecutor,
     *,
+    local_access: LocalAccessPolicy,
     remote_access: RemoteAccessSettings | None = None,
-) -> AsyncIterator[CachingResourceReader]:
-    """Build a reader that owns its remote transport for standalone use.
+) -> AsyncIterator[CachingResourceFetcher]:
+    """Build a fetcher that owns its remote transport for standalone use.
 
     The composition root creates and closes the transport through the
     runtime lifecycle; callers outside that lifecycle use this context
@@ -575,10 +611,11 @@ async def open_resource_reader(
         max_concurrent_fetches=remote_settings.max_concurrent_fetches
     )
     try:
-        yield build_resource_reader(
+        yield build_resource_fetcher(
             settings,
             observer,
             worker,
+            local_access=local_access,
             remote_transport=transport,
             remote_access=ConfiguredRemoteAccessPolicy(remote_settings),
             remote_timeout_seconds=remote_settings.request_timeout_seconds,
@@ -590,10 +627,10 @@ async def open_resource_reader(
 
 __all__ = [
     "AnyioWorkerExecutor",
-    "CachingResourceReader",
-    "CompositeResourceReader",
+    "CachingResourceFetcher",
+    "CompositeResourceFetcher",
     "ConfiguredLocalAccessPolicy",
     "RemoteTransportExecutor",
-    "build_resource_reader",
-    "open_resource_reader",
+    "build_resource_fetcher",
+    "open_resource_fetcher",
 ]

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from entari_plugin_htmlrender.preparation import PreparedHtml, RasterOptions
-    from entari_plugin_htmlrender.resources.config import ResourceResolveMode
+    from entari_plugin_htmlrender.resources.config import ResourceMaterializationPolicy
 
     from .types import StaticImageFormat, TakumiImageInput
 
@@ -52,7 +52,7 @@ async def render_prepared_html(
     lang: str | None = None,
     font_families: Sequence[str] | None = None,
     keyframes: object | None = None,
-    resolve_mode: ResourceResolveMode | None = None,
+    resolve_mode: ResourceMaterializationPolicy | None = None,
 ) -> bytes:
     """Execute a backend-neutral prepared document with Takumi."""
     ratio = validate_device_pixel_ratio(device_pixel_ratio)
@@ -101,7 +101,7 @@ async def rasterize_html(
     prepared: PreparedHtml,
     options: RasterOptions,
     *,
-    resolve_mode: ResourceResolveMode | None = None,
+    resolve_mode: ResourceMaterializationPolicy | None = None,
 ) -> bytes:
     return await render_prepared_html(
         state,

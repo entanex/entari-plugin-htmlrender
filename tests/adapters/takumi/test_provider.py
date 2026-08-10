@@ -25,23 +25,28 @@ from entari_plugin_htmlrender.adapters.takumi.provider import (
     TakumiProvider,
 )
 from entari_plugin_htmlrender.capabilities import TAKUMI
+from entari_plugin_htmlrender.errors import (
+    ProviderConfigurationError,
+    ProviderExecutionError,
+    ProviderLifecycleError,
+    UnsupportedDocumentFeatureError,
+)
 from entari_plugin_htmlrender.preparation import parse_html
 from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
 from entari_plugin_htmlrender.providers.sdk import (
-    ProviderAvailability,
+    LocalResourceStrategy,
+    ProviderAvailable,
     ProviderDependencies,
+    ProviderUnavailable,
 )
 from entari_plugin_htmlrender.rendering import (
     OperationAdmissionGate,
-    ProviderExecutionError,
-    ProviderLifecycleError,
     RenderedImage,
-    ResourcePolicy,
-    UnsupportedRequirement,
 )
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 from entari_plugin_htmlrender.rendering.observers import NoopCacheObserver
 from entari_plugin_htmlrender.resources.config import (
-    ResourceResolveMode,
+    ResourceMaterializationPolicy,
     ResourceStrategy,
 )
 from tests.image_fixtures import encoded_image
@@ -49,7 +54,7 @@ from tests.image_fixtures import encoded_image
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
-    from entari_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
     from tests.adapters.conftest import RecordingOperationObserver
 
 PREPARED = parse_html("<p>prepared</p>")
@@ -72,7 +77,14 @@ def _install_runtime_fakes(
     render_result: bytes | None = None,
 ) -> tuple[
     list[_FakeState],
-    list[tuple[_FakeState, PreparedHtml, RasterOptions, ResourceResolveMode]],
+    list[
+        tuple[
+            _FakeState,
+            PreparedHtml,
+            RasterOptions,
+            ResourceMaterializationPolicy,
+        ]
+    ],
 ]:
     effective_render_result = (
         encoded_image("png", width=640, height=480)
@@ -81,13 +93,18 @@ def _install_runtime_fakes(
     )
     created: list[_FakeState] = []
     rendered: list[
-        tuple[_FakeState, PreparedHtml, RasterOptions, ResourceResolveMode]
+        tuple[
+            _FakeState,
+            PreparedHtml,
+            RasterOptions,
+            ResourceMaterializationPolicy,
+        ]
     ] = []
 
     async def fake_create_runtime_state(
         config: TakumiConfig,
         *,
-        resources: ProviderResources,
+        resources: ProviderResourceAccess,
         cache_observer: object | None = None,
     ) -> _FakeState:
         del config, resources, cache_observer
@@ -108,7 +125,9 @@ def _install_runtime_fakes(
         prepared: PreparedHtml,
         options: RasterOptions,
         *,
-        resolve_mode: ResourceResolveMode = ResourceResolveMode.AUTO,
+        resolve_mode: ResourceMaterializationPolicy = (
+            ResourceMaterializationPolicy.AUTO
+        ),
     ) -> bytes:
         rendered.append((state, prepared, options, resolve_mode))
         return effective_render_result
@@ -137,34 +156,34 @@ def _dependencies(
     *,
     strategy: ResourceStrategy | None = None,
 ) -> ProviderDependencies:
-    resources = SimpleNamespace(strategy=strategy or ResourceStrategy())
+    resources = SimpleNamespace(strategy=strategy or LocalResourceStrategy())
     return ProviderDependencies(
         operation_observer=observer,
         operation_admission=OperationAdmissionGate(),
         cache_observer=NoopCacheObserver(),
-        resources=cast("ProviderResources", resources),
+        resources=cast("ProviderResourceAccess", resources),
         asset_publisher=None,
     )
 
 
-def test_parse_settings_validates_via_pydantic() -> None:
-    settings = PROVIDER.parse_settings({"max_concurrency": 2})
+def test_parse_config_validates_via_pydantic() -> None:
+    settings = PROVIDER.parse_config({"max_concurrency": 2})
 
     assert isinstance(settings, TakumiConfig)
     assert settings.max_concurrency == 2
     with pytest.raises(ValidationError):
-        PROVIDER.parse_settings({"unknown_key": True})
+        PROVIDER.parse_config({"unknown_key": True})
 
 
 def test_availability_maps_backend_result(mocker: MockerFixture) -> None:
     mocker.patch(
         "entari_plugin_htmlrender.adapters.takumi.render.takumi_availability",
-        return_value=ProviderAvailability(available=False, reason="missing"),
+        return_value=ProviderUnavailable(reason="missing"),
     )
 
-    result = PROVIDER.availability(TakumiConfig())
+    result = PROVIDER.check_availability(TakumiConfig())
 
-    assert result.available is False
+    assert isinstance(result, ProviderUnavailable)
     assert result.reason == "missing"
 
 
@@ -197,15 +216,15 @@ def test_availability_checks_exact_native_version(
 
     status = render_module.takumi_availability()
 
-    assert status.available is available
-    if reason is not None:
-        assert reason in (status.reason or "")
+    assert isinstance(status, ProviderAvailable) is available
+    if reason is not None and isinstance(status, ProviderUnavailable):
+        assert reason in status.reason
 
 
 def test_compose_rejects_foreign_settings(
     operation_observer: RecordingOperationObserver,
 ) -> None:
-    with pytest.raises(ProviderExecutionError, match="parse_settings"):
+    with pytest.raises(ProviderConfigurationError, match="parse_config"):
         PROVIDER.compose(
             cast("TakumiConfig", object()),
             _dependencies(operation_observer),
@@ -224,8 +243,16 @@ async def test_executor_lazily_starts_and_reuses_runtime(
     executor = bindings.prepared_html_executor
     assert executor is not None
 
-    first = await executor.execute(PREPARED, OPTIONS)
-    second = await executor.execute(PREPARED, OPTIONS)
+    first = await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
+    second = await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
 
     assert isinstance(first, RenderedImage)
     assert first == second
@@ -245,32 +272,57 @@ async def test_executor_lazily_starts_and_reuses_runtime(
 @pytest.mark.parametrize(
     ("policy", "default", "expected"),
     [
-        (None, ResourceResolveMode.AUTO, ResourceResolveMode.AUTO),
-        (None, ResourceResolveMode.STRICT, ResourceResolveMode.STRICT),
-        (ResourcePolicy.OFF, ResourceResolveMode.STRICT, ResourceResolveMode.OFF),
-        (ResourcePolicy.AUTO, ResourceResolveMode.STRICT, ResourceResolveMode.AUTO),
-        (ResourcePolicy.STRICT, ResourceResolveMode.OFF, ResourceResolveMode.STRICT),
+        (
+            None,
+            ResourceMaterializationPolicy.AUTO,
+            ResourceMaterializationPolicy.AUTO,
+        ),
+        (
+            None,
+            ResourceMaterializationPolicy.STRICT,
+            ResourceMaterializationPolicy.STRICT,
+        ),
+        (
+            ResourceMaterializationPolicy.OFF,
+            ResourceMaterializationPolicy.STRICT,
+            ResourceMaterializationPolicy.OFF,
+        ),
+        (
+            ResourceMaterializationPolicy.AUTO,
+            ResourceMaterializationPolicy.STRICT,
+            ResourceMaterializationPolicy.AUTO,
+        ),
+        (
+            ResourceMaterializationPolicy.STRICT,
+            ResourceMaterializationPolicy.OFF,
+            ResourceMaterializationPolicy.STRICT,
+        ),
     ],
 )
 async def test_executor_resolves_per_call_policy_against_provider_strategy(
     mocker: MockerFixture,
     operation_observer: RecordingOperationObserver,
-    policy: ResourcePolicy | None,
-    default: ResourceResolveMode,
-    expected: ResourceResolveMode,
+    policy: ResourceMaterializationPolicy | None,
+    default: ResourceMaterializationPolicy,
+    expected: ResourceMaterializationPolicy,
 ) -> None:
     _, rendered = _install_runtime_fakes(mocker)
     bindings = TakumiProvider().compose(
         TakumiConfig(),
         _dependencies(
             operation_observer,
-            strategy=ResourceStrategy(resolve_mode=default),
+            strategy=LocalResourceStrategy(materialization_policy=default),
         ),
     )
     executor = bindings.prepared_html_executor
     assert executor is not None
 
-    await executor.execute(PREPARED, OPTIONS, resource_policy=policy)
+    await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+        materialization_policy=policy,
+    )
 
     assert rendered[-1][3] is expected
 
@@ -287,8 +339,14 @@ async def test_executor_rejects_encoded_format_mismatch(
     executor = bindings.prepared_html_executor
     assert executor is not None
 
-    with pytest.raises(ProviderExecutionError, match="format mismatch"):
-        await executor.execute(PREPARED, OPTIONS)
+    with pytest.raises(ProviderExecutionError, match="format mismatch") as raised:
+        await executor.execute(
+            PREPARED,
+            OPTIONS,
+            operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+        )
+
+    assert raised.value.operation == RenderOperation.PREPARED_HTML_TO_IMAGE.value
 
 
 async def test_executor_rebuilds_after_runtime_death(
@@ -303,9 +361,17 @@ async def test_executor_rebuilds_after_runtime_death(
     executor = bindings.prepared_html_executor
     assert executor is not None
 
-    await executor.execute(PREPARED, OPTIONS)
+    await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
     created[0].closed = True
-    await executor.execute(PREPARED, OPTIONS)
+    await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
 
     assert len(created) == 2
 
@@ -322,9 +388,17 @@ async def test_executor_rebuilds_after_runtime_poisoning(
     executor = bindings.prepared_html_executor
     assert executor is not None
 
-    await executor.execute(PREPARED, OPTIONS)
+    await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
     created[0].healthy = False
-    await executor.execute(PREPARED, OPTIONS)
+    await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
 
     assert len(created) == 2
     assert rendered[-1][0] is created[1]
@@ -343,7 +417,11 @@ async def test_concurrent_leases_build_single_runtime(
     assert executor is not None
 
     async def one_render() -> None:
-        await executor.execute(PREPARED, OPTIONS)
+        await executor.execute(
+            PREPARED,
+            OPTIONS,
+            operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+        )
 
     async with anyio.create_task_group() as task_group:
         for _ in range(3):
@@ -372,11 +450,19 @@ async def test_native_errors_translate_into_stable_model(
         **kwargs: object,
     ) -> bytes:
         del state, prepared, options, kwargs
-        raise TakumiUnsupportedError("no scripts")
+        raise TakumiUnsupportedError("javascript", "no scripts")
 
     mocker.patch.object(provider_module, "takumi_rasterize_html", unsupported)
-    with pytest.raises(UnsupportedRequirement, match="no scripts"):
-        await executor.execute(PREPARED, OPTIONS)
+    with pytest.raises(UnsupportedDocumentFeatureError) as unsupported_error:
+        await executor.execute(
+            PREPARED,
+            OPTIONS,
+            operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+        )
+    assert unsupported_error.value.feature == "javascript"
+    assert unsupported_error.value.operation == (
+        RenderOperation.PREPARED_HTML_TO_IMAGE.value
+    )
 
     async def broken(
         state: object,
@@ -388,35 +474,13 @@ async def test_native_errors_translate_into_stable_model(
         raise TakumiRuntimeError("native panic")
 
     mocker.patch.object(provider_module, "takumi_rasterize_html", broken)
-    with pytest.raises(ProviderExecutionError, match="native panic"):
-        await executor.execute(PREPARED, OPTIONS)
-
-
-async def test_execution_timeout_maps_to_provider_error(
-    mocker: MockerFixture,
-    operation_observer: RecordingOperationObserver,
-) -> None:
-    _install_runtime_fakes(mocker)
-    bindings = TakumiProvider().compose(
-        TakumiConfig(),
-        _dependencies(operation_observer),
-    )
-    executor = bindings.prepared_html_executor
-    assert executor is not None
-
-    async def slow(
-        state: object,
-        prepared: object,
-        options: object,
-        **kwargs: object,
-    ) -> bytes:
-        del state, prepared, options, kwargs
-        await anyio.sleep(5)
-        return b""
-
-    mocker.patch.object(provider_module, "takumi_rasterize_html", slow)
-    with pytest.raises(ProviderExecutionError, match="timed out"):
-        await executor.execute(PREPARED, OPTIONS, timeout_seconds=0.05)
+    with pytest.raises(ProviderExecutionError, match="native panic") as execution_error:
+        await executor.execute(
+            PREPARED,
+            OPTIONS,
+            operation=RenderOperation.HTML_TO_IMAGE,
+        )
+    assert execution_error.value.operation == RenderOperation.HTML_TO_IMAGE.value
 
 
 async def test_startup_failure_translates_and_allows_retry(
@@ -429,7 +493,7 @@ async def test_startup_failure_translates_and_allows_retry(
     async def flaky_create(
         config: TakumiConfig,
         *,
-        resources: ProviderResources,
+        resources: ProviderResourceAccess,
         cache_observer: object | None = None,
     ) -> _FakeState:
         del config, resources, cache_observer
@@ -466,7 +530,11 @@ async def test_aclose_closes_runtime_and_is_idempotent(
     executor = bindings.prepared_html_executor
     assert executor is not None
 
-    await executor.execute(PREPARED, OPTIONS)
+    await executor.execute(
+        PREPARED,
+        OPTIONS,
+        operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
+    )
     await bindings.lifecycle.aclose()
     await bindings.lifecycle.aclose()
 
@@ -495,11 +563,11 @@ async def test_typed_extension_holds_an_operation_lease_until_context_exit(
 
     async with (
         anyio.create_task_group() as task_group,
-        capability.api() as api,
+        capability.lease_session() as session,
     ):
         # Observable contract: the leased runtime stays open for the whole
         # extension context, even while aclose is racing to drain it.
-        del api
+        del session
         assert created[0].closed is False
         task_group.start_soon(bindings.lifecycle.aclose)
         await checkpoint()
@@ -528,7 +596,7 @@ async def test_native_renderer_holds_lease_and_tracks_access(
 
     async with (
         anyio.create_task_group() as task_group,
-        capability.renderer() as renderer,
+        capability.lease_native_renderer() as renderer,
     ):
         assert renderer is created[0].renderer
         task_group.start_soon(bindings.lifecycle.aclose)

@@ -7,19 +7,25 @@ from typing import TYPE_CHECKING, final
 
 from PIL import Image
 
-from entari_plugin_htmlrender.graphics.execution import run_raster_backend
+from entari_plugin_htmlrender.graphics.execution import rasterize_with_backend
+from entari_plugin_htmlrender.graphics.models import (
+    DEFAULT_RASTER_ENCODE_OPTIONS,
+    RasterEncodeOptions,
+)
 from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
-    from entari_plugin_htmlrender.graphics.models import RenderRasterSceneRequest
+    from entari_plugin_htmlrender.graphics.models import RasterScene
     from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
     from entari_plugin_htmlrender.rendering.ports import OperationObserver
     from entari_plugin_htmlrender.resources.ports import WorkerExecutor
 
 
-def _render_sync(request: RenderRasterSceneRequest) -> RenderedImage:
-    scene = request.scene
+def _rasterize_sync(
+    scene: RasterScene,
+    output: RasterEncodeOptions,
+) -> RenderedImage:
     with Image.new(
         "RGBA",
         (scene.width, scene.height),
@@ -37,30 +43,30 @@ def _render_sync(request: RenderRasterSceneRequest) -> RenderedImage:
                 image.alpha_composite(source, dest=(rect.x, rect.y))
 
         stream = BytesIO()
-        if request.output.format == "png":
+        if output.format == "png":
             image.save(stream, format="PNG")
         else:
             with Image.new(
                 "RGBA",
                 image.size,
-                request.output.jpeg_matte.as_tuple(),
+                output.jpeg_matte.as_tuple(),
             ) as matte:
                 matte.alpha_composite(image)
                 with matte.convert("RGB") as opaque:
                     opaque.save(
                         stream,
                         format="JPEG",
-                        quality=request.output.jpeg_quality,
+                        quality=output.jpeg_quality,
                     )
         return RenderedImage.from_bytes(
             stream.getvalue(),
-            expected_format=request.output.format,
+            expected_format=output.format,
         )
 
 
 @final
 class PillowRasterSceneRenderer:
-    """Render neutral scenes through Pillow on an injected worker thread."""
+    """Rasterize neutral scenes through Pillow on an injected worker thread."""
 
     def __init__(
         self,
@@ -75,11 +81,17 @@ class PillowRasterSceneRenderer:
         self._operation_admission = operation_admission
         self._budget = budget
 
-    async def render(self, request: RenderRasterSceneRequest) -> RenderedImage:
-        return await run_raster_backend(
+    async def rasterize(
+        self,
+        scene: RasterScene,
+        *,
+        output: RasterEncodeOptions = DEFAULT_RASTER_ENCODE_OPTIONS,
+    ) -> RenderedImage:
+        return await rasterize_with_backend(
             "pillow",
-            request,
-            _render_sync,
+            scene,
+            output,
+            _rasterize_sync,
             worker=self._worker,
             observer=self._observer,
             operation_admission=self._operation_admission,

@@ -8,12 +8,17 @@ resolved objects through constructor injection instead.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Generic, TypeVar, final
 from typing_extensions import TypeIs
 
-from .errors import CapabilityUnavailable
+from entari_plugin_htmlrender.errors import (
+    CapabilityUnavailableError,
+    InvalidRenderInputError,
+)
 
 T = TypeVar("T")
+_CAPABILITY_NAME_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?")
 
 
 def _matches_interface(value: object, key: CapabilityKey[T]) -> TypeIs[T]:
@@ -32,6 +37,32 @@ class CapabilityKey(Generic[T]):
 
     name: str
     interface: type[T]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.name, str)
+            or _CAPABILITY_NAME_PATTERN.fullmatch(self.name) is None
+        ):
+            raise InvalidRenderInputError(
+                "Capability name must be a non-empty lowercase stable identifier.",
+                operation="capability.key.create",
+                field="name",
+            )
+        if not isinstance(self.interface, type):
+            raise InvalidRenderInputError(
+                "Capability interface must be a runtime-checkable type.",
+                operation="capability.key.create",
+                field="interface",
+            )
+        try:
+            isinstance(None, self.interface)
+        except TypeError as error:
+            raise InvalidRenderInputError(
+                "Capability interface must support runtime isinstance checks.",
+                operation="capability.key.create",
+                field="interface",
+                source=error,
+            ) from error
 
 
 @final
@@ -74,7 +105,7 @@ class CapabilityCatalog:
         if value is None:
             return None
         if not _matches_interface(value, key):
-            raise CapabilityUnavailable(
+            raise CapabilityUnavailableError(
                 key.name,
                 detail=(
                     f"Registered value is {type(value).__qualname__}, "
@@ -86,11 +117,14 @@ class CapabilityCatalog:
     def require(self, key: CapabilityKey[T]) -> T:
         value = self.get(key)
         if value is None:
-            raise CapabilityUnavailable(key.name)
+            raise CapabilityUnavailableError(key.name)
         return value
 
     def names(self) -> frozenset[str]:
         return frozenset(self._values)
 
     def __contains__(self, key: object) -> bool:
-        return isinstance(key, CapabilityKey) and key.name in self._values
+        if not isinstance(key, CapabilityKey):
+            return False
+        value = self._values.get(key.name)
+        return value is not None and _matches_interface(value, key)

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from hashlib import sha256
 from importlib import import_module
@@ -12,34 +10,36 @@ import uuid
 import anyio
 
 from entari_plugin_htmlrender._logging import logger
+from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
+from entari_plugin_htmlrender.resources._publication import (
+    normalize_publication_suffix,
+)
+from entari_plugin_htmlrender.resources.config import AssetPublisherSettings
+from entari_plugin_htmlrender.resources.errors import (
+    ResourceError,
+    ResourcePublishError,
+    ResourceTooLargeError,
+)
+from entari_plugin_htmlrender.resources.models import (
+    InlineResource,
+    PublicationLeaseId,
+    PublishedResource,
+    ResourceContent,
+)
+from entari_plugin_htmlrender.resources.observation import CacheObserver
+from entari_plugin_htmlrender.resources.ports import LocalAccessPolicy, WorkerExecutor
+
+from .hosted import HostedAssetNamespace, HostedAssetStore
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-    from entari_plugin_htmlrender.resources.config import AssetPublisherSettings
-    from entari_plugin_htmlrender.resources.observation import CacheObserver
-    from entari_plugin_htmlrender.resources.ports import (
-        LocalAccessPolicy,
-        WorkerExecutor,
-    )
-
-    from .hosted import HostedAssetNamespace, HostedAssetStore
-
-from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
-from entari_plugin_htmlrender.resources.errors import (
-    ResourceAccessDenied,
-    ResourceNotFound,
-    ResourceResolutionError,
-    ResourceSizeExceeded,
-)
-from entari_plugin_htmlrender.resources.models import PublishedResource
 
 
 @dataclass(slots=True)
 class _Entry:
     url: str
     expires_at: float
-    leases: set[str]
+    leases: set[PublicationLeaseId]
 
 
 @dataclass(slots=True)
@@ -48,7 +48,7 @@ class _Inflight:
     epoch: int
     url: str | None = None
     error: BaseException | None = None
-    leases: set[str] = field(default_factory=set)
+    leases: set[PublicationLeaseId] = field(default_factory=set)
 
 
 def _read_consistent(path: Path, max_resource_bytes: int) -> tuple[bytes, str]:
@@ -56,9 +56,13 @@ def _read_consistent(path: Path, max_resource_bytes: int) -> tuple[bytes, str]:
     for _ in range(3):
         before = resolved.stat()
         if max_resource_bytes > 0 and before.st_size > max_resource_bytes:
-            raise ResourceSizeExceeded(
+            raise ResourceTooLargeError(
                 f"Resource {resolved} exceeds the configured "
-                f"{max_resource_bytes}-byte publish limit."
+                f"{max_resource_bytes}-byte publish limit.",
+                reference=path,
+                operation="publish",
+                actual_size=before.st_size,
+                maximum_size=max_resource_bytes,
             )
         with resolved.open("rb") as stream:
             data = (
@@ -67,9 +71,13 @@ def _read_consistent(path: Path, max_resource_bytes: int) -> tuple[bytes, str]:
                 else stream.read(max_resource_bytes + 1)
             )
         if max_resource_bytes > 0 and len(data) > max_resource_bytes:
-            raise ResourceSizeExceeded(
+            raise ResourceTooLargeError(
                 f"Resource {resolved} exceeds the configured "
-                f"{max_resource_bytes}-byte publish limit."
+                f"{max_resource_bytes}-byte publish limit.",
+                reference=path,
+                operation="publish",
+                actual_size=len(data),
+                maximum_size=max_resource_bytes,
             )
         after = resolved.stat()
         if (
@@ -156,8 +164,8 @@ class FilehostAssetPublisher:
         )
         self._namespace: HostedAssetNamespace | None = None
 
-    def create_lease(self) -> str:
-        return f"lease:{uuid.uuid4().hex}"
+    def create_lease(self) -> PublicationLeaseId:
+        return PublicationLeaseId(f"lease:{uuid.uuid4().hex}")
 
     def _published(self, url: str) -> PublishedResource:
         return PublishedResource(url=url, request_headers=self._request_headers)
@@ -168,7 +176,9 @@ class FilehostAssetPublisher:
             return self._namespace
         if self._settings.public_base_url is None:
             raise ProviderLifecycleError(
-                "The filehost transport requires `resources.filehost.public_base_url`."
+                "The filehost transport requires `resources.filehost.public_base_url`.",
+                provider_id=None,
+                operation="startup",
             )
         self._namespace = self._store.open_namespace(
             headers=self._request_headers,
@@ -180,7 +190,9 @@ class FilehostAssetPublisher:
         async with self._lock:
             if self._closed:
                 raise ProviderLifecycleError(
-                    "The filehost publisher is already closed."
+                    "The filehost publisher is already closed.",
+                    provider_id=None,
+                    operation="startup",
                 )
         self._attach_namespace()
         try:
@@ -216,7 +228,7 @@ class FilehostAssetPublisher:
                     authorized,
                     self._settings.max_resource_bytes,
                 )
-                await self.publish(data, suffix=suffix)
+                await self.publish(InlineResource(data), suffix=suffix or None)
             except Exception as error:  # noqa: PERF203 -- optional files are isolated
                 logger.warning(
                     "Could not prewarm a filehost resource: %s",
@@ -231,7 +243,10 @@ class FilehostAssetPublisher:
             await drained.wait()
         if scope.cancel_called:
             raise ProviderLifecycleError(
-                "Timed out waiting for in-flight filehost publishes to finish."
+                "Timed out waiting for in-flight filehost publishes to finish.",
+                provider_id=None,
+                operation="aclose",
+                retryable=True,
             )
         async with self._lock:
             self._entries.clear()
@@ -253,7 +268,7 @@ class FilehostAssetPublisher:
         self,
         key: tuple[str, str],
         data: bytes,
-        lease_ids: set[str],
+        lease_ids: set[PublicationLeaseId],
     ) -> str:
         digest, suffix = key
         return await self._attach_namespace().put(
@@ -270,56 +285,34 @@ class FilehostAssetPublisher:
 
     async def publish(
         self,
-        value: str | Path | bytes,
+        content: ResourceContent | InlineResource,
         *,
-        lease_id: str | None = None,
+        lease_id: PublicationLeaseId | None = None,
         suffix: str | None = None,
     ) -> PublishedResource:
-        if isinstance(value, (str, Path)):
-            if suffix is not None:
-                raise ValueError("suffix cannot override a filesystem resource suffix")
-            try:
-                path = self._local_access.authorize(Path(value))
-                data, resolved_suffix = await self._worker.run_sync(
-                    _read_consistent,
-                    path,
-                    self._settings.max_resource_bytes,
-                )
-            except ResourceResolutionError:
-                raise
-            except FileNotFoundError as error:
-                raise ResourceNotFound(
-                    "Resource to publish was not found.", source=error
-                ) from error
-            except PermissionError as error:
-                raise ResourceAccessDenied(
-                    "Access to the resource being published was denied.",
-                    source=error,
-                ) from error
-            except Exception as error:
-                raise ResourceResolutionError(
-                    "Could not read resource for publishing.",
-                    source=error,
-                ) from error
-            suffix = resolved_suffix
-        else:
-            data = value
-            if (
-                self._settings.max_resource_bytes > 0
-                and len(data) > self._settings.max_resource_bytes
-            ):
-                raise ResourceSizeExceeded(
-                    "Resource exceeds the configured "
-                    f"{self._settings.max_resource_bytes}-byte publish limit."
-                )
-        normalized_suffix = (
-            "" if not suffix else suffix if suffix.startswith(".") else f".{suffix}"
-        )
-        key = (sha256(data).hexdigest(), normalized_suffix.lower())
+        data = content.data
+        if (
+            self._settings.max_resource_bytes > 0
+            and len(data) > self._settings.max_resource_bytes
+        ):
+            raise ResourceTooLargeError(
+                "Resource exceeds the configured "
+                f"{self._settings.max_resource_bytes}-byte publish limit.",
+                reference=content,
+                operation="publish",
+                actual_size=len(data),
+                maximum_size=self._settings.max_resource_bytes,
+            )
+        normalized_suffix = normalize_publication_suffix(suffix) or ""
+        key = (sha256(data).hexdigest(), normalized_suffix)
         now = time.monotonic()
         async with self._lock:
             if self._closed:
-                raise ProviderLifecycleError("The filehost publisher is closed.")
+                raise ResourcePublishError(
+                    "The filehost publisher is closed.",
+                    reference=content,
+                    operation="publish",
+                )
             expired = [
                 cache_key
                 for cache_key, entry in self._entries.items()
@@ -346,7 +339,11 @@ class FilehostAssetPublisher:
 
         async with self._lock:
             if self._closed:
-                raise ProviderLifecycleError("The filehost publisher is closed.")
+                raise ResourcePublishError(
+                    "The filehost publisher is closed.",
+                    reference=content,
+                    operation="publish",
+                )
             inflight = self._inflight.get(key)
             owner = inflight is None
             if inflight is None:
@@ -362,7 +359,9 @@ class FilehostAssetPublisher:
                 raise inflight.error
             if inflight.url is None:
                 return await self.publish(
-                    data, lease_id=lease_id, suffix=normalized_suffix
+                    content,
+                    lease_id=lease_id,
+                    suffix=normalized_suffix,
                 )
             return self._published(inflight.url)
         try:
@@ -390,11 +389,11 @@ class FilehostAssetPublisher:
             return self._published(url)
         except BaseException as error:
             published_error: BaseException = error
-            if isinstance(error, Exception) and not isinstance(
-                error, ResourceResolutionError
-            ):
-                published_error = ResourceResolutionError(
+            if isinstance(error, Exception) and not isinstance(error, ResourceError):
+                published_error = ResourcePublishError(
                     "Could not publish resource.",
+                    reference=content,
+                    operation="publish",
                     source=error,
                 )
             with anyio.CancelScope(shield=True):
@@ -411,7 +410,7 @@ class FilehostAssetPublisher:
     async def _confirm_hosted(
         self,
         key: tuple[str, str],
-        lease_id: str | None,
+        lease_id: PublicationLeaseId | None,
     ) -> bool:
         """Confirm the store still holds a reused asset; pin it when leased."""
         namespace = self._namespace
@@ -422,7 +421,7 @@ class FilehostAssetPublisher:
             return await namespace.attach(name, lease_id)
         return await namespace.touch(name)
 
-    async def release(self, lease_id: str) -> None:
+    async def release(self, lease_id: PublicationLeaseId) -> None:
         async with self._lock:
             now = time.monotonic()
             for inflight in self._inflight.values():

@@ -1,42 +1,43 @@
-"""Immutable use-case bindings consumed by the renderer."""
+"""Private immutable bindings for the default renderer implementation."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from entari_plugin_htmlrender.rendering.requests import RenderCommand
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 if TYPE_CHECKING:
     from .use_cases import (
-        RasterizeHtml,
-        RenderHtml,
-        RenderMarkdown,
-        RenderTemplate,
-        RenderTemplateHtml,
-        RenderText,
+        _RasterizeHtml,
+        _RasterizeMarkdown,
+        _RasterizePrepared,
+        _RasterizeTemplate,
+        _RasterizeText,
     )
 
 
 @dataclass(frozen=True, slots=True)
-class HtmlRendererBindings:
-    """Use cases actually available in one composition.
+class _HtmlRendererBindings:
+    rasterize_html: _RasterizeHtml | None = None
+    rasterize_text: _RasterizeText | None = None
+    rasterize_markdown: _RasterizeMarkdown | None = None
+    rasterize_template: _RasterizeTemplate | None = None
+    rasterize_prepared: _RasterizePrepared | None = None
 
-    HtmlRenderer command presence is derived from which bindings are set;
-    there is no separate capability declaration to keep in sync.
-    """
+    def supported_operations(self) -> frozenset[RenderOperation]:
+        operations: set[RenderOperation] = set()
+        if self.rasterize_html is not None:
+            operations.add(RenderOperation.HTML_TO_IMAGE)
+        if self.rasterize_text is not None:
+            operations.add(RenderOperation.TEXT_TO_IMAGE)
+        if self.rasterize_markdown is not None:
+            operations.add(RenderOperation.MARKDOWN_TO_IMAGE)
+        if self.rasterize_template is not None:
+            operations.add(RenderOperation.TEMPLATE_TO_IMAGE)
+        if self.rasterize_prepared is not None:
+            operations.add(RenderOperation.PREPARED_HTML_TO_IMAGE)
+        return frozenset(operations)
 
-    render_html: RenderHtml | None = None
-    render_text: RenderText | None = None
-    render_markdown: RenderMarkdown | None = None
-    render_template: RenderTemplate | None = None
-    render_template_html: RenderTemplateHtml | None = None
-    rasterize_html: RasterizeHtml | None = None
 
-    def present(self) -> frozenset[RenderCommand]:
-        """Typed commands for the bound use cases."""
-        return frozenset(
-            RenderCommand(binding.name)
-            for binding in fields(self)
-            if getattr(self, binding.name) is not None
-        )
+__all__: list[str] = []

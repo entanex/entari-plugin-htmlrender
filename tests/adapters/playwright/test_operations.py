@@ -9,17 +9,23 @@ import pytest
 
 from entari_plugin_htmlrender.adapters.resources.reader import (
     AnyioWorkerExecutor,
-    CompositeResourceReader,
+    CompositeResourceFetcher,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
 )
 from entari_plugin_htmlrender.resources.config import (
     LocalLocalResourcePolicy,
+    LocalResourceStrategy,
     RemoteLocalResourcePolicy,
-    ResourceResolveMode,
+    RemoteResourceStrategy,
+    ResourceMaterializationPolicy,
     ResourceStrategy,
 )
-from entari_plugin_htmlrender.resources.models import PublishedResource
+from entari_plugin_htmlrender.resources.models import (
+    InlineResource,
+    PublicationLeaseId,
+    PublishedResource,
+)
 from entari_plugin_htmlrender.resources.service import ResourceService
 
 
@@ -50,21 +56,33 @@ def _lease(mode: str, *, browser: object | None = None) -> PlaywrightLease:
 
 def _resources(
     *,
+    remote: bool = True,
     remote_policy: RemoteLocalResourcePolicy = RemoteLocalResourcePolicy.MEMORY,
     local_policy: LocalLocalResourcePolicy = LocalLocalResourcePolicy.FILE,
-    resolve_mode: ResourceResolveMode = ResourceResolveMode.AUTO,
+    materialization_policy: ResourceMaterializationPolicy = (
+        ResourceMaterializationPolicy.AUTO
+    ),
 ) -> ResourceService:
+    strategy: ResourceStrategy
+    if remote:
+        strategy = RemoteResourceStrategy(
+            materialization_policy=materialization_policy,
+            local_resource_policy=remote_policy,
+        )
+    else:
+        strategy = LocalResourceStrategy(
+            materialization_policy=materialization_policy,
+            local_resource_policy=local_policy,
+        )
+    local_access = ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True)
     return ResourceService(
-        reader=CompositeResourceReader(
+        fetcher=CompositeResourceFetcher(
             AnyioWorkerExecutor(),
+            local_access=local_access,
             remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
         ),
-        local_access=ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True),
-        strategy=ResourceStrategy(
-            resolve_mode=resolve_mode,
-            remote_local_policy=remote_policy,
-            local_local_policy=local_policy,
-        ),
+        local_access=local_access,
+        strategy=strategy,
     )
 
 
@@ -128,7 +146,7 @@ async def test_remote_http_navigation_is_resource_fallback(
             lease=_lease("remote_ws"),
             resources=resources,
             asset_publisher=None,
-            resolve_mode=ResourceResolveMode.STRICT,
+            resolve_mode=ResourceMaterializationPolicy.STRICT,
         )
         == b"image"
     )
@@ -182,7 +200,7 @@ async def test_remote_prepared_render_routes_local_assets_without_file_navigatio
         lease=_lease("remote_ws"),
         resources=_resources(),
         asset_publisher=None,
-        resolve_mode=ResourceResolveMode.STRICT,
+        resolve_mode=ResourceMaterializationPolicy.STRICT,
     )
 
     assert result == b"image"
@@ -268,6 +286,7 @@ async def test_direct_file_policies_canonicalize_relative_document_base(
         new=mocker.AsyncMock(return_value=b"image"),
     )
     resources = _resources(
+        remote=mode != "local_pw",
         remote_policy=RemoteLocalResourcePolicy.PASSTHROUGH,
     )
 
@@ -323,7 +342,7 @@ async def test_remote_error_policy_rejects_local_resources_before_page_open(
             lease=_lease("remote_ws"),
             resources=_resources(remote_policy=RemoteLocalResourcePolicy.ERROR),
             asset_publisher=None,
-            resolve_mode=ResourceResolveMode.AUTO,
+            resolve_mode=ResourceMaterializationPolicy.AUTO,
         )
 
     execute.assert_not_awaited()
@@ -360,7 +379,7 @@ async def test_remote_error_policy_accepts_http_fallback_with_relative_base(
         lease=_lease("remote_ws"),
         resources=_resources(remote_policy=RemoteLocalResourcePolicy.ERROR),
         asset_publisher=None,
-        resolve_mode=ResourceResolveMode.STRICT,
+        resolve_mode=ResourceMaterializationPolicy.STRICT,
     )
 
     assert result == b"image"
@@ -411,12 +430,12 @@ async def test_remote_filehost_policy_publishes_materialized_assets(
             remote_policy=RemoteLocalResourcePolicy.FILEHOST,
         ),
         asset_publisher=publisher,
-        resolve_mode=ResourceResolveMode.STRICT,
+        resolve_mode=ResourceMaterializationPolicy.STRICT,
     )
 
     assert result == b"image"
     publisher.publish.assert_awaited_once_with(
-        b"avatar",
+        InlineResource(b"avatar", "image/png"),
         lease_id="lease",
         suffix=".png",
     )
@@ -457,7 +476,7 @@ async def test_resolve_mode_off_bypasses_filehost_without_a_publisher(
         lease=_lease("remote_ws"),
         resources=_resources(
             remote_policy=RemoteLocalResourcePolicy.FILEHOST,
-            resolve_mode=ResourceResolveMode.OFF,
+            materialization_policy=ResourceMaterializationPolicy.OFF,
         ),
         asset_publisher=None,
     )
@@ -500,7 +519,7 @@ async def test_per_call_off_does_not_touch_composed_filehost_publisher(
         lease=_lease("remote_ws"),
         resources=_resources(remote_policy=RemoteLocalResourcePolicy.FILEHOST),
         asset_publisher=publisher,
-        resolve_mode=ResourceResolveMode.OFF,
+        resolve_mode=ResourceMaterializationPolicy.OFF,
     )
 
     assert result == b"image"
@@ -598,14 +617,14 @@ async def test_filehost_asset_graph_preserves_css_and_font_suffixes(
     )
 
     async def publish(
-        payload: bytes,
+        payload: InlineResource,
         *,
-        lease_id: str,
+        lease_id: PublicationLeaseId,
         suffix: str | None,
     ) -> PublishedResource:
         assert lease_id == "lease"
         return _published(
-            f"http://filehost/filehost/{len(payload)}{suffix or ''}",
+            f"http://filehost/filehost/{len(payload.data)}{suffix or ''}",
             {"X-HTMLRender-Filehost-Request": "unit-token"},
         )
 
@@ -615,7 +634,7 @@ async def test_filehost_asset_graph_preserves_css_and_font_suffixes(
     urls, authorization = await _publish_prepared_assets(
         prepared,
         publisher=publisher,
-        lease_id="lease",
+        lease_id=PublicationLeaseId("lease"),
     )
 
     assert urls[font.source].endswith(".woff2")
@@ -623,7 +642,7 @@ async def test_filehost_asset_graph_preserves_css_and_font_suffixes(
     calls = publisher.publish.await_args_list
     assert calls[0].kwargs["suffix"] == ".woff2"
     assert calls[1].kwargs["suffix"] == ".css"
-    assert urls[font.source].encode() in calls[1].args[0]
+    assert urls[font.source].encode() in calls[1].args[0].data
     # Every publication's exact URL carries its own authorization.
     assert set(authorization) == {urls[font.source], urls[stylesheet.source]}
     assert all(
@@ -673,7 +692,7 @@ async def test_local_file_policy_keeps_stylesheet_io_in_browser(
         content=ContentConfig(html=prepared.html),
         render=RenderConfig(),
         lease=_lease("local_pw"),
-        resources=_resources(),
+        resources=_resources(remote=False),
         asset_publisher=None,
     )
 

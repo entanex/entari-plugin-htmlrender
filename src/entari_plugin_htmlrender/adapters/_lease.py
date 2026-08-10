@@ -24,20 +24,23 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
     from contextlib import AbstractContextManager
 
+    from entari_plugin_htmlrender.errors import ProviderError
     from entari_plugin_htmlrender.preparation.models import (
         PreparedHtml,
         RasterOptions,
     )
     from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
-    from entari_plugin_htmlrender.rendering.errors import RenderingError
+    from entari_plugin_htmlrender.rendering.models import RenderOperation
     from entari_plugin_htmlrender.rendering.ports import OperationObserver
-    from entari_plugin_htmlrender.rendering.requests import ResourcePolicy
+    from entari_plugin_htmlrender.resources.config import (
+        ResourceMaterializationPolicy,
+    )
 
 LeaseT = TypeVar("LeaseT")
 
 if TYPE_CHECKING:
     TranslateFactory = Callable[
-        [str, type[RenderingError]],
+        [str, type[ProviderError]],
         AbstractContextManager[None],
     ]
     CreateLeaseFn = Callable[[], Awaitable[LeaseT]]
@@ -45,7 +48,12 @@ if TYPE_CHECKING:
     CloseLeaseFn = Callable[[LeaseT], Awaitable[None]]
     ProbeLeaseFn = Callable[[LeaseT], Awaitable[None]]
     RasterizeLeaseFn = Callable[
-        [LeaseT, PreparedHtml, RasterOptions, "ResourcePolicy | None"],
+        [
+            LeaseT,
+            PreparedHtml,
+            RasterOptions,
+            "ResourceMaterializationPolicy | None",
+        ],
         Awaitable[RenderedImage],
     ]
 
@@ -70,6 +78,7 @@ class ExecutionLeaseProvider(Generic[LeaseT]):
         create: CreateLeaseFn[LeaseT],
         is_alive: LeaseAliveFn[LeaseT],
         close: CloseLeaseFn[LeaseT],
+        provider_id: str,
         observer: OperationObserver,
         translate: TranslateFactory,
         observation_attributes: Mapping[str, str],
@@ -78,6 +87,7 @@ class ExecutionLeaseProvider(Generic[LeaseT]):
         self._create = create
         self._is_alive = is_alive
         self._close = close
+        self._provider_id = provider_id
         self._observer = observer
         self._translate = translate
         self._attributes = dict(observation_attributes)
@@ -109,12 +119,17 @@ class ExecutionLeaseProvider(Generic[LeaseT]):
             raise ProviderLifecycleError(
                 "Execution lease provider close failed; the runtime is "
                 "retained and only a retried aclose() may release it.",
+                provider_id=self._provider_id,
+                operation="lease",
+                retryable=True,
                 source=self._close_error,
             ) from self._close_error
         if self._state is not _LeaseProviderState.OPEN:
             raise ProviderLifecycleError(
                 "Execution lease provider is closing or closed; build a new "
-                "composition to render again."
+                "composition to render again.",
+                provider_id=self._provider_id,
+                operation="lease",
             )
 
     def _begin_operation(self) -> None:
@@ -224,6 +239,9 @@ class ExecutionLeaseProvider(Generic[LeaseT]):
                     return
                 raise ProviderLifecycleError(
                     "The shared close attempt failed; retry aclose().",
+                    provider_id=self._provider_id,
+                    operation="shutdown",
+                    retryable=True,
                     source=self._close_error,
                 ) from self._close_error
 
@@ -241,7 +259,10 @@ class ExecutionLeaseProvider(Generic[LeaseT]):
                             "Render operations or the provider restart did not "
                             "drain within the bounded wait of "
                             f"{_DRAIN_TIMEOUT_SECONDS}s; the runtime is retained "
-                            "and close may be retried."
+                            "and close may be retried.",
+                            provider_id=self._provider_id,
+                            operation="shutdown",
+                            retryable=True,
                         )
                 lease = self._lease
                 if lease is not None:
@@ -285,6 +306,9 @@ class ExecutionLeaseProvider(Generic[LeaseT]):
                     "Closing the render runtime exceeded the bounded wait of "
                     f"{_TEARDOWN_TIMEOUT_SECONDS}s; the lease is retained for "
                     "a retried close.",
+                    provider_id=self._provider_id,
+                    operation="shutdown",
+                    retryable=True,
                     source=error,
                 ) from error
             except ProviderLifecycleError:
@@ -292,6 +316,9 @@ class ExecutionLeaseProvider(Generic[LeaseT]):
             except Exception as error:
                 raise ProviderLifecycleError(
                     "Closing the render runtime failed.",
+                    provider_id=self._provider_id,
+                    operation="shutdown",
+                    retryable=True,
                     source=error,
                 ) from error
 
@@ -307,14 +334,14 @@ class PreparedHtmlLeaseExecutor(Generic[LeaseT]):
         rasterize: RasterizeLeaseFn[LeaseT],
         translate: TranslateFactory,
         observer: OperationObserver,
-        operation: str | None,
+        telemetry_operation: str | None,
         observation_attributes: Mapping[str, str],
     ) -> None:
         self._leases = leases
         self._rasterize = rasterize
         self._translate = translate
         self._observer = observer
-        self._operation = operation
+        self._telemetry_operation = telemetry_operation
         self._attributes = dict(observation_attributes)
 
     async def execute(
@@ -322,44 +349,43 @@ class PreparedHtmlLeaseExecutor(Generic[LeaseT]):
         prepared: PreparedHtml,
         options: RasterOptions,
         *,
-        resource_policy: ResourcePolicy | None = None,
-        timeout_seconds: float | None = None,
+        operation: RenderOperation,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> RenderedImage:
-        if timeout_seconds is None:
-            return await self._execute(prepared, options, resource_policy)
-        try:
-            with anyio.fail_after(timeout_seconds):
-                return await self._execute(prepared, options, resource_policy)
-        except TimeoutError as error:
-            raise ProviderExecutionError(
-                f"Render operation timed out after {timeout_seconds} seconds.",
-                source=error,
-            ) from error
+        return await self._execute(
+            prepared,
+            options,
+            operation,
+            materialization_policy,
+        )
 
     async def _execute(
         self,
         prepared: PreparedHtml,
         options: RasterOptions,
-        resource_policy: ResourcePolicy | None,
+        operation: RenderOperation,
+        materialization_policy: ResourceMaterializationPolicy | None,
     ) -> RenderedImage:
         async with self._leases.lease() as lease:
-            if self._operation is None:
+            if self._telemetry_operation is None:
                 return await self._run(
                     lease,
                     prepared,
                     options,
-                    resource_policy,
+                    operation,
+                    materialization_policy,
                 )
             with observe_operation(
                 self._observer,
-                self._operation,
+                self._telemetry_operation,
                 dict(self._attributes),
             ):
                 return await self._run(
                     lease,
                     prepared,
                     options,
-                    resource_policy,
+                    operation,
+                    materialization_policy,
                 )
 
     async def _run(
@@ -367,15 +393,15 @@ class PreparedHtmlLeaseExecutor(Generic[LeaseT]):
         lease: LeaseT,
         prepared: PreparedHtml,
         options: RasterOptions,
-        resource_policy: ResourcePolicy | None,
+        operation: RenderOperation,
+        materialization_policy: ResourceMaterializationPolicy | None,
     ) -> RenderedImage:
-        operation = self._operation or "render"
-        with self._translate(operation, ProviderExecutionError):
+        with self._translate(operation.value, ProviderExecutionError):
             return await self._rasterize(
                 lease,
                 prepared,
                 options,
-                resource_policy,
+                materialization_policy,
             )
 
 

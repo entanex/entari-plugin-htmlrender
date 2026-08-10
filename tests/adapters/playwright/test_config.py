@@ -7,32 +7,32 @@ def test_playwright_config_uses_safe_remote_resource_defaults() -> None:
     )
     from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         RemoteLocalResourcePolicy,
-        ResourceResolveMode,
+        ResourceMaterializationPolicy,
     )
 
     cfg = PlaywrightConfig()
 
-    assert cfg.resource_resolve_mode is ResourceResolveMode.AUTO
+    assert cfg.materialization_policy is ResourceMaterializationPolicy.AUTO
     assert cfg.remote_local_resource_policy is RemoteLocalResourcePolicy.MEMORY
 
 
-def test_playwright_config_preserves_explicit_v071_resource_policy() -> None:
+def test_playwright_config_preserves_explicit_materialization_policy() -> None:
     from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
     from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         RemoteLocalResourcePolicy,
-        ResourceResolveMode,
+        ResourceMaterializationPolicy,
     )
 
     cfg = PlaywrightConfig.model_validate(
         {
-            "resource_resolve_mode": "off",
+            "materialization_policy": "off",
             "remote_local_resource_policy": "passthrough",
         }
     )
 
-    assert cfg.resource_resolve_mode is ResourceResolveMode.OFF
+    assert cfg.materialization_policy is ResourceMaterializationPolicy.OFF
     assert cfg.remote_local_resource_policy is RemoteLocalResourcePolicy.PASSTHROUGH
 
 
@@ -98,16 +98,16 @@ def test_playwright_config_accepts_resource_resolution_options() -> None:
     from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         LocalLocalResourcePolicy,
         RemoteLocalResourcePolicy,
-        ResourceResolveMode,
+        ResourceMaterializationPolicy,
     )
 
     cfg = PlaywrightConfig(
-        resource_resolve_mode=ResourceResolveMode.AUTO,
+        materialization_policy=ResourceMaterializationPolicy.AUTO,
         remote_local_resource_policy=RemoteLocalResourcePolicy.FILEHOST,
         local_local_resource_policy=LocalLocalResourcePolicy.FILE,
     )
 
-    assert cfg.resource_resolve_mode is ResourceResolveMode.AUTO
+    assert cfg.materialization_policy is ResourceMaterializationPolicy.AUTO
     assert cfg.remote_local_resource_policy is RemoteLocalResourcePolicy.FILEHOST
     assert cfg.local_local_resource_policy is LocalLocalResourcePolicy.FILE
 

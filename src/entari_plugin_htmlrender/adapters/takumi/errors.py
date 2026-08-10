@@ -1,8 +1,32 @@
-from entari_plugin_htmlrender.errors import RenderingError
+from __future__ import annotations
+
+from typing import Literal
+from typing_extensions import TypeAlias
+
+TakumiUnsupportedFeature: TypeAlias = Literal[
+    "css_import",
+    "font_face",
+    "javascript",
+    "linked_stylesheet",
+    "media_condition",
+]
 
 
-class TakumiBackendError(RenderingError, RuntimeError):
-    """Base error raised by the htmlrender Takumi adapter."""
+class TakumiBackendError(RuntimeError):
+    """Internal failure raised by the Takumi adapter boundary."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: BaseException | None = None,
+    ) -> None:
+        self.source = source
+        if source is None:
+            display = message
+        else:
+            display = f"{message} Caused by {type(source).__name__}: {source}"
+        super().__init__(display)
 
 
 class TakumiInputError(TakumiBackendError):
@@ -26,9 +50,24 @@ class TakumiRuntimeError(TakumiBackendError):
 class TakumiUnsupportedError(TakumiBackendError):
     """The request requires browser behavior that Takumi cannot provide."""
 
+    def __init__(self, feature: TakumiUnsupportedFeature, detail: str) -> None:
+        self.feature = feature
+        self.detail = detail
+        super().__init__(detail)
+
 
 class TakumiResourceError(TakumiBackendError):
     """A resource reference was not supplied as in-process bytes."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reference: object | None = None,
+        source: BaseException | None = None,
+    ) -> None:
+        self.reference = reference
+        super().__init__(message, source=source)
 
 
 __all__ = [
@@ -37,4 +76,5 @@ __all__ = [
     "TakumiResourceError",
     "TakumiRuntimeError",
     "TakumiUnsupportedError",
+    "TakumiUnsupportedFeature",
 ]

@@ -1,29 +1,53 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import math
-from typing import get_type_hints
+from typing import cast, get_type_hints
+import zlib
 
 import pytest
 
 from entari_plugin_htmlrender.preparation import PreparedHtml, RasterOptions
 from entari_plugin_htmlrender.raster import RasterImageFormat
-from entari_plugin_htmlrender.rendering import (
-    InvalidRenderRequest,
-    PreparedHtmlExecutor,
-    RenderedHtml,
-    RenderedImage,
-    RenderHtmlRequest,
-    RenderMarkdownRequest,
-    RenderTemplateRequest,
-    ResourcePolicy,
+from entari_plugin_htmlrender.rendering import PreparedHtmlExecutor, RenderOperation
+from entari_plugin_htmlrender.rendering.artifacts import RenderedHtml, RenderedImage
+from entari_plugin_htmlrender.resources.config import (
+    ResourceMaterializationPolicy,
 )
-from entari_plugin_htmlrender.rendering.requests import (
-    POLICY_RESOLVE_MODES,
-    resolve_mode_for_policy,
-)
-from entari_plugin_htmlrender.resources.config import ResourceResolveMode
 from tests.image_fixtures import encoded_image
+
+
+def _png_ihdr(
+    *,
+    width: int = 1,
+    height: int = 1,
+    bit_depth: int = 8,
+    color_type: int = 6,
+    compression: int = 0,
+    filter_method: int = 0,
+    interlace: int = 0,
+) -> bytes:
+    payload = (
+        width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + bytes(
+            (bit_depth, color_type, compression, filter_method, interlace),
+        )
+    )
+    chunk_type = b"IHDR"
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + len(payload).to_bytes(4, "big")
+        + chunk_type
+        + payload
+        + zlib.crc32(chunk_type + payload).to_bytes(4, "big")
+    )
+
+
+def _jpeg_segment(marker: int, payload: bytes, *, length: int | None = None) -> bytes:
+    segment_length = len(payload) + 2 if length is None else length
+    return (
+        b"\xff\xd8\xff" + bytes((marker,)) + segment_length.to_bytes(2, "big") + payload
+    )
 
 
 def test_rendered_image_exposes_bytes_and_media_type() -> None:
@@ -48,8 +72,8 @@ def test_public_executor_annotations_resolve_at_runtime() -> None:
     assert annotations == {
         "prepared": PreparedHtml,
         "options": RasterOptions,
-        "resource_policy": ResourcePolicy | None,
-        "timeout_seconds": float | None,
+        "operation": RenderOperation,
+        "materialization_policy": ResourceMaterializationPolicy | None,
         "return": RenderedImage,
     }
 
@@ -119,6 +143,27 @@ def test_rendered_image_rejects_corrupt_png_metadata() -> None:
         RenderedImage.from_bytes(bytes(corrupted))
 
 
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (b"\x89PNG\r\n\x1a\n", "IHDR chunk is truncated"),
+        (
+            b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0cIDAT" + b"\x00" * 17,
+            "IHDR must be the first",
+        ),
+        (_png_ihdr(width=0), "dimensions must be positive"),
+        (_png_ihdr(color_type=5), "unsupported color type or bit depth"),
+        (_png_ihdr(compression=1), "unsupported encoding methods"),
+    ],
+)
+def test_rendered_image_rejects_invalid_png_container(
+    data: bytes,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        RenderedImage.from_bytes(data)
+
+
 def test_rendered_image_rejects_truncated_jpeg_metadata() -> None:
     with pytest.raises(ValueError, match="JPEG"):
         RenderedImage.from_bytes(b"\xff\xd8\xff\xc0\x00")
@@ -131,6 +176,51 @@ def test_rendered_image_rejects_jpeg_scan_before_frame() -> None:
         RenderedImage.from_bytes(scan_without_frame)
 
 
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (b"\xff\xd8", "marker stream is truncated"),
+        (b"\xff\xd8\x01\x00", "expected a marker prefix"),
+        (b"\xff\xd8\xff\x00", "unexpected stuffed marker byte"),
+        (b"\xff\xd8\xff\xd9", "image ends before frame dimensions"),
+        (b"\xff\xd8\xff\xd8", "unexpected marker"),
+        (b"\xff\xd8\xff\xe0\x00", "segment length is truncated"),
+        (b"\xff\xd8\xff\xe0\x00\x01", "invalid segment length"),
+        (b"\xff\xd8\xff\xe0\x00\x04\x00", "segment payload is truncated"),
+        (_jpeg_segment(0xC0, b"\x00" * 8, length=10), "frame segment is truncated"),
+        (
+            _jpeg_segment(
+                0xC0,
+                b"\x08\x00\x01\x00\x01\x02\x01\x11\x00",
+            ),
+            "frame components are inconsistent",
+        ),
+        (
+            _jpeg_segment(
+                0xC0,
+                b"\x08\x00\x00\x00\x01\x01\x01\x11\x00",
+            ),
+            "frame dimensions must be positive",
+        ),
+        (_jpeg_segment(0xE0, b""), "no frame dimensions were found"),
+        (b"\xff\xd8\xff\xff", "no frame dimensions were found"),
+    ],
+)
+def test_rendered_image_rejects_invalid_jpeg_container(
+    data: bytes,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        RenderedImage.from_bytes(data)
+
+
+def test_rendered_image_rejects_unknown_signature_and_mutable_data() -> None:
+    with pytest.raises(ValueError, match="PNG or JPEG signature"):
+        RenderedImage.from_bytes(b"not-an-image")
+    with pytest.raises(TypeError, match="data must be bytes"):
+        RenderedImage(cast("bytes", bytearray(encoded_image("png"))))
+
+
 def test_rendered_html_stringifies_to_content() -> None:
     artifact = RenderedHtml(content="<p>hi</p>")
 
@@ -138,44 +228,20 @@ def test_rendered_html_stringifies_to_content() -> None:
     assert artifact.content == "<p>hi</p>"
 
 
-def test_markdown_request_requires_content_or_path() -> None:
-    with pytest.raises(InvalidRenderRequest, match="markdown"):
-        RenderMarkdownRequest()
+@pytest.mark.parametrize("content", [None, 123, b"<p>hi</p>"])
+def test_rendered_html_rejects_non_string_content(content: object) -> None:
+    with pytest.raises(TypeError, match="content must be a string"):
+        RenderedHtml(content=cast("str", content))
 
 
-def test_template_request_requires_template_name() -> None:
-    with pytest.raises(InvalidRenderRequest, match="template_name"):
-        RenderTemplateRequest(template_path="templates", template_name="")
-
-
-def test_template_request_snapshots_mutable_inputs() -> None:
-    from types import MappingProxyType  # noqa: PLC0415
-
-    live_variables: dict[str, object] = {"name": "a"}
-    request = RenderTemplateRequest(
-        template_path="templates",
-        template_name="card.html",
-        variables=live_variables,
-        extensions=[],
-    )
-
-    # Mutating the caller's original dict must not affect the request.
-    live_variables["name"] = "b"
-    live_variables["injected"] = True
-    assert dict(request.variables) == {"name": "a"}
-
-    # The request owns a read-only snapshot, not the caller's live container.
-    assert isinstance(request.variables, MappingProxyType)
-    assert isinstance(request.extensions, tuple)
-
-
-@pytest.mark.parametrize("timeout", [0.0, -1.0, math.nan, math.inf, -math.inf])
-def test_timeout_must_be_finite_and_positive(timeout: float) -> None:
-    with pytest.raises(InvalidRenderRequest, match="timeout_seconds"):
-        RenderHtmlRequest(html="<p>hi</p>", timeout_seconds=timeout)
-
-
-def test_policy_resolve_mode_mapping_is_exhaustive() -> None:
-    assert set(POLICY_RESOLVE_MODES) == set(ResourcePolicy)
-    for policy in ResourcePolicy:
-        assert isinstance(resolve_mode_for_policy(policy), ResourceResolveMode)
+def test_render_operation_identity_is_output_explicit() -> None:
+    assert {operation.value for operation in RenderOperation} == {
+        "html_to_image",
+        "text_to_image",
+        "markdown_to_image",
+        "template_to_image",
+        "prepared_html_to_image",
+        "raster_scene_to_image",
+        "template_to_html",
+    }
+    assert all("rasterize" not in operation.value for operation in RenderOperation)

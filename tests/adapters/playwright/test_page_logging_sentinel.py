@@ -99,28 +99,30 @@ def test_page_logging_handlers_never_emit_console_or_error_payload() -> None:
 async def test_resource_resolve_failure_log_is_payload_free() -> None:
     from entari_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
         AnyioWorkerExecutor,
-        CompositeResourceReader,
+        CompositeResourceFetcher,
         ConfiguredLocalAccessPolicy,
         RemoteTransportExecutor,
     )
     from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
-        ResourceStrategy,
+        LocalResourceStrategy,
     )
     from entari_plugin_htmlrender.resources.service import (  # noqa: PLC0415
         ResourceService,
     )
 
+    local_access = ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True)
     resources = ResourceService(
-        reader=CompositeResourceReader(
+        fetcher=CompositeResourceFetcher(
             AnyioWorkerExecutor(),
+            local_access=local_access,
             remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
         ),
-        local_access=ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True),
-        strategy=ResourceStrategy(),
+        local_access=local_access,
+        strategy=LocalResourceStrategy(),
     )
 
-    class _RaisingResolver:
-        def resolve(
+    class _RaisingMaterializer:
+        async def materialize(
             self, value: object, *, template_base: Path | None = None
         ) -> object:
             del value, template_base
@@ -130,11 +132,12 @@ async def test_resource_resolve_failure_log_is_payload_free() -> None:
     with _captured_logs() as records:
         # Non-strict custom resolver failure must log without the resource
         # value or the raised error message.
-        result = await resources.resolve_template_vars(
+        result = await resources.materialize_template_variables(
             {"asset": secret_value},
-            resolver=_RaisingResolver(),
+            materializer=_RaisingMaterializer(),
             strict=False,
+            template_base=None,
         )
 
-    assert result.value == {"asset": secret_value}
+    assert result == {"asset": secret_value}
     assert _SECRET not in "\n".join(records)

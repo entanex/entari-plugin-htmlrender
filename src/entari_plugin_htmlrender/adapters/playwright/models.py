@@ -2,7 +2,7 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from entari_plugin_htmlrender.rendering.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.errors import InvalidRenderInputError
 
 
 class ViewportConfig(BaseModel):
@@ -216,4 +216,8 @@ def _build_screenshot_config(
             full_page=full_page,
             wait_before_screenshot=wait_before_screenshot,
         )
-    raise InvalidRenderRequest(f"Unsupported Playwright image format: {image_type!r}")
+    raise InvalidRenderInputError(
+        f"Unsupported Playwright image format: {image_type!r}",
+        operation="rasterize_prepared",
+        field="format",
+    )

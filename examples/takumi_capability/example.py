@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from html import escape
+from typing import TYPE_CHECKING
 
-from entari_plugin_htmlrender import RuntimeSource, resolve_runtime
+if TYPE_CHECKING:
+    from entari_plugin_htmlrender.capabilities import TakumiCapability
 
 CARD_STYLE = """
 body { margin: 0; background: #111827; color: #f9fafb; font-family: sans-serif; }
@@ -14,19 +16,17 @@ body { margin: 0; background: #111827; color: #f9fafb; font-family: sans-serif; 
 """
 
 
-async def render_takumi_card(runtime: RuntimeSource, title: str) -> bytes:
+async def render_takumi_card(takumi: TakumiCapability, title: str) -> str:
     html = (
         '<div class="card">'
         f'<div class="title">{escape(title)}</div>'
-        '<div class="subtitle">Rendered through a leased native extension</div>'
+        '<div class="subtitle">Rendered through a managed capability lease</div>'
         "</div>"
     )
-    takumi = resolve_runtime(runtime).extensions.takumi
-    async with takumi.api() as api:
-        return await api.render_html(
+    async with takumi.lease_session() as session:
+        return await session.render_svg_html(
             html,
             stylesheets=(CARD_STYLE,),
             width=640,
             height=240,
-            device_pixel_ratio=1.0,
         )

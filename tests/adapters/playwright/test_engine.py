@@ -20,7 +20,10 @@ from entari_plugin_htmlrender.adapters.playwright.render import (
     PlaywrightMode,
     WsVersionRiskLevel,
 )
-from entari_plugin_htmlrender.providers.sdk import ProviderAvailability
+from entari_plugin_htmlrender.providers.sdk import (
+    ProviderAvailable,
+    ProviderUnavailable,
+)
 from entari_plugin_htmlrender.rendering.observers import NoopOperationObserver
 
 if TYPE_CHECKING:
@@ -298,9 +301,9 @@ def test_availability_remote_and_install_branches(
 
     result = playwright_availability(PlaywrightConfig.model_validate(settings))
 
-    assert result.available is available
-    if reason is not None:
-        assert reason in (result.reason or "")
+    assert isinstance(result, ProviderAvailable) is available
+    if reason is not None and isinstance(result, ProviderUnavailable):
+        assert reason in result.reason
 
 
 def test_availability_checks_explicit_executable(
@@ -315,8 +318,8 @@ def test_availability_checks_explicit_executable(
     executable.write_text("browser", encoding="utf-8")
     present = playwright_availability(PlaywrightConfig(executable_path=executable))
 
-    assert missing.available is False
-    assert present == ProviderAvailability(available=True)
+    assert isinstance(missing, ProviderUnavailable)
+    assert isinstance(present, ProviderAvailable)
 
 
 def test_availability_checks_injected_storage_path(
@@ -340,7 +343,7 @@ def test_availability_checks_injected_storage_path(
 
     result = playwright_availability(config)
 
-    assert result.available is False
+    assert isinstance(result, ProviderUnavailable)
     installed.assert_called_once_with(
         BrowserEngine.FIREFOX,
         storage_path=storage_path,
@@ -374,9 +377,6 @@ async def test_create_and_close_lease_owns_process_and_browser(
     scope = mocker.patch(
         "entari_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
     )
-    reconcile = mocker.patch(
-        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
-    )
     record = mocker.patch(
         "entari_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
     )
@@ -387,7 +387,6 @@ async def test_create_and_close_lease_owns_process_and_browser(
     assert lease.playwright is playwright
     assert lease.browser is browser
     scope.assert_called_once()
-    reconcile.assert_called_once()
     record.assert_called_once()
     browser.close.assert_awaited_once_with()
     playwright.stop.assert_awaited_once_with()
@@ -412,9 +411,6 @@ async def test_create_lease_cleans_process_when_browser_creation_fails(
     )
     mocker.patch(
         "entari_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
-    )
-    mocker.patch(
-        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
     )
     mocker.patch(
         "entari_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
@@ -475,9 +471,6 @@ async def test_create_lease_failure_aggregates_driver_stop_failure(
         "entari_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
     )
     mocker.patch(
-        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
-    )
-    mocker.patch(
         "entari_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
     )
 
@@ -492,18 +485,18 @@ async def test_create_lease_propagates_preparation_failure(
     mocker: MockerFixture,
 ) -> None:
     engine = _engine()
-    reconcile = mocker.patch(
-        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache",
-        side_effect=RuntimeError("cache reconciliation failed"),
+    record = mocker.patch(
+        "entari_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state",
+        side_effect=RuntimeError("runtime state failed"),
     )
     starter = mocker.patch(
         "entari_plugin_htmlrender.adapters.playwright.render.async_playwright"
     )
 
-    with pytest.raises(RuntimeError, match="cache reconciliation failed"):
+    with pytest.raises(RuntimeError, match="runtime state failed"):
         await engine.create_lease()
 
-    reconcile.assert_called_once()
+    record.assert_called_once()
     starter.assert_not_called()
 
 

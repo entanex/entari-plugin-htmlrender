@@ -9,11 +9,10 @@ import pytest
 from entari_plugin_htmlrender.adapters.playwright.prepared import (
     build_browser_load_plan,
     install_browser_asset_routes,
-    materialize_prepared_html,
 )
 from entari_plugin_htmlrender.adapters.resources.reader import (
     AnyioWorkerExecutor,
-    CompositeResourceReader,
+    CompositeResourceFetcher,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
 )
@@ -22,7 +21,7 @@ from entari_plugin_htmlrender.preparation import (
     PreparedStylesheet,
     parse_html,
 )
-from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.resources.config import LocalResourceStrategy
 from entari_plugin_htmlrender.resources.service import ResourceService
 
 if TYPE_CHECKING:
@@ -39,13 +38,15 @@ def _asset_url(payload: bytes) -> str:
 
 
 def _resources() -> ResourceService:
+    local_access = ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True)
     return ResourceService(
-        reader=CompositeResourceReader(
+        fetcher=CompositeResourceFetcher(
             AnyioWorkerExecutor(),
+            local_access=local_access,
             remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
         ),
-        local_access=ConfiguredLocalAccessPolicy(allowed_roots=(), allow_any=True),
-        strategy=ResourceStrategy(),
+        local_access=local_access,
+        strategy=LocalResourceStrategy(),
     )
 
 
@@ -62,7 +63,7 @@ def _write_recursive_stylesheets(root: Path) -> tuple[Path, Path, Path, Path]:
     return document, site, theme, font
 
 
-def test_materialize_prepared_html_preserves_styles_and_routes_assets() -> None:
+def test_browser_load_plan_preserves_styles_and_routes_assets() -> None:
     prepared = parse_html(
         """<!doctype html><html><head>
         <style media="screen">.base { background: url(memory:background) }</style>
@@ -74,7 +75,7 @@ def test_materialize_prepared_html_preserves_styles_and_routes_assets() -> None:
         ),
     )
 
-    document = materialize_prepared_html(prepared)
+    document = build_browser_load_plan(prepared).html
 
     assert ".explicit {" in document
     assert '<style media="screen">.base {' in document
@@ -318,25 +319,18 @@ async def test_install_browser_asset_routes_fulfils_with_cors(
     )
 
 
-def test_materialize_prepared_html_preserves_plain_document() -> None:
+def test_browser_load_plan_preserves_plain_document() -> None:
     prepared = parse_html("<main>unchanged</main>")
-    assert materialize_prepared_html(prepared) == prepared.html
+    assert build_browser_load_plan(prepared).html == prepared.html
 
 
-@pytest.mark.parametrize(
-    "assets",
-    [
-        (
+def test_browser_load_plan_rejects_duplicate_assets() -> None:
+    prepared = parse_html(
+        "<main></main>",
+        assets=(
             PreparedAsset("duplicate", b"first"),
             PreparedAsset("duplicate", b"second"),
         ),
-        (PreparedAsset("", b"empty"),),
-        (PreparedAsset("asset", b"invalid", 'image/png" unsafe'),),
-    ],
-)
-def test_materialize_prepared_html_rejects_invalid_assets(
-    assets: tuple[PreparedAsset, ...],
-) -> None:
-    prepared = parse_html("<main></main>", assets=assets)
+    )
     with pytest.raises(ValueError):
-        materialize_prepared_html(prepared)
+        build_browser_load_plan(prepared)

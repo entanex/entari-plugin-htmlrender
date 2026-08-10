@@ -13,21 +13,25 @@ from entari_plugin_htmlrender.adapters._lease import (
     ExecutionLeaseProvider,
     PreparedHtmlLeaseExecutor,
 )
-from entari_plugin_htmlrender.preparation import parse_html
-from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
-from entari_plugin_htmlrender.rendering.errors import (
+from entari_plugin_htmlrender.errors import (
     ProviderExecutionError,
     ProviderLifecycleError,
-    RenderingError,
 )
+from entari_plugin_htmlrender.preparation import parse_html
+from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 from entari_plugin_htmlrender.rendering.observers import NoopOperationObserver
+from tests.adapters.conftest import RecordingOperationObserver
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from entari_plugin_htmlrender.errors import ProviderError
     from entari_plugin_htmlrender.rendering import RenderedImage
-    from entari_plugin_htmlrender.rendering.requests import ResourcePolicy
+    from entari_plugin_htmlrender.resources.config import (
+        ResourceMaterializationPolicy,
+    )
 
 
 @dataclass(slots=True)
@@ -39,12 +43,16 @@ class _Lease:
 @contextmanager
 def _translate(
     operation: str,
-    error_type: type[RenderingError],
+    error_type: type[ProviderError],
 ) -> Iterator[None]:
     try:
         yield
     except Exception as error:
-        raise error_type(f"{operation}: {error}") from error
+        raise error_type(
+            f"{operation}: {error}",
+            provider_id="test",
+            operation=operation,
+        ) from error
 
 
 def _provider(
@@ -55,6 +63,7 @@ def _provider(
         create=create,
         is_alive=lambda lease: lease.alive,
         close=close,
+        provider_id="test",
         observer=NoopOperationObserver(),
         translate=_translate,
         observation_attributes={"render.backend": "test"},
@@ -176,6 +185,7 @@ async def test_close_rejects_new_work_and_drains_the_active_operation() -> None:
         create=create,
         is_alive=lambda lease: lease.alive,
         close=close,
+        provider_id="test",
         observer=NoopOperationObserver(),
         translate=_translate,
         observation_attributes={"render.backend": "test"},
@@ -493,9 +503,9 @@ async def test_prepared_executor_holds_lease_until_rasterize_finishes() -> None:
         lease: _Lease,
         prepared: PreparedHtml,
         options: RasterOptions,
-        resource_policy: ResourcePolicy | None,
+        materialization_policy: ResourceMaterializationPolicy | None,
     ) -> RenderedImage:
-        del prepared, options, resource_policy
+        del prepared, options, materialization_policy
         assert lease.alive is True
         rasterize_entered.set()
         await release_rasterize.wait()
@@ -507,7 +517,7 @@ async def test_prepared_executor_holds_lease_until_rasterize_finishes() -> None:
         rasterize=rasterize,
         translate=_translate,
         observer=NoopOperationObserver(),
-        operation=None,
+        telemetry_operation=None,
         observation_attributes={"render.backend": "test"},
     )
 
@@ -516,6 +526,7 @@ async def test_prepared_executor_holds_lease_until_rasterize_finishes() -> None:
             await executor.execute(
                 parse_html("<p>test</p>"),
                 RasterOptions(width=64, height=32),
+                operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
             )
         )
 
@@ -533,13 +544,13 @@ async def test_prepared_executor_holds_lease_until_rasterize_finishes() -> None:
         await executor.execute(
             parse_html("<p>closed</p>"),
             RasterOptions(width=64, height=32),
+            operation=RenderOperation.PREPARED_HTML_TO_IMAGE,
         )
 
 
-async def test_prepared_executor_timeout_includes_lazy_lease_startup() -> None:
+async def test_prepared_executor_separates_telemetry_and_error_operations() -> None:
     async def create() -> _Lease:
-        await anyio.sleep_forever()
-        raise AssertionError("unreachable")
+        return _Lease(1)
 
     async def close(lease: _Lease) -> None:
         lease.alive = False
@@ -548,23 +559,27 @@ async def test_prepared_executor_timeout_includes_lazy_lease_startup() -> None:
         lease: _Lease,
         prepared: PreparedHtml,
         options: RasterOptions,
-        resource_policy: ResourcePolicy | None,
+        materialization_policy: ResourceMaterializationPolicy | None,
     ) -> RenderedImage:
-        del lease, prepared, options, resource_policy
-        return rendered_image("png", width=128, height=64)
+        del lease, prepared, options, materialization_policy
+        raise RuntimeError("native failure")
 
+    observer = RecordingOperationObserver()
     executor = PreparedHtmlLeaseExecutor(
         leases=_provider(create, close),
         rasterize=rasterize,
         translate=_translate,
-        observer=NoopOperationObserver(),
-        operation=None,
+        observer=observer,
+        telemetry_operation="test_provider.rasterize_prepared",
         observation_attributes={"render.backend": "test"},
     )
 
-    with pytest.raises(ProviderExecutionError, match="timed out"):
+    with pytest.raises(ProviderExecutionError) as raised:
         await executor.execute(
             parse_html("<p>test</p>"),
-            RasterOptions(width=64, height=32),
-            timeout_seconds=0.01,
+            RasterOptions(),
+            operation=RenderOperation.HTML_TO_IMAGE,
         )
+
+    assert raised.value.operation == RenderOperation.HTML_TO_IMAGE.value
+    assert "test_provider.rasterize_prepared" in observer.names()

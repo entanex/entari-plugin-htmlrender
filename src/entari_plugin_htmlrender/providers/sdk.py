@@ -1,12 +1,10 @@
-"""Provider SDK: the formal contract between the plugin and render engines.
+"""Provider SDK: stable contracts for render-provider composition.
 
 A provider is loaded either from an explicit composition-root override or
-from the ``entari_plugin_htmlrender.providers`` entry-point group. Settings
-flow through the provider opaquely: the composition root calls
-``parse_settings`` and hands the result straight back to ``availability`` and
-``compose``. Providers narrow the settings
-object internally; this keeps entry-point loading fully typed without
-generics over dynamically discovered classes.
+from the versioned ``entari_plugin_htmlrender.providers.v2`` entry-point group.
+Raw mappings cross the boundary once through :meth:`RenderProvider.parse_config`;
+the resulting provider-owned value flows unchanged through availability,
+resource planning, and composition.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping  # noqa: TC003 -- runtime annotation contract
 from dataclasses import dataclass
 import re
-from typing import Final, Protocol, TypeAlias, TypeVar, runtime_checkable
+from typing import Final, NewType, Protocol, TypeAlias, TypeVar, runtime_checkable
 
 from entari_plugin_htmlrender.rendering.capabilities import (  # noqa: TC001
     CapabilityCatalog,
@@ -25,65 +23,87 @@ from entari_plugin_htmlrender.rendering.ports import (  # noqa: TC001
     PreparedHtmlExecutor,
     RuntimeLifecycle,
 )
-from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.resources.config import (
+    LocalResourceStrategy,
+    RemoteResourceStrategy,
+    ResourceStrategy,
+)
 from entari_plugin_htmlrender.resources.observation import (  # noqa: TC001
     CacheObserver,
 )
 from entari_plugin_htmlrender.resources.ports import (  # noqa: TC001
     AssetPublisher,
-    ProviderResources,
+    ProviderResourceAccess,
 )
 
-EngineId: TypeAlias = str
-SettingsT = TypeVar("SettingsT")
+ProviderId = NewType("ProviderId", str)
+ConfigT = TypeVar("ConfigT")
 
-ENTRY_POINT_GROUP = "entari_plugin_htmlrender.providers"
+ENTRY_POINT_GROUP = "entari_plugin_htmlrender.providers.v2"
 
-PLAYWRIGHT_PROVIDER_ID: Final[EngineId] = "playwright"
-TAKUMI_PROVIDER_ID: Final[EngineId] = "takumi"
+PLAYWRIGHT_PROVIDER_ID: Final[ProviderId] = ProviderId("playwright")
+TAKUMI_PROVIDER_ID: Final[ProviderId] = ProviderId("takumi")
 
-RESERVED_PROVIDER_IDS: frozenset[EngineId] = frozenset(
+RESERVED_PROVIDER_IDS: frozenset[ProviderId] = frozenset(
     {PLAYWRIGHT_PROVIDER_ID, TAKUMI_PROVIDER_ID}
 )
-_ENGINE_ID_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?")
+_PROVIDER_ID_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?")
 
 __all__ = [
     "ENTRY_POINT_GROUP",
     "PLAYWRIGHT_PROVIDER_ID",
     "RESERVED_PROVIDER_IDS",
     "TAKUMI_PROVIDER_ID",
-    "EngineBindings",
-    "EngineId",
-    "EngineProvider",
+    "LocalResourceStrategy",
     "ProviderAvailability",
+    "ProviderAvailable",
+    "ProviderBinding",
     "ProviderDependencies",
+    "ProviderId",
+    "ProviderUnavailable",
+    "RemoteResourceStrategy",
+    "RenderProvider",
     "ResourceStrategy",
-    "validate_engine_id",
+    "validate_provider_id",
 ]
 
 
-def validate_engine_id(value: object) -> EngineId:
+def validate_provider_id(value: object) -> ProviderId:
     """Validate the stable identifier shared by config and entry points."""
-    if not isinstance(value, str) or _ENGINE_ID_PATTERN.fullmatch(value) is None:
+    if not isinstance(value, str) or _PROVIDER_ID_PATTERN.fullmatch(value) is None:
         raise ValueError(
             "provider id must be a non-empty lowercase identifier containing "
             "only ASCII letters, digits, '.', '_' or '-', with an alphanumeric "
             "first and last character"
         )
-    return value
+    return ProviderId(value)
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderAvailability:
-    """Whether a provider can run in the current environment."""
+class ProviderAvailable:
+    """The provider can run with the parsed configuration."""
 
-    available: bool
-    reason: str | None = None
+
+@dataclass(frozen=True, slots=True)
+class ProviderUnavailable:
+    """The provider cannot currently run with the parsed configuration."""
+
+    reason: str
+    retryable: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reason, str) or not self.reason.strip():
+            raise ValueError("provider unavailability reason must not be empty")
+        if type(self.retryable) is not bool:
+            raise ValueError("provider unavailability retryable must be a boolean")
+
+
+ProviderAvailability: TypeAlias = ProviderAvailable | ProviderUnavailable
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderDependencies:
-    """Services the composition root hands to ``EngineProvider.compose``.
+    """Services the composition root hands to ``RenderProvider.compose``.
 
     Providers never read global configuration or construct their own
     observers; everything they need arrives here.
@@ -92,13 +112,13 @@ class ProviderDependencies:
     operation_observer: OperationObserver
     operation_admission: OperationAdmission
     cache_observer: CacheObserver
-    resources: ProviderResources
+    resources: ProviderResourceAccess
     asset_publisher: AssetPublisher | None
 
 
 @dataclass(frozen=True, slots=True)
-class EngineBindings:
-    """Immutable composition DTO produced by ``EngineProvider.compose``.
+class ProviderBinding:
+    """Immutable composition value produced by ``RenderProvider.compose``.
 
     Only the composition root consumes this; caller code receives the
     contained lifecycle and executor through constructor injection.
@@ -110,20 +130,20 @@ class EngineBindings:
 
 
 @runtime_checkable
-class EngineProvider(Protocol[SettingsT]):
-    """A render engine packaged for discovery and composition."""
+class RenderProvider(Protocol[ConfigT]):
+    """A discoverable implementation of HTML rendering operations."""
 
     @property
-    def id(self) -> EngineId: ...
+    def id(self) -> ProviderId: ...
 
-    def parse_settings(self, raw: Mapping[str, object]) -> SettingsT: ...
+    def parse_config(self, raw: Mapping[str, object]) -> ConfigT: ...
 
-    def availability(self, settings: SettingsT) -> ProviderAvailability: ...
+    def check_availability(self, config: ConfigT) -> ProviderAvailability: ...
 
-    def resource_strategy(self, settings: SettingsT) -> ResourceStrategy: ...
+    def resource_strategy(self, config: ConfigT) -> ResourceStrategy: ...
 
     def compose(
         self,
-        settings: SettingsT,
+        config: ConfigT,
         dependencies: ProviderDependencies,
-    ) -> EngineBindings: ...
+    ) -> ProviderBinding: ...

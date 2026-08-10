@@ -1,25 +1,24 @@
-"""Render one backend-neutral scene with Pillow or Skia."""
+"""Rasterize one backend-neutral scene through an injected graphics contract."""
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING
 
-from entari_plugin_htmlrender import RenderedImage, RuntimeSource, resolve_runtime
 from entari_plugin_htmlrender.graphics import (
     FillRect,
     PixelRect,
     RasterScene,
-    RenderRasterSceneRequest,
     RGBAColor,
 )
 
+if TYPE_CHECKING:
+    from entari_plugin_htmlrender import RenderedImage
+    from entari_plugin_htmlrender.graphics import GraphicsRenderer
 
-async def render_scene(
-    runtime: RuntimeSource,
-    backend: Literal["pillow", "skia"] = "pillow",
+
+async def rasterize_scene(
+    graphics: GraphicsRenderer,
 ) -> RenderedImage:
-    extensions = resolve_runtime(runtime).extensions
-    renderer = extensions.pillow if backend == "pillow" else extensions.skia
     scene = RasterScene(
         width=640,
         height=360,
@@ -31,4 +30,4 @@ async def render_scene(
             FillRect(PixelRect(320, 160, 184, 32), RGBAColor(45, 212, 191, 192)),
         ),
     )
-    return await renderer.render(RenderRasterSceneRequest(scene))
+    return await graphics.rasterize(scene)

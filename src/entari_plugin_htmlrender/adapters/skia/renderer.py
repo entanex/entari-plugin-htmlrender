@@ -8,13 +8,17 @@ from __future__ import annotations
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, cast, final
 
-from entari_plugin_htmlrender.graphics.execution import run_raster_backend
+from entari_plugin_htmlrender.graphics.execution import rasterize_with_backend
+from entari_plugin_htmlrender.graphics.models import (
+    DEFAULT_RASTER_ENCODE_OPTIONS,
+    RasterEncodeOptions,
+)
 from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
     from entari_plugin_htmlrender.graphics.models import (
-        RenderRasterSceneRequest,
+        RasterScene,
         RGBAColor,
     )
     from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
@@ -145,21 +149,23 @@ def _surface(width: int, height: int) -> _SkiaSurface:
     return surface
 
 
-def _encode(image: _SkiaImage, request: RenderRasterSceneRequest) -> bytes:
-    if request.output.format == "png":
+def _encode(image: _SkiaImage, output: RasterEncodeOptions) -> bytes:
+    if output.format == "png":
         data = image.encodeToData(_skia.EncodedImageFormat.kPNG, 100)
     else:
         data = image.encodeToData(
             _skia.EncodedImageFormat.kJPEG,
-            request.output.jpeg_quality,
+            output.jpeg_quality,
         )
     if data is None:
-        raise RuntimeError(f"Skia could not encode {request.output.format.upper()}.")
+        raise RuntimeError(f"Skia could not encode {output.format.upper()}.")
     return bytes(data)
 
 
-def _render_sync(request: RenderRasterSceneRequest) -> RenderedImage:
-    scene = request.scene
+def _rasterize_sync(
+    scene: RasterScene,
+    output: RasterEncodeOptions,
+) -> RenderedImage:
     surface = _surface(scene.width, scene.height)
     canvas = surface.getCanvas()
     canvas.clear(_skia_color(scene.background))
@@ -177,10 +183,10 @@ def _render_sync(request: RenderRasterSceneRequest) -> RenderedImage:
         )
 
     image = surface.makeImageSnapshot()
-    if request.output.format == "jpeg":
+    if output.format == "jpeg":
         matte_surface = _surface(scene.width, scene.height)
         matte_canvas = matte_surface.getCanvas()
-        matte_canvas.clear(_skia_color(request.output.jpeg_matte))
+        matte_canvas.clear(_skia_color(output.jpeg_matte))
         matte_paint = _skia.Paint(AntiAlias=False)
         matte_paint.setBlendMode(_skia.BlendMode.kSrcOver)
         matte_canvas.drawImage(
@@ -193,14 +199,14 @@ def _render_sync(request: RenderRasterSceneRequest) -> RenderedImage:
         image = matte_surface.makeImageSnapshot()
 
     return RenderedImage.from_bytes(
-        _encode(image, request),
-        expected_format=request.output.format,
+        _encode(image, output),
+        expected_format=output.format,
     )
 
 
 @final
 class SkiaRasterSceneRenderer:
-    """Render neutral scenes through skia-python on an injected worker thread."""
+    """Rasterize neutral scenes through skia-python on an injected worker thread."""
 
     def __init__(
         self,
@@ -215,11 +221,17 @@ class SkiaRasterSceneRenderer:
         self._operation_admission = operation_admission
         self._budget = budget
 
-    async def render(self, request: RenderRasterSceneRequest) -> RenderedImage:
-        return await run_raster_backend(
+    async def rasterize(
+        self,
+        scene: RasterScene,
+        *,
+        output: RasterEncodeOptions = DEFAULT_RASTER_ENCODE_OPTIONS,
+    ) -> RenderedImage:
+        return await rasterize_with_backend(
             "skia",
-            request,
-            _render_sync,
+            scene,
+            output,
+            _rasterize_sync,
             worker=self._worker,
             observer=self._observer,
             operation_admission=self._operation_admission,

@@ -15,7 +15,6 @@ from entari_plugin_htmlrender.graphics import (
     PixelRect,
     RasterEncodeOptions,
     RasterScene,
-    RenderRasterSceneRequest,
     RGBAColor,
 )
 from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
@@ -97,7 +96,7 @@ async def test_raster_backend_renders_owned_scene_contract(
     result = await _renderer(
         renderer_type,
         observer=operation_observer,
-    ).render(RenderRasterSceneRequest(scene, RasterEncodeOptions()))
+    ).rasterize(scene)
 
     assert (result.format, result.width, result.height) == ("png", 4, 3)
     _assert_channels_close(
@@ -106,7 +105,7 @@ async def test_raster_backend_renders_owned_scene_contract(
         tolerance=1,
     )
     assert _pixel(result, 2, 1, mode="RGBA") == (20, 40, 60, 128)
-    assert operation_observer.names() == [f"graphics.{backend}.render_scene"]
+    assert operation_observer.names() == [f"graphics.{backend}.rasterize"]
 
 
 @pytest.mark.parametrize(
@@ -126,11 +125,9 @@ async def test_raster_backend_encodes_jpeg_over_matte(
         commands=(FillRect(PixelRect(8, 4, 16, 16), RGBAColor(220, 100, 40, 128)),),
     )
 
-    result = await _renderer(renderer_type).render(
-        RenderRasterSceneRequest(
-            scene,
-            RasterEncodeOptions(format="jpeg", quality=100, matte=matte),
-        )
+    result = await _renderer(renderer_type).rasterize(
+        scene,
+        output=RasterEncodeOptions(format="jpeg", quality=100, matte=matte),
     )
 
     assert (result.format, result.width, result.height) == ("jpeg", 48, 24)

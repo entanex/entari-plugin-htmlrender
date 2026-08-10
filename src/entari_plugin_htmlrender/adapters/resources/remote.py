@@ -9,6 +9,7 @@ cannot swap in a blocked address between the check and the connect.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable, Iterable, Mapping  # noqa: TC003
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
@@ -19,7 +20,7 @@ import socket
 import ssl
 import threading
 import time
-from typing import TYPE_CHECKING, TypeVar, final, overload
+from typing import TypeVar, final, overload
 from urllib.parse import urljoin, urlsplit
 
 import anyio
@@ -29,24 +30,25 @@ from anyio.lowlevel import EventLoopToken, current_token
 from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
 from entari_plugin_htmlrender.resources.config import RemoteAccessSettings
 from entari_plugin_htmlrender.resources.errors import (
-    ResourceAccessDenied,
-    ResourceNotFound,
-    ResourceResolutionError,
-    ResourceSizeExceeded,
+    ResourceAccessDeniedError,
+    ResourceAuthenticationError,
+    ResourceFetchError,
+    ResourceNetworkError,
+    ResourceNotFoundError,
+    ResourceRemoteResponseError,
+    ResourceTimeoutError,
+    ResourceTooLargeError,
 )
 from entari_plugin_htmlrender.resources.models import (
     NotModified,
+    RemoteResourceRef,
     ResourceContent,
     ResourceRevision,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
-
-    from entari_plugin_htmlrender.resources.models import RemoteResourceRef
-    from entari_plugin_htmlrender.resources.ports import RemoteAccessPolicy
+from entari_plugin_htmlrender.resources.ports import RemoteAccessPolicy  # noqa: TC001
 
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_RETRYABLE_RESPONSE_STATUSES = frozenset({408, 425, 429})
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 
 _T = TypeVar("_T")
@@ -55,8 +57,12 @@ _T = TypeVar("_T")
 def read_bounded(read: Callable[[int], bytes], limit: int, label: str) -> bytes:
     data = read(-1 if limit == 0 else limit + 1)
     if limit > 0 and len(data) > limit:
-        raise ResourceSizeExceeded(
-            f"Resource {label} exceeds the configured {limit}-byte read limit."
+        raise ResourceTooLargeError(
+            f"Resource {label} exceeds the configured {limit}-byte fetch limit.",
+            reference=label,
+            operation="fetch",
+            actual_size=len(data),
+            maximum_size=limit,
         )
     return data
 
@@ -104,18 +110,28 @@ class ConfiguredRemoteAccessPolicy:
     def _host_of(self, url: str) -> str:
         split = urlsplit(url)
         if split.scheme not in _ALLOWED_SCHEMES:
-            raise ResourceAccessDenied(
-                f"Remote resource scheme {split.scheme!r} is not allowed: {url}"
+            raise ResourceAccessDeniedError(
+                f"Remote resource scheme {split.scheme!r} is not allowed: {url}",
+                reference=url,
+                operation="authorize",
             )
         host = split.hostname
         if not host:
-            raise ResourceAccessDenied(f"Remote resource URL has no host: {url}")
+            raise ResourceAccessDeniedError(
+                f"Remote resource URL has no host: {url}",
+                reference=url,
+                operation="authorize",
+            )
         return _normalize_host(host)
 
     def authorize_url(self, url: str) -> None:
         host = self._host_of(url)
         if _matches_host(host, self._deny_hosts):
-            raise ResourceAccessDenied(f"Remote host {host!r} is denied: {url}")
+            raise ResourceAccessDeniedError(
+                f"Remote host {host!r} is denied: {url}",
+                reference=url,
+                operation="authorize",
+            )
         if _matches_host(host, self._allow_hosts):
             return
         try:
@@ -131,7 +147,11 @@ class ConfiguredRemoteAccessPolicy:
     ) -> None:
         host = self._host_of(url)
         if _matches_host(host, self._deny_hosts):
-            raise ResourceAccessDenied(f"Remote host {host!r} is denied: {url}")
+            raise ResourceAccessDeniedError(
+                f"Remote host {host!r} is denied: {url}",
+                reference=url,
+                operation="authorize",
+            )
         if _matches_host(host, self._allow_hosts):
             return
         self._check_address(url, address)
@@ -140,8 +160,10 @@ class ConfiguredRemoteAccessPolicy:
         if self._settings.allow_private_networks:
             return
         if _is_blocked_address(address):
-            raise ResourceAccessDenied(
-                f"Remote resource resolves to blocked address {address}: {url}"
+            raise ResourceAccessDeniedError(
+                f"Remote resource resolves to blocked address {address}: {url}",
+                reference=url,
+                operation="authorize",
             )
 
 
@@ -194,7 +216,16 @@ def _resolve_addresses(
     host: str,
     port: int,
 ) -> tuple[IPv4Address | IPv6Address, ...]:
-    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as error:
+        raise ResourceNetworkError(
+            f"Remote host name resolution failed: {host}",
+            reference=host,
+            operation="fetch",
+            retryable=True,
+            source=error,
+        ) from error
     addresses: list[IPv4Address | IPv6Address] = []
     seen: set[str] = set()
     for info in infos:
@@ -204,7 +235,12 @@ def _resolve_addresses(
         seen.add(raw)
         addresses.append(ip_address(raw.split("%", 1)[0]))
     if not addresses:
-        raise ResourceResolutionError(f"Remote host did not resolve: {host}")
+        raise ResourceNetworkError(
+            f"Remote host did not resolve: {host}",
+            reference=host,
+            operation="fetch",
+            retryable=True,
+        )
     return tuple(addresses)
 
 
@@ -379,7 +415,11 @@ class RemoteTransportExecutor:
         waiter: _AdmissionWaiter | None = None
         with self._mutex:
             if self._state is not _TransportState.OPEN:
-                raise ResourceResolutionError("Remote transport executor is closed.")
+                raise ResourceNetworkError(
+                    "Remote transport executor is closed.",
+                    reference=None,
+                    operation="fetch",
+                )
             if self._tokens > 0:
                 self._tokens -= 1
             else:
@@ -396,8 +436,10 @@ class RemoteTransportExecutor:
                     self._release_one_token()
                 raise
             if waiter.closed:
-                raise ResourceResolutionError(
-                    "Remote transport executor closed while waiting for admission."
+                raise ResourceNetworkError(
+                    "Remote transport executor closed while waiting for admission.",
+                    reference=None,
+                    operation="fetch",
                 )
 
         submission = _Submission(anyio.Event(), origin, origin_thread)
@@ -413,7 +455,11 @@ class RemoteTransportExecutor:
                 self._active[submission] = submission_deadline
         if future is None:
             self._release_one_token()
-            raise ResourceResolutionError("Remote transport executor is closed.")
+            raise ResourceNetworkError(
+                "Remote transport executor is closed.",
+                reference=None,
+                operation="fetch",
+            )
 
         def _finish(done: Future[_T]) -> None:
             del done
@@ -475,6 +521,9 @@ class RemoteTransportExecutor:
                 raise ProviderLifecycleError(
                     f"Remote transport close timed out with {remaining} "
                     "in-flight fetches still running; close may be retried.",
+                    provider_id=None,
+                    operation="aclose",
+                    retryable=True,
                     source=error,
                 ) from error
         self._pool.shutdown(wait=True)
@@ -518,17 +567,38 @@ def _read_response(
     if response.status in _REDIRECT_STATUSES:
         location = response.getheader("Location")
         if not location:
-            raise ResourceResolutionError(
-                f"Remote redirect carries no Location header: {url}"
+            raise ResourceRemoteResponseError(
+                f"Remote redirect carries no Location header: {url}",
+                reference=url,
+                operation="fetch",
+                status_code=response.status,
             )
         return _HopOutcome(redirect_to=urljoin(url, location))
     if conditional and response.status == 304:
         return _HopOutcome(not_modified=True)
     if response.status == 404:
-        raise ResourceNotFound(f"Remote resource was not found: {url}")
-    if response.status >= 400:
-        raise ResourceResolutionError(
-            f"Remote resource request failed with HTTP {response.status}: {url}"
+        raise ResourceNotFoundError(
+            f"Remote resource was not found: {url}",
+            reference=url,
+            operation="fetch",
+        )
+    if response.status in {401, 403}:
+        raise ResourceAuthenticationError(
+            f"Remote resource authorization failed with HTTP {response.status}: {url}",
+            reference=url,
+            operation="fetch",
+            status_code=response.status,
+        )
+    if not 200 <= response.status < 300:
+        raise ResourceRemoteResponseError(
+            f"Remote resource request failed with HTTP {response.status}: {url}",
+            reference=url,
+            operation="fetch",
+            status_code=response.status,
+            retryable=(
+                response.status in _RETRYABLE_RESPONSE_STATUSES
+                or response.status >= 500
+            ),
         )
     content_length = response.getheader("Content-Length")
     if (
@@ -537,9 +607,13 @@ def _read_response(
         and content_length.isdigit()
         and int(content_length) > max_resource_bytes
     ):
-        raise ResourceSizeExceeded(
+        raise ResourceTooLargeError(
             f"Resource {url} exceeds the configured "
-            f"{max_resource_bytes}-byte read limit."
+            f"{max_resource_bytes}-byte fetch limit.",
+            reference=url,
+            operation="fetch",
+            actual_size=int(content_length),
+            maximum_size=max_resource_bytes,
         )
     data = read_bounded(response.read, max_resource_bytes, url)
     media_type = response.headers.get_content_type()
@@ -571,7 +645,11 @@ def _perform_hop(
     split = urlsplit(url)
     host = split.hostname
     if not host:
-        raise ResourceResolutionError(f"Remote resource URL has no host: {url}")
+        raise ResourceFetchError(
+            f"Remote resource URL has no host: {url}",
+            reference=url,
+            operation="fetch",
+        )
     port = split.port or (443 if split.scheme == "https" else 80)
     last_error: OSError | None = None
     for address in pinned_addresses:
@@ -602,14 +680,25 @@ def _perform_hop(
             continue
         finally:
             connection.close()
-    raise ResourceResolutionError(
+    if isinstance(last_error, TimeoutError):
+        raise ResourceTimeoutError(
+            f"Remote connection exceeded its {socket_timeout}s deadline: {url}",
+            reference=url,
+            operation="fetch",
+            timeout_seconds=socket_timeout,
+            source=last_error,
+        ) from last_error
+    raise ResourceNetworkError(
         f"Remote host is unreachable at every authorized address: {url}",
+        reference=url,
+        operation="fetch",
+        retryable=True,
         source=last_error,
     ) from last_error
 
 
 @overload
-async def read_remote(
+async def fetch_remote(
     reference: RemoteResourceRef,
     *,
     policy: RemoteAccessPolicy,
@@ -621,7 +710,7 @@ async def read_remote(
 
 
 @overload
-async def read_remote(
+async def fetch_remote(
     reference: RemoteResourceRef,
     *,
     policy: RemoteAccessPolicy,
@@ -632,7 +721,7 @@ async def read_remote(
 ) -> ResourceContent | NotModified: ...
 
 
-async def read_remote(
+async def fetch_remote(
     reference: RemoteResourceRef,
     *,
     policy: RemoteAccessPolicy,
@@ -661,8 +750,10 @@ async def read_remote(
                 split = urlsplit(url)
                 host = split.hostname
                 if not host:
-                    raise ResourceResolutionError(
-                        f"Remote resource URL has no host: {url}"
+                    raise ResourceFetchError(
+                        f"Remote resource URL has no host: {url}",
+                        reference=url,
+                        operation="fetch",
                     )
                 port = split.port or (443 if split.scheme == "https" else 80)
                 addresses = await transport.run(
@@ -688,28 +779,37 @@ async def read_remote(
                     continue
                 if outcome.not_modified:
                     if conditional_revision is None:
-                        raise ResourceResolutionError(
-                            f"Remote resource produced no content: {url}"
+                        raise ResourceFetchError(
+                            f"Remote resource produced no content: {url}",
+                            reference=url,
+                            operation="fetch",
                         )
                     return NotModified(conditional_revision)
                 if outcome.content is None:
-                    raise ResourceResolutionError(
-                        f"Remote resource produced no content: {url}"
+                    raise ResourceFetchError(
+                        f"Remote resource produced no content: {url}",
+                        reference=url,
+                        operation="fetch",
                     )
                 return outcome.content
     except TimeoutError as error:
-        raise ResourceResolutionError(
+        raise ResourceTimeoutError(
             f"Remote resource fetch exceeded the {request_timeout_seconds}s deadline.",
+            reference=reference,
+            operation="fetch",
+            timeout_seconds=request_timeout_seconds,
             source=error,
         ) from error
-    raise ResourceResolutionError(
-        f"Remote resource exceeded {policy.max_redirects} redirects: {reference.url}"
+    raise ResourceFetchError(
+        f"Remote resource exceeded {policy.max_redirects} redirects: {reference.url}",
+        reference=reference,
+        operation="fetch",
     )
 
 
 __all__ = [
     "ConfiguredRemoteAccessPolicy",
     "RemoteTransportExecutor",
+    "fetch_remote",
     "read_bounded",
-    "read_remote",
 ]

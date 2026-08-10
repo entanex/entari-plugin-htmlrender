@@ -3,7 +3,10 @@ from __future__ import annotations
 from io import BytesIO
 from typing import TYPE_CHECKING
 
-from entari_plugin_htmlrender.resources.config import ResourceResolveMode
+from entari_plugin_htmlrender.preparation import TemplateRef
+from entari_plugin_htmlrender.resources.config import (
+    ResourceMaterializationPolicy,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,8 +26,7 @@ async def test_template_variables_stage_paths_and_binary_assets(
     image.write_bytes(b"path-image")
     png = b"\x89PNG\r\n\x1a\nfixture"
     prepared = await preparer.prepare_template(
-        tmp_path,
-        "card.html",
+        TemplateRef(tmp_path, "card.html"),
         {
             "path": image,
             "binary": png,
@@ -44,14 +46,13 @@ async def test_template_binary_media_type_fallback(
 ) -> None:
     (tmp_path / "card.html").write_text('<object data="{{ payload }}"></object>')
     prepared = await preparer.prepare_template(
-        tmp_path,
-        "card.html",
+        TemplateRef(tmp_path, "card.html"),
         {"payload": b"unknown"},
     )
     assert prepared.assets[0].media_type == "application/octet-stream"
 
 
-async def test_template_resource_mode_off_does_not_stage_variables(
+async def test_template_materialization_off_does_not_stage_variables(
     tmp_path: Path,
     preparer: DefaultHtmlPreparer,
 ) -> None:
@@ -59,10 +60,9 @@ async def test_template_resource_mode_off_does_not_stage_variables(
     outside = tmp_path.parent / "not-authorized.png"
 
     prepared = await preparer.prepare_template(
-        tmp_path,
-        "card.html",
+        TemplateRef(tmp_path, "card.html"),
         {"path": outside, "payload": b"raw"},
-        resource_mode=ResourceResolveMode.OFF,
+        materialization_policy=ResourceMaterializationPolicy.OFF,
     )
 
     assert str(outside) in prepared.html

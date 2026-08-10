@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -9,33 +10,40 @@ import anyio.lowlevel
 from exceptiongroup import ExceptionGroup
 import pytest
 
+from entari_plugin_htmlrender.errors import (
+    ProviderLifecycleError,
+    RuntimeUnavailableError,
+)
 from entari_plugin_htmlrender.rendering import (
     CapabilityCatalog,
     CapabilityKey,
     OperationAdmissionGate,
-    ProviderLifecycleError,
-    RenderTemplateHtmlRequest,
 )
-from entari_plugin_htmlrender.runtime import (
-    HtmlRenderer,
-    HtmlRendererBindings,
-    RenderRuntime,
-    RenderTemplateHtml,
+from entari_plugin_htmlrender.resources import (
+    FileResourceRef,
+    ResourceContent,
 )
+from entari_plugin_htmlrender.runtime import RenderRuntime, RuntimeState
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import AsyncIterator
 
-    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
-    from entari_plugin_htmlrender.resources.service import ResourceService
-    from entari_plugin_htmlrender.resources.templating import (
-        ExtensionSpec,
-        FilterCallable,
+    from entari_plugin_htmlrender.graphics import GraphicsRenderer
+    from entari_plugin_htmlrender.rendering.contracts import (
+        HtmlRenderer,
+        TemplateRenderer,
     )
+    from entari_plugin_htmlrender.resources import (
+        InlineResource,
+        PublishedResource,
+        ResourceRef,
+    )
+    from entari_plugin_htmlrender.resources.ports import ResourceAccess
 
 
-_PREPARATION = cast("HtmlPreparer", object())
-_RESOURCES = cast("ResourceService", object())
+_RENDERER = cast("HtmlRenderer", object())
+_TEMPLATES = cast("TemplateRenderer", object())
+_GRAPHICS = cast("GraphicsRenderer", object())
 
 
 @dataclass
@@ -62,334 +70,177 @@ class _FakeLifecycle:
 
 
 @dataclass
-class _FakeTemplatePreparer:
-    calls: int = 0
-    started: anyio.Event | None = None
-    release: anyio.Event | None = None
-
-    async def render_template_html(
-        self,
-        template_path: str | Path,
-        template_name: str,
-        variables: Mapping[str, object],
-        *,
-        filters: Mapping[str, FilterCallable] | None = None,
-        extensions: Sequence[ExtensionSpec] = (),
-    ) -> str:
-        del template_path, template_name, variables, filters, extensions
-        self.calls += 1
-        if self.started is not None:
-            self.started.set()
-        if self.release is not None:
-            await self.release.wait()
-        return "<p>rendered</p>"
-
-
-@dataclass
 class _FakeResources:
-    read_calls: int = 0
-    authorize_calls: int = 0
-    should_resolve_calls: int = 0
+    fetch_calls: int = 0
     started: anyio.Event | None = None
     release: anyio.Event | None = None
 
-    def authorize_local(self, path: Path) -> Path:
-        self.authorize_calls += 1
-        return path
-
-    def should_resolve(self, resolver: object | None = None) -> bool:
-        del resolver
-        self.should_resolve_calls += 1
-        return True
-
-    async def read_bytes(self, reference: object, *, refresh: bool = False) -> bytes:
-        del reference, refresh
-        self.read_calls += 1
+    async def fetch(
+        self,
+        resource: ResourceRef,
+        *,
+        refresh: bool = False,
+    ) -> ResourceContent:
+        del resource, refresh
+        self.fetch_calls += 1
         if self.started is not None:
             self.started.set()
         if self.release is not None:
             await self.release.wait()
-        return b"content"
+        return ResourceContent(b"content", media_type="text/plain")
+
+    async def fetch_bytes(
+        self,
+        resource: ResourceRef,
+        *,
+        refresh: bool = False,
+    ) -> bytes:
+        return (await self.fetch(resource, refresh=refresh)).data
+
+    async def fetch_text(
+        self,
+        resource: ResourceRef,
+        *,
+        encoding: str = "utf-8",
+        errors: str = "strict",
+        refresh: bool = False,
+    ) -> str:
+        return (await self.fetch_bytes(resource, refresh=refresh)).decode(
+            encoding,
+            errors,
+        )
+
+    @asynccontextmanager
+    async def publish(
+        self,
+        content: ResourceContent | InlineResource,
+        *,
+        suffix: str | None = None,
+    ) -> AsyncIterator[PublishedResource]:
+        del content, suffix
+        raise AssertionError("publish is not exercised by this test double")
+        yield
 
 
-def _runtime(lifecycle: _FakeLifecycle) -> RenderRuntime:
-    admission = OperationAdmissionGate()
-    return RenderRuntime(
-        renderer=HtmlRenderer(
-            HtmlRendererBindings(),
-            operation_admission=admission,
-        ),
-        preparation=_PREPARATION,
-        resources=_RESOURCES,
-        lifecycle=lifecycle,
-        operation_admission=admission,
-    )
-
-
-def _template_runtime(
+def _runtime(
     lifecycle: _FakeLifecycle,
-    preparer: _FakeTemplatePreparer,
-) -> RenderRuntime:
-    typed_preparer = cast("HtmlPreparer", preparer)
-    admission = OperationAdmissionGate()
-    renderer = HtmlRenderer(
-        HtmlRendererBindings(
-            render_template_html=RenderTemplateHtml(preparer=typed_preparer)
-        ),
-        operation_admission=admission,
-    )
-    return RenderRuntime(
-        renderer=renderer,
-        preparation=typed_preparer,
-        resources=_RESOURCES,
-        lifecycle=lifecycle,
-        operation_admission=admission,
-    )
-
-
-def _template_request() -> RenderTemplateHtmlRequest:
-    return RenderTemplateHtmlRequest(
-        template_path="templates",
-        template_name="page.html",
-        variables={"title": "hello"},
-    )
-
-
-def _resource_runtime(
-    lifecycle: _FakeLifecycle,
-    resources: _FakeResources,
+    *,
+    resources: _FakeResources | None = None,
+    capabilities: CapabilityCatalog | None = None,
 ) -> RenderRuntime:
     admission = OperationAdmissionGate()
     return RenderRuntime(
-        renderer=HtmlRenderer(
-            HtmlRendererBindings(),
-            operation_admission=admission,
-        ),
-        preparation=_PREPARATION,
-        resources=cast("ResourceService", resources),
+        renderer=_RENDERER,
+        templates=_TEMPLATES,
+        resources=cast("ResourceAccess", resources or _FakeResources()),
+        graphics=_GRAPHICS,
         lifecycle=lifecycle,
         operation_admission=admission,
+        capabilities=capabilities,
+        provider_id="fake",
     )
 
 
-async def test_startup_is_idempotent() -> None:
+async def _wait_for_state(runtime: RenderRuntime, state: RuntimeState) -> None:
+    while runtime.state is not state:
+        await anyio.lowlevel.checkpoint()
+
+
+async def test_startup_is_concurrency_safe_and_idempotent() -> None:
     lifecycle = _FakeLifecycle()
-    app = _runtime(lifecycle)
-
-    await app.startup()
-    await app.startup()
-
-    assert lifecycle.startup_calls == 1
-
-
-async def test_concurrent_startup_invokes_lifecycle_once() -> None:
-    lifecycle = _FakeLifecycle()
-    app = _runtime(lifecycle)
+    runtime = _runtime(lifecycle)
 
     async with anyio.create_task_group() as task_group:
-        task_group.start_soon(app.startup)
-        task_group.start_soon(app.startup)
-        task_group.start_soon(app.startup)
+        task_group.start_soon(runtime.startup)
+        task_group.start_soon(runtime.startup)
+        task_group.start_soon(runtime.startup)
 
     assert lifecycle.startup_calls == 1
+    assert runtime.state is RuntimeState.OPEN
 
 
-async def test_startup_failure_allows_retry() -> None:
+async def test_startup_failure_is_structured_and_allows_retry() -> None:
     lifecycle = _FakeLifecycle(startup_failures=[RuntimeError("boom")])
-    app = _runtime(lifecycle)
+    runtime = _runtime(lifecycle)
 
-    with pytest.raises(ProviderLifecycleError, match="boom") as captured:
-        await app.startup()
+    with pytest.raises(ProviderLifecycleError) as captured:
+        await runtime.startup()
+
+    assert captured.value.operation == "startup"
+    assert captured.value.provider_id == "fake"
     assert isinstance(captured.value.__cause__, RuntimeError)
-    await app.startup()
 
+    await runtime.startup()
     assert lifecycle.startup_calls == 2
 
 
-async def test_aclose_is_idempotent_and_blocks_restart() -> None:
+async def test_probe_starts_once_then_delegates() -> None:
     lifecycle = _FakeLifecycle()
-    app = _runtime(lifecycle)
+    runtime = _runtime(lifecycle)
 
-    await app.startup()
-    await app.aclose()
-    await app.aclose()
+    await runtime.probe()
+    await runtime.probe()
+
+    assert lifecycle.startup_calls == 1
+    assert lifecycle.probe_calls == 2
+
+
+async def test_close_is_idempotent_and_blocks_restart() -> None:
+    lifecycle = _FakeLifecycle()
+    runtime = _runtime(lifecycle)
+
+    await runtime.startup()
+    await runtime.aclose()
+    await runtime.aclose()
 
     assert lifecycle.aclose_calls == 1
-    with pytest.raises(ProviderLifecycleError, match="closed"):
-        await app.startup()
+    assert runtime.state is RuntimeState.CLOSED
+    with pytest.raises(RuntimeUnavailableError) as captured:
+        await runtime.startup()
+    assert captured.value.state == RuntimeState.CLOSED.value
+    assert captured.value.operation == "startup"
 
 
-async def test_aclose_without_startup_still_closes_lifecycle() -> None:
-    lifecycle = _FakeLifecycle()
-    app = _runtime(lifecycle)
-
-    await app.aclose()
-
-    assert lifecycle.aclose_calls == 1
-
-
-async def test_failed_close_can_be_retried_but_cannot_restart() -> None:
+async def test_failed_close_is_retryable_but_runtime_stays_closing() -> None:
     lifecycle = _FakeLifecycle(aclose_failures=[RuntimeError("cache busy")])
-    app = _runtime(lifecycle)
-    await app.startup()
+    runtime = _runtime(lifecycle)
 
-    with pytest.raises(ProviderLifecycleError, match="cache busy") as captured:
-        await app.aclose()
+    with pytest.raises(ProviderLifecycleError) as captured:
+        await runtime.aclose()
+
+    assert captured.value.operation == "aclose"
     assert isinstance(captured.value.__cause__, RuntimeError)
-    with pytest.raises(ProviderLifecycleError, match="closing"):
-        await app.startup()
+    assert runtime.state is RuntimeState.CLOSING
+    with pytest.raises(RuntimeUnavailableError):
+        await runtime.startup()
 
-    await app.aclose()
-    await app.aclose()
-
+    await runtime.aclose()
     assert lifecycle.aclose_calls == 2
+    assert runtime.state is RuntimeState.CLOSED
 
 
-async def test_failed_close_permanently_rejects_renderer_operations() -> None:
-    lifecycle = _FakeLifecycle(aclose_failures=[RuntimeError("cache busy")])
-    preparer = _FakeTemplatePreparer()
-    app = _template_runtime(lifecycle, preparer)
-    renderer = app.renderer
-
-    with pytest.raises(ProviderLifecycleError, match="cache busy"):
-        await app.aclose()
-    with pytest.raises(ProviderLifecycleError, match="closing or closed"):
-        await renderer.render_template_html(_template_request())
-
-    assert preparer.calls == 0
-    await app.aclose()
-
-
-async def test_close_drains_complete_use_case_and_rejects_new_operations() -> None:
-    lifecycle = _FakeLifecycle()
-    preparer = _FakeTemplatePreparer(started=anyio.Event(), release=anyio.Event())
-    app = _template_runtime(lifecycle, preparer)
-    renderer = app.renderer
-    rendered: list[str] = []
-    close_finished = anyio.Event()
-
-    async def render() -> None:
-        rendered.append(str(await renderer.render_template_html(_template_request())))
-
-    async def close() -> None:
-        await app.aclose()
-        close_finished.set()
-
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(render)
-        assert preparer.started is not None
-        await preparer.started.wait()
-        task_group.start_soon(close)
-        await anyio.lowlevel.checkpoint()
-
-        assert lifecycle.aclose_calls == 0
-        assert preparer.release is not None
-        preparer.release.set()
-        await close_finished.wait()
-
-    assert rendered == ["<p>rendered</p>"]
-    assert preparer.calls == 1
-    assert lifecycle.aclose_calls == 1
-
-
-async def test_close_drains_public_preparation_facade() -> None:
-    lifecycle = _FakeLifecycle()
-    preparer = _FakeTemplatePreparer(started=anyio.Event(), release=anyio.Event())
-    app = _template_runtime(lifecycle, preparer)
-    preparation = app.preparation
-    close_finished = anyio.Event()
-
-    async def prepare() -> None:
-        await preparation.render_template_html(
-            "templates",
-            "page.html",
-            {"title": "hello"},
-        )
-
-    async def close() -> None:
-        await app.aclose()
-        close_finished.set()
-
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(prepare)
-        assert preparer.started is not None
-        await preparer.started.wait()
-        task_group.start_soon(close)
-        await anyio.lowlevel.checkpoint()
-
-        assert lifecycle.aclose_calls == 0
-        assert not close_finished.is_set()
-        assert preparer.release is not None
-        preparer.release.set()
-        await close_finished.wait()
-
-    assert lifecycle.aclose_calls == 1
-
-
-async def test_close_rejects_renderer_retained_before_shutdown() -> None:
-    lifecycle = _FakeLifecycle()
-    preparer = _FakeTemplatePreparer()
-    app = _template_runtime(lifecycle, preparer)
-    renderer = app.renderer
-
-    await app.aclose()
-
-    with pytest.raises(ProviderLifecycleError, match="closing or closed"):
-        await renderer.render_template_html(_template_request())
-    assert preparer.calls == 0
-
-
-async def test_close_rejects_preparer_retained_before_shutdown() -> None:
-    lifecycle = _FakeLifecycle()
-    preparer = _FakeTemplatePreparer()
-    app = _template_runtime(lifecycle, preparer)
-    preparation = app.preparation
-
-    await app.aclose()
-
-    with pytest.raises(ProviderLifecycleError, match="closing or closed"):
-        await preparation.render_template_html(
-            "templates",
-            "page.html",
-            {"title": "hello"},
-        )
-    assert preparer.calls == 0
-
-
-async def test_close_rejects_resources_retained_before_shutdown() -> None:
-    lifecycle = _FakeLifecycle()
-    resources = _FakeResources()
-    app = _resource_runtime(lifecycle, resources)
-    public_resources = app.resources
-
-    await app.aclose()
-
-    with pytest.raises(ProviderLifecycleError, match="closing or closed"):
-        await public_resources.read_bytes("asset.png")
-    assert resources.read_calls == 0
-
-
-async def test_close_drains_public_resource_facade() -> None:
-    lifecycle = _FakeLifecycle()
+async def test_close_drains_admitted_resource_operation() -> None:
     resources = _FakeResources(started=anyio.Event(), release=anyio.Event())
-    app = _resource_runtime(lifecycle, resources)
-    public_resources = app.resources
+    lifecycle = _FakeLifecycle()
+    runtime = _runtime(lifecycle, resources=resources)
+    reference = FileResourceRef(Path("asset.txt"))
     close_finished = anyio.Event()
 
-    async def read() -> None:
-        await public_resources.read_bytes("asset.png")
+    async def fetch() -> None:
+        await runtime.resources.fetch(reference)
 
     async def close() -> None:
-        await app.aclose()
+        await runtime.aclose()
         close_finished.set()
 
     async with anyio.create_task_group() as task_group:
-        task_group.start_soon(read)
+        task_group.start_soon(fetch)
         assert resources.started is not None
         await resources.started.wait()
         task_group.start_soon(close)
-        await anyio.lowlevel.checkpoint()
+        await _wait_for_state(runtime, RuntimeState.CLOSING)
 
+        assert runtime.state is RuntimeState.CLOSING
         assert lifecycle.aclose_calls == 0
         assert not close_finished.is_set()
         assert resources.release is not None
@@ -397,97 +248,59 @@ async def test_close_drains_public_resource_facade() -> None:
         await close_finished.wait()
 
     assert lifecycle.aclose_calls == 1
+    assert runtime.state is RuntimeState.CLOSED
 
 
-async def test_lifecycle_exception_group_is_exposed_as_stable_error() -> None:
+async def test_close_rejects_resource_facade_retained_by_caller() -> None:
+    resources = _FakeResources()
+    runtime = _runtime(_FakeLifecycle(), resources=resources)
+    public_resources = runtime.resources
+
+    await runtime.aclose()
+
+    with pytest.raises(RuntimeUnavailableError) as captured:
+        await public_resources.fetch(FileResourceRef(Path("asset.txt")))
+    assert captured.value.operation == "resource.fetch"
+    assert resources.fetch_calls == 0
+
+
+async def test_lifecycle_exception_group_is_preserved_as_cause() -> None:
     failure = ExceptionGroup(
         "cleanup failed",
-        [RuntimeError("engine close failed"), RuntimeError("cache clear failed")],
+        [RuntimeError("provider close failed"), RuntimeError("cache clear failed")],
     )
-    app = _runtime(_FakeLifecycle(aclose_failures=[failure]))
+    runtime = _runtime(_FakeLifecycle(aclose_failures=[failure]))
 
-    with pytest.raises(ProviderLifecycleError, match="cleanup failed") as captured:
-        await app.aclose()
+    with pytest.raises(ProviderLifecycleError) as captured:
+        await runtime.aclose()
 
     assert captured.value.__cause__ is failure
 
 
-async def test_probe_delegates_to_lifecycle() -> None:
-    lifecycle = _FakeLifecycle()
-    app = _runtime(lifecycle)
+def test_runtime_exposes_only_caller_services() -> None:
+    runtime = _runtime(_FakeLifecycle())
 
-    await app.probe()
-
-    assert lifecycle.startup_calls == 1
-    assert lifecycle.probe_calls == 1
-
-    await app.aclose()
-    with pytest.raises(ProviderLifecycleError, match="closed"):
-        await app.probe()
+    assert runtime.renderer is _RENDERER
+    assert runtime.templates is _TEMPLATES
+    assert runtime.graphics is _GRAPHICS
+    assert runtime.resources is runtime.resources
+    assert not hasattr(runtime, "preparation")
+    assert not hasattr(runtime, "extensions")
 
 
-def test_capability_catalog_defaults_to_empty() -> None:
-    app = _runtime(_FakeLifecycle())
-
-    class _Marker:
-        pass
-
-    assert app.extensions.names() == frozenset()
-    assert app.extensions.get(CapabilityKey("test.marker", _Marker)) is None
-
-
-def test_capability_catalog_passthrough() -> None:
+def test_runtime_capabilities_default_empty_and_support_typed_lookup() -> None:
     class _Marker:
         pass
 
     marker = _Marker()
     key = CapabilityKey("test.marker", _Marker)
-    catalog = CapabilityCatalog().with_capability(key, marker)
-    admission = OperationAdmissionGate()
-    app = RenderRuntime(
-        renderer=HtmlRenderer(
-            HtmlRendererBindings(),
-            operation_admission=admission,
-        ),
-        preparation=_PREPARATION,
-        resources=_RESOURCES,
-        lifecycle=_FakeLifecycle(),
-        operation_admission=admission,
-        extensions=catalog,
+    empty = _runtime(_FakeLifecycle())
+    populated = _runtime(
+        _FakeLifecycle(),
+        capabilities=CapabilityCatalog().with_capability(key, marker),
     )
 
-    assert app.extensions.require(key) is marker
-
-
-def test_runtime_exposes_composition_owned_services() -> None:
-    app = _runtime(_FakeLifecycle())
-
-    assert app.preparation is app.preparation
-    assert app.resources is app.resources
-    assert app.preparation is not _PREPARATION
-    assert app.resources is not _RESOURCES
-
-
-def test_renderer_does_not_expose_lifecycle_controller() -> None:
-    renderer = HtmlRenderer(
-        HtmlRendererBindings(),
-        operation_admission=OperationAdmissionGate(),
-    )
-
-    assert not hasattr(renderer, "operation_admission")
-
-
-async def test_close_rejects_synchronous_resource_facade_operations() -> None:
-    resources = _FakeResources()
-    app = _resource_runtime(_FakeLifecycle(), resources)
-    public_resources = app.resources
-
-    await app.aclose()
-
-    with pytest.raises(ProviderLifecycleError, match="closing or closed"):
-        public_resources.authorize_local(Path("asset.png"))
-    with pytest.raises(ProviderLifecycleError, match="closing or closed"):
-        public_resources.should_resolve()
-
-    assert resources.authorize_calls == 0
-    assert resources.should_resolve_calls == 0
+    assert empty.capabilities.available_names == frozenset()
+    assert empty.capabilities.get(key) is None
+    assert populated.capabilities.available_names == frozenset({"test.marker"})
+    assert populated.capabilities.require(key) is marker

@@ -6,7 +6,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING
 
 from entari_plugin_htmlrender._logging import logger
-from entari_plugin_htmlrender.errors import RenderingError
+from entari_plugin_htmlrender.errors import HtmlRenderError
 
 from .common import get_trace_id, normalize_backend, set_span_attribute, set_span_status
 from .prometheus import (
@@ -27,8 +27,6 @@ from .sentry import start_trace
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Generator, Iterator, Mapping
-
-    from entari_plugin_htmlrender.providers.sdk import EngineId
 
 
 class TelemetryCacheObserver:
@@ -183,7 +181,7 @@ def record_cache_metrics(
 def _record_error(span: object, error: BaseException) -> None:
     """Attach bounded failure metadata without exporting raw native objects."""
     set_span_attribute(span, "error.type", type(error).__name__)
-    if not isinstance(error, RenderingError):
+    if not isinstance(error, HtmlRenderError):
         return
     set_span_attribute(span, "error.message", error.message)
     set_span_attribute(span, "error.message_truncated", error.message_truncated)
@@ -199,7 +197,7 @@ def _record_error(span: object, error: BaseException) -> None:
 def _operation_context(
     op: str,
     *,
-    backend: EngineId | None = None,
+    backend: str | None = None,
     name: str | None = None,
     attrs: Mapping[str, str] | None = None,
     sentry: bool,
@@ -284,7 +282,7 @@ def _operation_context(
 async def track_render(
     op: str,
     *,
-    backend: EngineId | None = None,
+    backend: str | None = None,
     name: str | None = None,
     attrs: Mapping[str, str] | None = None,
     sentry: bool = False,

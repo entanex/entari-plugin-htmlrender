@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, ParamSpec, Protocol, TypeGuard, TypeVar
 import anyio
 from anyio.to_thread import run_sync
 
+from entari_plugin_htmlrender.resources.models import FileResourceRef
 from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
 
 from .cache import SyncWeightedSingleflightLRU, WeightedCacheStats
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from takumi_py import FontResourceInput
 
     from entari_plugin_htmlrender.resources.observation import CacheObserver
-    from entari_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
 
     from .config import GenericFontFamily, TakumiConfig, TakumiFontConfig
     from .types import NativeCompiledHtml, NativeRenderer
@@ -259,7 +260,7 @@ class TakumiRuntimeState:
     renderer: NativeRenderer | None
     limiter: anyio.Semaphore
     config: TakumiConfig
-    resources: ProviderResources
+    resources: ProviderResourceAccess
     registered_font_families: tuple[str, ...] = ()
     cache_observer: CacheObserver | None = None
     _compiled: SyncWeightedSingleflightLRU[
@@ -632,8 +633,9 @@ class TakumiRuntimeState:
         cache_policy: FileCachePolicy,
     ) -> tuple[str, ...]:
         self._ensure_open()
-        payload = await self.resources.read_bytes(
-            path,
+        reference = FileResourceRef(self.resources.authorize_local(Path(path)))
+        payload = await self.resources.fetch_bytes(
+            reference,
             refresh=cache_policy is FileCachePolicy.REVALIDATE,
         )
         spec = _validate_font_spec(
@@ -718,14 +720,15 @@ async def _load_font_payloads(
     fonts: Sequence[TakumiFontConfig],
     *,
     config: TakumiConfig,
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
 ) -> tuple[bytes, ...]:
     payloads: list[bytes | None] = [None] * len(fonts)
 
     async def _read_one(index: int, font: TakumiFontConfig) -> None:
         policy = font.cache_policy or config.font_cache_policy
-        payloads[index] = await resources.read_bytes(
-            font.path,
+        reference = FileResourceRef(resources.authorize_local(Path(font.path)))
+        payloads[index] = await resources.fetch_bytes(
+            reference,
             refresh=policy is FileCachePolicy.REVALIDATE,
         )
 
@@ -861,7 +864,7 @@ def render_defaults(
 async def create_runtime_state(
     config: TakumiConfig,
     *,
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
     cache_observer: CacheObserver | None = None,
 ) -> TakumiRuntimeState:
     """Create one renderer and register revalidated font bytes exactly once."""

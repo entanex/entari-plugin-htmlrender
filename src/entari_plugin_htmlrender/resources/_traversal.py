@@ -7,10 +7,23 @@ from dataclasses import dataclass
 from itertools import islice
 from typing import Literal, TypeAlias, TypeVar
 
-from .errors import ResourceResolutionError
+from entari_plugin_htmlrender.errors import InvalidRenderInputError
 
 _ContainerKind: TypeAlias = Literal["mapping", "tuple", "list", "set", "sequence"]
 _T = TypeVar("_T")
+
+
+def _traversal_error(
+    message: str,
+    *,
+    source: BaseException | None = None,
+) -> InvalidRenderInputError:
+    return InvalidRenderInputError(
+        message,
+        operation="materialize",
+        field="template_vars",
+        source=source,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +97,7 @@ class _Exit:
 def _bounded_tuple(values: Iterable[_T], max_items: int) -> tuple[_T, ...]:
     items = tuple(islice(values, max_items + 1))
     if len(items) > max_items:
-        raise ResourceResolutionError(
+        raise _traversal_error(
             "Template variable tree exceeds the configured node traversal limit."
         )
     return items
@@ -128,8 +141,8 @@ def _child_path(
 
 
 @dataclass(frozen=True, slots=True)
-class VariableResolutionPlan:
-    """A bounded immutable variable tree with separately resolvable leaves."""
+class VariableMaterializationPlan:
+    """A bounded immutable variable tree with materializable leaves."""
 
     _nodes: tuple[_FrozenNode, ...]
     _root_index: int
@@ -141,7 +154,7 @@ class VariableResolutionPlan:
         value: object,
         *,
         budget: ResourceTraversalBudget,
-    ) -> VariableResolutionPlan:
+    ) -> VariableMaterializationPlan:
         nodes: list[_BuildingNode] = []
         active_containers: set[int] = set()
         stack: list[_Visit | _Exit] = [_Visit(value, 0, None, None, "$")]
@@ -155,7 +168,7 @@ class VariableResolutionPlan:
                 continue
 
             if len(nodes) >= budget.max_nodes:
-                raise ResourceResolutionError(
+                raise _traversal_error(
                     "Template variable tree exceeds the configured "
                     f"{budget.max_nodes}-node traversal limit."
                 )
@@ -171,14 +184,14 @@ class VariableResolutionPlan:
             else:
                 kind, keys, children = parts
                 if work.depth > budget.max_depth:
-                    raise ResourceResolutionError(
+                    raise _traversal_error(
                         "Template variable tree reaches "
                         f"{work.path} at depth {work.depth}, exceeding the configured "
                         f"depth limit of {budget.max_depth}."
                     )
                 identity = id(work.value)
                 if identity in active_containers:
-                    raise ResourceResolutionError(
+                    raise _traversal_error(
                         f"Template variable tree contains a cycle at {work.path}."
                     )
                 active_containers.add(identity)
@@ -247,11 +260,11 @@ class VariableResolutionPlan:
                 try:
                     values[index] = set(children)
                 except TypeError as error:
-                    raise ResourceResolutionError(
+                    raise _traversal_error(
                         "Resolved set items must remain hashable.",
                         source=error,
                     ) from error
         return values[self._root_index]
 
 
-__all__ = ["ResourceTraversalBudget", "VariableResolutionPlan"]
+__all__ = ["ResourceTraversalBudget", "VariableMaterializationPlan"]

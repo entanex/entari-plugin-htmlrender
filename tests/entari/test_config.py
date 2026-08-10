@@ -5,17 +5,17 @@ from pathlib import Path
 from pydantic import ValidationError
 import pytest
 
-from entari_plugin_htmlrender.host.config import (
-    RenderSettings,
-    RenderStartupMode,
+from entari_plugin_htmlrender.config import (
+    HtmlRenderConfig,
+    RuntimeStartupPolicy,
 )
 
 
-def test_render_settings_defaults() -> None:
-    settings = RenderSettings()
+def test_htmlrender_config_defaults() -> None:
+    settings = HtmlRenderConfig()
 
     assert settings.provider is None
-    assert settings.startup is RenderStartupMode.OFF
+    assert settings.startup is RuntimeStartupPolicy.OFF
     assert settings.provider_config == {}
     assert settings.html.max_source_bytes == 64 * 1024 * 1024
     assert settings.html.max_pixels == 16 * 1024 * 1024
@@ -23,7 +23,7 @@ def test_render_settings_defaults() -> None:
     assert settings.html.max_device_pixel_ratio == 4.0
     assert settings.html.max_auto_height == 16_384
     assert settings.html.max_concurrency == 2
-    assert settings.graphics.backends == ()
+    assert settings.graphics.backend is None
     assert settings.graphics.max_pixels == 16 * 1024 * 1024
     assert settings.graphics.max_concurrency == 2
     assert settings.resources.cache.max_entries == 256
@@ -46,8 +46,8 @@ def test_render_settings_defaults() -> None:
     assert settings.observability.prometheus is False
 
 
-def test_render_settings_nested_parse() -> None:
-    settings = RenderSettings.model_validate(
+def test_htmlrender_config_nested_parse() -> None:
+    settings = HtmlRenderConfig.model_validate(
         {
             "provider": "takumi",
             "startup": "probe",
@@ -61,7 +61,7 @@ def test_render_settings_nested_parse() -> None:
                 "max_concurrency": 1,
             },
             "graphics": {
-                "backends": ["pillow", "skia"],
+                "backend": "skia",
                 "max_pixels": 1_000_000,
                 "max_concurrency": 1,
             },
@@ -85,7 +85,7 @@ def test_render_settings_nested_parse() -> None:
     )
 
     assert settings.provider == "takumi"
-    assert settings.startup is RenderStartupMode.PROBE
+    assert settings.startup is RuntimeStartupPolicy.PROBE
     assert settings.provider_config == {"max_concurrency": 2}
     assert settings.html.max_source_bytes == 1024
     assert settings.html.max_pixels == 4096
@@ -93,7 +93,7 @@ def test_render_settings_nested_parse() -> None:
     assert settings.html.max_device_pixel_ratio == 2
     assert settings.html.max_auto_height == 512
     assert settings.html.max_concurrency == 1
-    assert settings.graphics.backends == ("pillow", "skia")
+    assert settings.graphics.backend == "skia"
     assert settings.graphics.max_pixels == 1_000_000
     assert settings.graphics.max_concurrency == 1
     assert settings.resources.cache.max_entries == 8
@@ -127,11 +127,8 @@ def test_render_settings_nested_parse() -> None:
             "resources.filehost.bind_port",
         ),
         ({"graphics": {"backend": ["pillow"]}}, "graphics.backend"),
-        ({"graphics": {"backends": ["unknown"]}}, "graphics.backends.0"),
-        (
-            {"graphics": {"backends": ["pillow", "pillow"]}},
-            "graphics.backends",
-        ),
+        ({"graphics": {"backend": "unknown"}}, "graphics.backend"),
+        ({"graphics": {"backends": ["pillow"]}}, "graphics.backends"),
     ],
 )
 def test_render_tree_rejects_unknown_fields(
@@ -139,27 +136,43 @@ def test_render_tree_rejects_unknown_fields(
     location: str,
 ) -> None:
     with pytest.raises(ValidationError) as captured:
-        RenderSettings.model_validate(value)
+        HtmlRenderConfig.model_validate(value)
 
     assert location in str(captured.value)
 
 
-def test_render_settings_rejects_wrapped_or_unrelated_config() -> None:
+def test_htmlrender_config_rejects_wrapped_or_unrelated_config() -> None:
     for value in (
         {"render": {"provider": "takumi"}},
         {"unrelated_plugin": {"enabled": True}},
     ):
         with pytest.raises(ValidationError):
-            RenderSettings.model_validate(value)
+            HtmlRenderConfig.model_validate(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"html": {"max_device_pixel_ratio": float("inf")}},
+        {"resources": {"cache": {"revalidate_seconds": float("inf")}}},
+        {"resources": {"remote_access": {"request_timeout_seconds": float("inf")}}},
+        {"resources": {"filehost": {"cache_ttl_seconds": float("inf")}}},
+    ],
+)
+def test_htmlrender_config_rejects_non_finite_numbers(
+    value: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        HtmlRenderConfig.model_validate(value)
 
 
 @pytest.mark.parametrize(
     "provider",
     ["", " ", "Playwright", "bad/provider", "-leading", "trailing-"],
 )
-def test_render_settings_rejects_invalid_provider_ids(provider: str) -> None:
+def test_htmlrender_config_rejects_invalid_provider_ids(provider: str) -> None:
     with pytest.raises(ValidationError, match="provider id"):
-        RenderSettings.model_validate({"provider": provider})
+        HtmlRenderConfig.model_validate({"provider": provider})
 
 
 @pytest.mark.parametrize(
@@ -174,7 +187,7 @@ def test_provider_options_require_a_selected_provider(
     value: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError):
-        RenderSettings.model_validate(value)
+        HtmlRenderConfig.model_validate(value)
 
 
 @pytest.mark.parametrize(
@@ -191,4 +204,4 @@ def test_filehost_rejects_invalid_request_headers(
     filehost: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError):
-        RenderSettings.model_validate({"resources": {"filehost": filehost}})
+        HtmlRenderConfig.model_validate({"resources": {"filehost": filehost}})

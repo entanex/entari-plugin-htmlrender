@@ -5,7 +5,7 @@ import struct
 import pytest
 
 from entari_plugin_htmlrender.adapters.takumi import TakumiConfig, TakumiRuntimeError
-from entari_plugin_htmlrender.adapters.takumi.api import TakumiAPIAdapter
+from entari_plugin_htmlrender.adapters.takumi.api import TakumiSessionAdapter
 from entari_plugin_htmlrender.adapters.takumi.runtime import create_runtime_state
 from tests.adapters.takumi.helpers import resource_service
 
@@ -15,7 +15,7 @@ takumi_py = pytest.importorskip("takumi_py")
 async def test_takumi_native_boundary_renders_extension_output() -> None:
     state = await create_runtime_state(TakumiConfig(), resources=resource_service())
     try:
-        rendered = await TakumiAPIAdapter(state).render_html(
+        rendered = await TakumiSessionAdapter(state).render_html(
             '<div style="width:32px;height:16px;background:#00f"></div>',
             width=32,
             height=16,
@@ -28,24 +28,14 @@ async def test_takumi_native_boundary_renders_extension_output() -> None:
     assert struct.unpack(">II", rendered[16:24]) == (64, 32)
 
 
-async def test_takumi_exact_native_methods_use_projected_signatures() -> None:
+async def test_native_methods_are_not_projected_onto_the_managed_session() -> None:
     state = await create_runtime_state(TakumiConfig(), resources=resource_service())
     try:
-        api = TakumiAPIAdapter(state)
-        node = await api.compile_node({"type": "container"}, validate=True)
-        keyframes = await api.compile_keyframes(
-            {
-                "fade": {
-                    "from": {"opacity": 0},
-                    "to": {"opacity": 1},
-                }
-            }
-        )
+        session = TakumiSessionAdapter(state)
+        assert not hasattr(session, "compile_node")
+        assert not hasattr(session, "compile_keyframes")
     finally:
         await state.aclose()
-
-    assert isinstance(node, takumi_py.CompiledNode)
-    assert isinstance(keyframes, takumi_py.CompiledStyleSheet)
 
 
 async def test_takumi_native_error_is_translated_at_runtime_boundary() -> None:

@@ -1,67 +1,43 @@
-"""Stable errors for neutral requests, lifecycles, and executor boundaries.
-
-Provider-specific typed capabilities may intentionally expose their engine's
-native exceptions; the neutral executor boundary translates those failures.
-"""
-
-from __future__ import annotations
+"""Rendering-boundary errors re-exported from the single public taxonomy."""
 
 from entari_plugin_htmlrender.errors import (
-    ErrorCause as ErrorCause,
+    CapabilityUnavailableError as CapabilityUnavailableError,
+)
+from entari_plugin_htmlrender.errors import HtmlRenderError as HtmlRenderError
+from entari_plugin_htmlrender.errors import (
+    InvalidRenderInputError as InvalidRenderInputError,
 )
 from entari_plugin_htmlrender.errors import (
-    InvalidRenderRequest as InvalidRenderRequest,
+    ProviderExecutionError as ProviderExecutionError,
 )
-from entari_plugin_htmlrender.errors import PreparationError as PreparationError
-from entari_plugin_htmlrender.errors import RenderingError as RenderingError
-from entari_plugin_htmlrender.resources.errors import (
-    ResourceAccessDenied as ResourceAccessDenied,
+from entari_plugin_htmlrender.errors import (
+    ProviderLifecycleError as ProviderLifecycleError,
 )
-from entari_plugin_htmlrender.resources.errors import (
-    ResourceNotFound as ResourceNotFound,
+from entari_plugin_htmlrender.errors import (
+    RenderTimeoutError as RenderTimeoutError,
 )
-from entari_plugin_htmlrender.resources.errors import (
-    ResourceResolutionError as ResourceResolutionError,
+from entari_plugin_htmlrender.errors import (
+    RuntimeUnavailableError as RuntimeUnavailableError,
 )
-from entari_plugin_htmlrender.resources.errors import (
-    ResourceSizeExceeded as ResourceSizeExceeded,
+from entari_plugin_htmlrender.errors import (
+    UnsupportedDocumentFeatureError as UnsupportedDocumentFeatureError,
+)
+from entari_plugin_htmlrender.errors import (
+    UnsupportedOperationError as UnsupportedOperationError,
+)
+from entari_plugin_htmlrender.errors import (
+    UnsupportedRasterOptionError as UnsupportedRasterOptionError,
 )
 
-
-class CapabilityUnavailable(RenderingError):
-    """A requested capability has no binding in the current composition."""
-
-    def __init__(self, capability: str, *, detail: str | None = None) -> None:
-        message = f"Capability `{capability}` is not available in this composition."
-        if detail:
-            message = f"{message} {detail}"
-        super().__init__(message)
-        self.capability = capability
-
-
-class RuntimeNotBound(RenderingError):
-    """No render runtime is available in the current call context."""
-
-
-class UnsupportedRequirement(RenderingError):
-    """The prepared document needs something the provider cannot deliver."""
-
-
-class UnsupportedRenderOption(RenderingError):
-    """A valid portable raster option is unsupported by the selected provider."""
-
-
-class ProviderNotFound(RenderingError):
-    """The configured provider id does not resolve to any known provider."""
-
-
-class ProviderUnavailable(RenderingError):
-    """The provider exists but cannot run in the current environment."""
-
-
-class ProviderExecutionError(RenderingError):
-    """The provider failed while executing a render operation."""
-
-
-class ProviderLifecycleError(RenderingError):
-    """The provider runtime failed to start, probe, or shut down."""
+__all__ = [
+    "CapabilityUnavailableError",
+    "HtmlRenderError",
+    "InvalidRenderInputError",
+    "ProviderExecutionError",
+    "ProviderLifecycleError",
+    "RenderTimeoutError",
+    "RuntimeUnavailableError",
+    "UnsupportedDocumentFeatureError",
+    "UnsupportedOperationError",
+    "UnsupportedRasterOptionError",
+]

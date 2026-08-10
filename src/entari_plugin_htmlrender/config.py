@@ -1,4 +1,4 @@
-"""Validated configuration owned by the Entari plugin."""
+"""Framework-neutral configuration for one HTMLRender composition."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # Pydantic resolves this annotation while constructing the model.
 from entari_plugin_htmlrender.graphics.models import GraphicsBackendName  # noqa: TC001
-from entari_plugin_htmlrender.providers.sdk import validate_engine_id
+from entari_plugin_htmlrender.providers.sdk import ProviderId, validate_provider_id
 from entari_plugin_htmlrender.resources.config import normalize_public_base_url
 from entari_plugin_htmlrender.resources.headers import (
     validate_request_header_name,
@@ -19,7 +19,7 @@ from entari_plugin_htmlrender.resources.headers import (
 )
 
 
-class RenderStartupMode(str, Enum):
+class RuntimeStartupPolicy(str, Enum):
     """Provider runtime initialization policy."""
 
     OFF = "off"
@@ -30,7 +30,10 @@ class RenderStartupMode(str, Enum):
 class _StrictRenderModel(BaseModel):
     """Reject misspelled keys inside the plugin-owned configuration tree."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False,
+    )
 
 
 class CacheSettings(_StrictRenderModel):
@@ -146,22 +149,12 @@ class ObservabilitySettings(_StrictRenderModel):
 
 
 class GraphicsSettings(_StrictRenderModel):
-    """Independent physical-pixel scene backends composed as capabilities."""
+    """Selection and budget for the backend-neutral graphics renderer."""
 
-    backends: tuple[GraphicsBackendName, ...] = ()
+    backend: GraphicsBackendName | None = None
     max_pixels: int = Field(default=16 * 1024 * 1024, gt=0)
     max_concurrency: int = Field(default=2, gt=0)
     max_commands: int = Field(default=100_000, gt=0)
-
-    @field_validator("backends")
-    @classmethod
-    def _unique_backends(
-        cls,
-        value: tuple[GraphicsBackendName, ...],
-    ) -> tuple[GraphicsBackendName, ...]:
-        if len(set(value)) != len(value):
-            raise ValueError("graphics backends must not contain duplicates")
-        return value
 
 
 class HtmlRenderSettings(_StrictRenderModel):
@@ -188,11 +181,11 @@ class ResourceSettings(_StrictRenderModel):
     filehost: FilehostSettings = Field(default_factory=FilehostSettings)
 
 
-class RenderSettings(_StrictRenderModel):
+class HtmlRenderConfig(_StrictRenderModel):
     """Complete configuration accepted by the Entari plugin."""
 
-    provider: str | None = Field(default=None)
-    startup: RenderStartupMode = Field(default=RenderStartupMode.OFF)
+    provider: ProviderId | None = Field(default=None)
+    startup: RuntimeStartupPolicy = Field(default=RuntimeStartupPolicy.OFF)
     provider_config: dict[str, object] = Field(default_factory=dict)
     html: HtmlRenderSettings = Field(default_factory=HtmlRenderSettings)
     graphics: GraphicsSettings = Field(default_factory=GraphicsSettings)
@@ -201,10 +194,10 @@ class RenderSettings(_StrictRenderModel):
 
     @field_validator("provider")
     @classmethod
-    def _validate_provider(cls, value: str | None) -> str | None:
+    def _validate_provider(cls, value: str | None) -> ProviderId | None:
         if value is None:
             return None
-        return validate_engine_id(value)
+        return validate_provider_id(value)
 
     @model_validator(mode="after")
     def _validate_provider_selection(self) -> Self:
@@ -212,7 +205,7 @@ class RenderSettings(_StrictRenderModel):
             return self
         if self.provider_config:
             raise ValueError("provider_config requires a selected provider")
-        if self.startup is not RenderStartupMode.OFF:
+        if self.startup is not RuntimeStartupPolicy.OFF:
             raise ValueError("startup must be 'off' when provider is null")
         return self
 
@@ -221,12 +214,12 @@ __all__ = [
     "CacheSettings",
     "FilehostSettings",
     "GraphicsSettings",
+    "HtmlRenderConfig",
     "HtmlRenderSettings",
     "LocalAccessSettings",
     "ObservabilitySettings",
     "RemoteAccessSettings",
-    "RenderSettings",
-    "RenderStartupMode",
     "ResourceSettings",
+    "RuntimeStartupPolicy",
     "TemplateSettings",
 ]

@@ -5,27 +5,27 @@ from typing import TYPE_CHECKING, Protocol, final
 
 import markdown
 
-from entari_plugin_htmlrender.errors import InvalidRenderRequest
-from entari_plugin_htmlrender.resources.config import ResourceResolveMode
-from entari_plugin_htmlrender.resources.models import PackageResourceRef
+from entari_plugin_htmlrender.resources.config import ResourceMaterializationPolicy
+from entari_plugin_htmlrender.resources.models import (
+    FileResourceRef,
+    PackageResourceRef,
+    RemoteResourceRef,
+    ResourceRef,
+)
 from entari_plugin_htmlrender.resources.source import PackageResourceSource
 
 from .html import parse_html
 from .materialize import materialize_local_assets
-from .models import PreparedHtml, PreparedStylesheet
+from .models import PreparedHtml, PreparedStylesheet, TemplateRef
 from .template_assets import stage_template_variables
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from entari_plugin_htmlrender.resources.ports import (
+        PreparationResourceAccess,
         TemplateCompiler,
         WorkerExecutor,
-    )
-    from entari_plugin_htmlrender.resources.service import ResourceService
-    from entari_plugin_htmlrender.resources.templating import (
-        ExtensionSpec,
-        FilterCallable,
     )
 
 BUILTIN_TEMPLATES = PackageResourceSource("entari_plugin_htmlrender", "templates")
@@ -41,36 +41,33 @@ class HtmlPreparer(Protocol):
         self, html: str, *, base_url: str | None = None
     ) -> PreparedHtml: ...
 
-    async def prepare_text(self, text: str, *, css_path: str = "") -> PreparedHtml: ...
+    async def prepare_text(
+        self,
+        text: str,
+        *,
+        stylesheet: ResourceRef | None = None,
+    ) -> PreparedHtml: ...
 
     async def prepare_markdown(
         self,
-        markdown_text: str = "",
+        source: str | ResourceRef,
         *,
-        markdown_path: str = "",
-        css_path: str = "",
-        resource_mode: ResourceResolveMode | None = None,
+        stylesheet: ResourceRef | None = None,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml: ...
 
     async def prepare_template(
         self,
-        template_path: str | Path,
-        template_name: str,
+        template: TemplateRef,
         variables: Mapping[str, object],
         *,
-        filters: Mapping[str, FilterCallable] | None = None,
-        extensions: Sequence[ExtensionSpec] = (),
-        resource_mode: ResourceResolveMode | None = None,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml: ...
 
-    async def render_template_html(
+    async def render_template(
         self,
-        template_path: str | Path,
-        template_name: str,
+        template: TemplateRef,
         variables: Mapping[str, object],
-        *,
-        filters: Mapping[str, FilterCallable] | None = None,
-        extensions: Sequence[ExtensionSpec] = (),
     ) -> str: ...
 
 
@@ -81,7 +78,7 @@ class DefaultHtmlPreparer:
     def __init__(
         self,
         *,
-        resources: ResourceService,
+        resources: PreparationResourceAccess,
         templates: TemplateCompiler,
         worker: WorkerExecutor,
     ) -> None:
@@ -94,21 +91,33 @@ class DefaultHtmlPreparer:
         return f"{uri.rstrip('/')}/" if directory else uri
 
     async def _builtin(self, name: str) -> str:
-        return await self._resources.read_text(
+        return await self._resources.fetch_text(
             PackageResourceRef(
                 BUILTIN_TEMPLATES.package, f"{BUILTIN_TEMPLATES.root}/{name}"
             )
         )
+
+    def _resource_base_url(self, reference: ResourceRef) -> str | None:
+        if isinstance(reference, FileResourceRef):
+            return self._resources.authorize_local(reference.path).as_uri()
+        if isinstance(reference, RemoteResourceRef):
+            return reference.url
+        return None
 
     async def prepare_html(
         self, html: str, *, base_url: str | None = None
     ) -> PreparedHtml:
         return await self._worker.run_sync(parse_html, html, base_url=base_url)
 
-    async def prepare_text(self, text: str, *, css_path: str = "") -> PreparedHtml:
+    async def prepare_text(
+        self,
+        text: str,
+        *,
+        stylesheet: ResourceRef | None = None,
+    ) -> PreparedHtml:
         css = (
-            await self._resources.read_text(css_path)
-            if css_path
+            await self._resources.fetch_text(stylesheet)
+            if stylesheet is not None
             else await self._builtin("text/text.css")
         )
         html = await self._templates.render(
@@ -118,7 +127,9 @@ class DefaultHtmlPreparer:
             immutable=True,
         )
         stylesheet_base = (
-            await self._worker.run_sync(self._path_uri, css_path) if css_path else None
+            await self._worker.run_sync(self._resource_base_url, stylesheet)
+            if stylesheet is not None
+            else None
         )
         return await self._worker.run_sync(
             parse_html,
@@ -128,16 +139,20 @@ class DefaultHtmlPreparer:
 
     async def prepare_markdown(
         self,
-        markdown_text: str = "",
+        source: str | ResourceRef,
         *,
-        markdown_path: str = "",
-        css_path: str = "",
-        resource_mode: ResourceResolveMode | None = None,
+        stylesheet: ResourceRef | None = None,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml:
-        if not markdown_text:
-            if not markdown_path:
-                raise InvalidRenderRequest("markdown or markdown_path must be provided")
-            markdown_text = await self._resources.read_text(markdown_path)
+        if isinstance(source, str):
+            markdown_text = source
+            markup_base = None
+        else:
+            markdown_text = await self._resources.fetch_text(source)
+            markup_base = await self._worker.run_sync(
+                self._resource_base_url,
+                source,
+            )
         rendered = await self._worker.run_sync(
             markdown.markdown,
             markdown_text,
@@ -166,8 +181,8 @@ class DefaultHtmlPreparer:
                 f"<script defer>{mathtex_js}</script>"
             )
         css = (
-            await self._resources.read_text(css_path)
-            if css_path
+            await self._resources.fetch_text(stylesheet)
+            if stylesheet is not None
             else await self._builtin("markdown/github-markdown-light.css")
             + await self._builtin("markdown/pygments-default.css")
         )
@@ -177,13 +192,10 @@ class DefaultHtmlPreparer:
             {"md": rendered, "css": "", "extra": extra},
             immutable=True,
         )
-        markup_base = (
-            await self._worker.run_sync(self._path_uri, markdown_path)
-            if markdown_path
-            else None
-        )
         stylesheet_base = (
-            await self._worker.run_sync(self._path_uri, css_path) if css_path else None
+            await self._worker.run_sync(self._resource_base_url, stylesheet)
+            if stylesheet is not None
+            else None
         )
         prepared = await self._worker.run_sync(
             parse_html,
@@ -191,47 +203,44 @@ class DefaultHtmlPreparer:
             base_url=markup_base,
             stylesheets=(PreparedStylesheet(css=css, base_url=stylesheet_base),),
         )
-        effective_mode = resource_mode or self._resources.strategy.resolve_mode
-        if effective_mode is ResourceResolveMode.OFF:
+        effective_mode = (
+            materialization_policy or self._resources.strategy.materialization_policy
+        )
+        if effective_mode is ResourceMaterializationPolicy.OFF:
             return prepared
         return await materialize_local_assets(
             prepared,
             resources=self._resources,
-            strict=effective_mode is ResourceResolveMode.STRICT,
+            strict=effective_mode is ResourceMaterializationPolicy.STRICT,
         )
 
     async def prepare_template(
         self,
-        template_path: str | Path,
-        template_name: str,
+        template: TemplateRef,
         variables: Mapping[str, object],
         *,
-        filters: Mapping[str, FilterCallable] | None = None,
-        extensions: Sequence[ExtensionSpec] = (),
-        resource_mode: ResourceResolveMode | None = None,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml:
-        if not template_name:
-            raise InvalidRenderRequest("template_name must not be empty")
         template_root = await self._worker.run_sync(
             self._resources.authorize_local,
-            Path(template_path),
+            template.root,
         )
-        effective_mode = resource_mode or self._resources.strategy.resolve_mode
-        if effective_mode is ResourceResolveMode.OFF:
+        effective_mode = (
+            materialization_policy or self._resources.strategy.materialization_policy
+        )
+        if effective_mode is ResourceMaterializationPolicy.OFF:
             staged, assets = dict(variables), ()
         else:
             staged, assets = await stage_template_variables(
                 variables,
                 template_base=template_root,
                 resources=self._resources,
-                strict=effective_mode is ResourceResolveMode.STRICT,
+                strict=effective_mode is ResourceMaterializationPolicy.STRICT,
             )
         html = await self._templates.render(
             template_root,
-            template_name,
+            template.name,
             staged,
-            filters=filters,
-            extensions=extensions,
         )
         base = await self._worker.run_sync(
             self._path_uri,
@@ -245,27 +254,19 @@ class DefaultHtmlPreparer:
             assets=assets,
         )
 
-    async def render_template_html(
+    async def render_template(
         self,
-        template_path: str | Path,
-        template_name: str,
+        template: TemplateRef,
         variables: Mapping[str, object],
-        *,
-        filters: Mapping[str, FilterCallable] | None = None,
-        extensions: Sequence[ExtensionSpec] = (),
     ) -> str:
-        if not template_name:
-            raise InvalidRenderRequest("template_name must not be empty")
         template_root = await self._worker.run_sync(
             self._resources.authorize_local,
-            Path(template_path),
+            template.root,
         )
         return await self._templates.render(
             template_root,
-            template_name,
+            template.name,
             variables,
-            filters=filters,
-            extensions=extensions,
         )
 
 

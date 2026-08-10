@@ -25,15 +25,12 @@ from playwright.async_api import (
 )
 
 from entari_plugin_htmlrender._logging import logger
-from entari_plugin_htmlrender.providers.sdk import PLAYWRIGHT_PROVIDER_ID, EngineId
+from entari_plugin_htmlrender.providers.sdk import PLAYWRIGHT_PROVIDER_ID, ProviderId
 from entari_plugin_htmlrender.rendering.observers import observe_operation
 
 from .config import BrowserEngine
 from .install import install_browser
-from .install_state import (
-    reconcile_legacy_playwright_cache,
-    record_playwright_runtime_state,
-)
+from .install_state import record_playwright_runtime_state
 from .spawn import DRIVER_SPAWN_COORDINATOR
 
 if TYPE_CHECKING:
@@ -102,7 +99,7 @@ class WsVersionRiskLevel(StrEnum):
 class PlaywrightEngine:
     """Own Playwright resources using one explicitly injected configuration."""
 
-    backend: EngineId = PLAYWRIGHT_PROVIDER_ID
+    provider_id: ProviderId = PLAYWRIGHT_PROVIDER_ID
 
     def __init__(
         self,
@@ -117,19 +114,12 @@ class PlaywrightEngine:
         """Prepare the environment and create one process/browser lease."""
         playwright: Playwright | None = None
         try:
-            await run_sync(
-                partial(
-                    reconcile_legacy_playwright_cache,
-                    self._config,
-                    cleanup=self._config.cleanup_legacy_cache,
-                )
-            )
             await run_sync(record_playwright_runtime_state, self._config)
 
             with observe_operation(
                 self._operation_observer,
                 "playwright.open_runtime",
-                {"render.backend": self.backend},
+                {"render.backend": self.provider_id},
             ):
                 # The coordinator is the process-wide owner of the browser
                 # store env var; it scopes the snapshot to this driver spawn
@@ -139,7 +129,7 @@ class PlaywrightEngine:
             with observe_operation(
                 self._operation_observer,
                 "playwright.open_session",
-                {"render.backend": self.backend},
+                {"render.backend": self.provider_id},
             ):
                 mode = self._resolve_mode()
                 browser = await self._create_browser(playwright, mode)

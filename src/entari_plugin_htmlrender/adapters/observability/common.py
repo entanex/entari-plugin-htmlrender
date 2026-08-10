@@ -13,8 +13,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from types import ModuleType
 
-    from entari_plugin_htmlrender.providers.sdk import EngineId
-
 
 @final
 class OptionalModuleLoader:
@@ -76,8 +74,8 @@ class OptionalModuleLoader:
         return module
 
 
-def normalize_backend(backend: EngineId | None) -> str:
-    """Normalize an open provider identifier into a metric label string."""
+def normalize_backend(backend: str | None) -> str:
+    """Normalize a provider or graphics backend into a metric label string."""
     if backend is None:
         return "unknown"
     return str(backend)

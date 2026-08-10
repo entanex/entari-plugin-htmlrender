@@ -4,10 +4,13 @@ from typing import Any, Protocol, cast
 
 import pytest
 
+from entari_plugin_htmlrender.errors import (
+    CapabilityUnavailableError,
+    InvalidRenderInputError,
+)
 from entari_plugin_htmlrender.rendering import (
     CapabilityCatalog,
     CapabilityKey,
-    CapabilityUnavailable,
 )
 
 
@@ -33,7 +36,7 @@ def test_empty_catalog_reports_missing_capability() -> None:
     assert catalog.get(ECHO_KEY) is None
     assert ECHO_KEY not in catalog
     assert catalog.names() == frozenset()
-    with pytest.raises(CapabilityUnavailable) as exc_info:
+    with pytest.raises(CapabilityUnavailableError) as exc_info:
         catalog.require(ECHO_KEY)
     assert exc_info.value.capability == "test.echo"
 
@@ -65,10 +68,10 @@ def test_registration_validates_interface() -> None:
 
 
 def test_registration_diagnoses_non_runtime_protocol() -> None:
-    key = CapabilityKey("test.structural", _StructuralCapability)
+    with pytest.raises(InvalidRenderInputError) as raised:
+        CapabilityKey("test.structural", _StructuralCapability)
 
-    with pytest.raises(TypeError, match="runtime_checkable"):
-        CapabilityCatalog().with_capability(key, cast("Any", _Other()))
+    assert raised.value.field == "interface"
 
 
 def test_get_rejects_same_name_key_with_incompatible_interface() -> None:
@@ -77,10 +80,19 @@ def test_get_rejects_same_name_key_with_incompatible_interface() -> None:
     conflicting_key = CapabilityKey("test.echo", _Other)
     catalog = CapabilityCatalog().with_capability(ECHO_KEY, _Echo())
 
-    with pytest.raises(CapabilityUnavailable, match="not _Other"):
+    with pytest.raises(CapabilityUnavailableError, match="not _Other"):
         catalog.get(conflicting_key)
-    with pytest.raises(CapabilityUnavailable, match="not _Other"):
+    with pytest.raises(CapabilityUnavailableError, match="not _Other"):
         catalog.require(conflicting_key)
+    assert conflicting_key not in catalog
+
+
+@pytest.mark.parametrize("name", ["", "UPPER", "bad/name", ".leading"])
+def test_capability_key_rejects_unstable_names(name: str) -> None:
+    with pytest.raises(InvalidRenderInputError) as raised:
+        CapabilityKey(name, _Echo)
+
+    assert raised.value.field == "name"
 
 
 def test_contains_rejects_non_key_objects() -> None:

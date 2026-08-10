@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, final
 
 import anyio
 
-from .errors import ProviderLifecycleError
+from entari_plugin_htmlrender.errors import RuntimeUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -24,24 +24,24 @@ class OperationAdmissionGate:
 
     def __init__(self) -> None:
         self._lock = anyio.Lock()
-        self._accepting = True
+        self._state = "open"
         self._active_operations = 0
         self._drained = anyio.Event()
         self._drained.set()
 
-    def ensure_accepting(self) -> None:
+    def ensure_accepting(self, operation: str | None = None) -> None:
         """Reject synchronous facade operations after shutdown begins."""
-        if not self._accepting:
-            raise ProviderLifecycleError(
-                "Render runtime is closing or closed; build a new composition "
-                "to render again."
-            )
+        if self._state != "open":
+            raise RuntimeUnavailableError(self._state, operation=operation)
 
     @asynccontextmanager
-    async def operation(self) -> AsyncIterator[None]:
+    async def operation(
+        self,
+        operation: str | None = None,
+    ) -> AsyncIterator[None]:
         """Admit one operation for its complete preparation/execution span."""
         async with self._lock:
-            self.ensure_accepting()
+            self.ensure_accepting(operation)
             if self._active_operations == 0:
                 self._drained = anyio.Event()
             self._active_operations += 1
@@ -63,10 +63,17 @@ class OperationAdmissionGate:
         # operations remains cancellable so RenderRuntime.aclose() can be retried.
         with anyio.CancelScope(shield=True):
             async with self._lock:
-                self._accepting = False
+                if self._state == "open":
+                    self._state = "closing"
         # No new operation can be admitted anymore, so the drained event can
         # no longer be replaced and reading it outside the lock is stable.
         await self._drained.wait()
+
+    async def mark_closed(self) -> None:
+        """Record that lifecycle teardown completed after the drain."""
+        with anyio.CancelScope(shield=True):
+            async with self._lock:
+                self._state = "closed"
 
 
 __all__ = ["OperationAdmissionGate"]

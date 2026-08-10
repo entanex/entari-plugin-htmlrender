@@ -8,19 +8,19 @@ from .hosted import (
 from .publisher import FilehostAssetPublisher
 from .reader import (
     AnyioWorkerExecutor,
-    CachingResourceReader,
-    CompositeResourceReader,
+    CachingResourceFetcher,
+    CompositeResourceFetcher,
     ConfiguredLocalAccessPolicy,
-    build_resource_reader,
-    open_resource_reader,
+    build_resource_fetcher,
+    open_resource_fetcher,
 )
 from .remote import ConfiguredRemoteAccessPolicy, RemoteTransportExecutor
 
 __all__ = [
     "HOSTED_ASSET_MOUNT",
     "AnyioWorkerExecutor",
-    "CachingResourceReader",
-    "CompositeResourceReader",
+    "CachingResourceFetcher",
+    "CompositeResourceFetcher",
     "ConfiguredLocalAccessPolicy",
     "ConfiguredRemoteAccessPolicy",
     "FilehostAssetPublisher",
@@ -29,6 +29,6 @@ __all__ = [
     "HostedAssetNamespace",
     "HostedAssetStore",
     "RemoteTransportExecutor",
-    "build_resource_reader",
-    "open_resource_reader",
+    "build_resource_fetcher",
+    "open_resource_fetcher",
 ]

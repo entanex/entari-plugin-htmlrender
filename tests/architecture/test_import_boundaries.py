@@ -1,4 +1,4 @@
-"""Host-neutral architecture guardrails for the 0.8 layering.
+"""Host-neutral architecture guardrails for the package layering.
 
 The scan does not import the package, so it also protects installations that
 only use the core library. Both ordinary imports and literal lazy imports
@@ -338,8 +338,8 @@ def _python_sources(path: Path) -> tuple[Path, ...]:
 
 
 def test_filehost_adapter_is_not_nested_under_the_resource_core() -> None:
-    legacy_adapter = PACKAGE_ROOT / "resources" / "filehost"
-    sources = _python_sources(legacy_adapter)
+    misplaced_adapter = PACKAGE_ROOT / "resources" / "filehost"
+    sources = _python_sources(misplaced_adapter)
     assert not sources, (
         "resources.filehost is a host adapter and must live under adapters/resources: "
         f"{sources!r}"
@@ -347,27 +347,12 @@ def test_filehost_adapter_is_not_nested_under_the_resource_core() -> None:
 
 
 def test_observability_adapter_is_not_nested_under_utils() -> None:
-    legacy_adapter = PACKAGE_ROOT / "utils" / "telemetry"
-    sources = _python_sources(legacy_adapter)
+    misplaced_adapter = PACKAGE_ROOT / "utils" / "telemetry"
+    sources = _python_sources(misplaced_adapter)
     assert not sources, (
         "telemetry integrates host SDKs and must live under adapters/observability: "
         f"{sources!r}"
     )
-
-
-def test_transitional_implementation_modules_are_physically_removed() -> None:
-    legacy_modules = (
-        "adapters/_backend.py",
-        "preparation/content.py",
-        "preparation/resolve.py",
-        "resources/budget.py",
-        "resources/cache.py",
-        "resources/resolve.py",
-        "resources/template.py",
-        "resources/weighted_cache.py",
-    )
-    present = [module for module in legacy_modules if (PACKAGE_ROOT / module).exists()]
-    assert not present, f"Transitional implementation modules remain: {present!r}"
 
 
 def test_literal_lazy_import_collector_handles_supported_loader_forms() -> None:

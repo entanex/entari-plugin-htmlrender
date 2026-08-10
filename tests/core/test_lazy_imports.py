@@ -61,7 +61,7 @@ def test_public_library_import_is_host_neutral_and_lazy() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_core_packages_do_not_load_host_composition_or_adapters() -> None:
+def test_core_packages_do_not_load_composition_entari_or_adapters() -> None:
     result = _run_python(
         """
         import sys
@@ -74,8 +74,9 @@ def test_core_packages_do_not_load_host_composition_or_adapters() -> None:
 
         forbidden_prefixes = (
             "entari_plugin_htmlrender.adapters",
-            "entari_plugin_htmlrender.host.composition",
-            "entari_plugin_htmlrender.host._service",
+            "entari_plugin_htmlrender.composition",
+            "entari_plugin_htmlrender.config",
+            "entari_plugin_htmlrender.entari",
             "arclet.entari",
         )
         unexpected = {
@@ -121,18 +122,18 @@ def test_first_party_provider_modules_do_not_load_native_engines() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_selected_playwright_provider_build_stays_lazy() -> None:
+def test_selected_playwright_provider_plan_and_build_stay_lazy() -> None:
     result = _run_python(
         """
         import sys
 
-        from entari_plugin_htmlrender.host.composition import compose_runtime
-        from entari_plugin_htmlrender.host.config import RenderSettings
+        from entari_plugin_htmlrender.composition import build_runtime_plan
+        from entari_plugin_htmlrender.config import HtmlRenderConfig
 
-        settings = RenderSettings.model_validate(
+        config = HtmlRenderConfig.model_validate(
             {"provider": "playwright", "startup": "off"}
         )
-        plan = compose_runtime(settings)
+        plan = build_runtime_plan(config)
         runtime = plan.build_runtime()
 
         if plan.provider is None or plan.provider.id != "playwright":

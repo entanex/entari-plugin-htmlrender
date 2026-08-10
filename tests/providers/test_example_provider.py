@@ -9,15 +9,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from entari_plugin_htmlrender.host.composition import compose_runtime
-from entari_plugin_htmlrender.host.config import RenderSettings
+from entari_plugin_htmlrender.composition import build_runtime_plan
+from entari_plugin_htmlrender.config import HtmlRenderConfig
+from entari_plugin_htmlrender.errors import UnsupportedRasterOptionError
 from entari_plugin_htmlrender.preparation import RasterOptions
-from entari_plugin_htmlrender.providers.sdk import EngineProvider
-from entari_plugin_htmlrender.rendering import (
-    RenderHtmlRequest,
-    UnsupportedRenderOption,
-)
-from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.providers.sdk import RenderProvider
+from entari_plugin_htmlrender.resources.config import LocalResourceStrategy
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.runtime import RenderRuntime
@@ -34,7 +31,7 @@ _EXAMPLE_MODULE = (
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
-def _load_example_provider() -> EngineProvider[Any]:
+def _load_example_provider() -> RenderProvider[Any]:
     spec = importlib.util.spec_from_file_location(
         "htmlrender_echo_provider",
         _EXAMPLE_MODULE,
@@ -49,26 +46,24 @@ def _load_example_provider() -> EngineProvider[Any]:
         provider = module.PROVIDER
     finally:
         sys.modules.pop(spec.name, None)
-    assert isinstance(provider, EngineProvider)
+    assert isinstance(provider, RenderProvider)
     return provider
 
 
 async def test_echo_provider_composes_and_renders() -> None:
     provider = _load_example_provider()
-    settings = RenderSettings.model_validate(
+    settings = HtmlRenderConfig.model_validate(
         {
             "provider": "echo",
             "provider_config": {"color": "#ff0000"},
         }
     )
 
-    composition = compose_runtime(settings, explicit_providers=[provider])
-    runtime = composition.build_runtime()
+    plan = build_runtime_plan(settings, provider_override=provider)
+    runtime = plan.build_runtime()
     await runtime.startup()
     try:
-        artifact = await runtime.renderer.render_html(
-            RenderHtmlRequest(html="<p>echo</p>")
-        )
+        artifact = await runtime.renderer.rasterize_html("<p>echo</p>")
     finally:
         await runtime.aclose()
 
@@ -76,7 +71,7 @@ async def test_echo_provider_composes_and_renders() -> None:
     assert payload[: len(_PNG_MAGIC)] == _PNG_MAGIC
     assert artifact.format == "png"
     assert (artifact.width, artifact.height) == (1, 1)
-    assert runtime.resources.strategy == ResourceStrategy()
+    assert plan.resource_strategy == LocalResourceStrategy()
 
 
 async def test_echo_provider_satisfies_lifecycle_conformance() -> None:
@@ -87,12 +82,12 @@ async def test_echo_provider_satisfies_lifecycle_conformance() -> None:
     )
 
     provider = _load_example_provider()
-    settings = RenderSettings.model_validate({"provider": "echo"})
+    settings = HtmlRenderConfig.model_validate({"provider": "echo"})
 
-    def compose(selected: EngineProvider[Any]) -> RenderRuntime:
-        return compose_runtime(
+    def compose(selected: RenderProvider[Any]) -> RenderRuntime:
+        return build_runtime_plan(
             settings,
-            explicit_providers=[selected],
+            provider_override=selected,
         ).build_runtime()
 
     await run_provider_lifecycle_conformance(provider, compose)
@@ -100,18 +95,16 @@ async def test_echo_provider_satisfies_lifecycle_conformance() -> None:
 
 async def test_echo_provider_rejects_unsupported_encoded_format() -> None:
     provider = _load_example_provider()
-    composition = compose_runtime(
-        RenderSettings.model_validate({"provider": "echo"}),
-        explicit_providers=[provider],
+    plan = build_runtime_plan(
+        HtmlRenderConfig.model_validate({"provider": "echo"}),
+        provider_override=provider,
     )
-    runtime = composition.build_runtime()
+    runtime = plan.build_runtime()
     try:
-        with pytest.raises(UnsupportedRenderOption, match="PNG only"):
-            await runtime.renderer.render_html(
-                RenderHtmlRequest(
-                    html="<p>echo</p>",
-                    raster=RasterOptions(format="jpeg"),
-                )
+        with pytest.raises(UnsupportedRasterOptionError):
+            await runtime.renderer.rasterize_html(
+                "<p>echo</p>",
+                raster=RasterOptions(format="jpeg"),
             )
     finally:
         await runtime.aclose()
@@ -120,4 +113,4 @@ async def test_echo_provider_rejects_unsupported_encoded_format() -> None:
 def test_echo_provider_rejects_unknown_settings_keys() -> None:
     provider = _load_example_provider()
     with pytest.raises(ValueError, match="Unknown provider_config keys"):
-        provider.parse_settings({"color": "#123456", "bogus": True})
+        provider.parse_config({"color": "#123456", "bogus": True})

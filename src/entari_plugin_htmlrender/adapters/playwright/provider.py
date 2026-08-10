@@ -14,24 +14,24 @@ from entari_plugin_htmlrender.adapters._lease import (
     PreparedHtmlLeaseExecutor,
 )
 from entari_plugin_htmlrender.adapters.playwright.config import PlaywrightConfig
+from entari_plugin_htmlrender.errors import (
+    HtmlRenderError,
+    ProviderConfigurationError,
+    ProviderError,
+)
 from entari_plugin_htmlrender.providers.sdk import (
     PLAYWRIGHT_PROVIDER_ID,
-    EngineBindings,
-    EngineId,
     ProviderAvailability,
+    ProviderBinding,
     ProviderDependencies,
+    ProviderId,
 )
 from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
 from entari_plugin_htmlrender.rendering.capabilities import CapabilityCatalog
-from entari_plugin_htmlrender.rendering.errors import (
-    ProviderExecutionError,
-    RenderingError,
-)
-from entari_plugin_htmlrender.rendering.requests import (
-    ResourcePolicy,
-    effective_resource_resolve_mode,
-)
 from entari_plugin_htmlrender.resources.config import (
+    LocalResourceStrategy,
+    RemoteResourceStrategy,
+    ResourceMaterializationPolicy,
     ResourceStrategy,
 )
 
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from entari_plugin_htmlrender.rendering.ports import OperationObserver
     from entari_plugin_htmlrender.resources.ports import (
         AssetPublisher,
-        ProviderResources,
+        ProviderResourceAccess,
     )
 
 
@@ -105,16 +105,18 @@ _OBSERVATION_ATTRIBUTES: dict[str, str] = {"render.backend": PLAYWRIGHT_PROVIDER
 @contextmanager
 def _translate(
     operation: str,
-    runtime_error: type[RenderingError],
+    runtime_error: type[ProviderError],
 ) -> Iterator[None]:
     """Translate native Playwright failures into the stable error model."""
     try:
         yield
-    except RenderingError:
+    except HtmlRenderError:
         raise
     except Exception as error:
         raise runtime_error(
             f"Playwright {operation} failed.",
+            provider_id=str(PLAYWRIGHT_PROVIDER_ID),
+            operation=operation,
             source=error,
         ) from error
 
@@ -123,9 +125,9 @@ async def _rasterize(
     lease: PlaywrightLease,
     prepared: PreparedHtml,
     options: RasterOptions,
-    resource_policy: ResourcePolicy | None,
+    materialization_policy: ResourceMaterializationPolicy | None,
     *,
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
     asset_publisher: AssetPublisher | None,
 ) -> RenderedImage:
     from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
@@ -163,9 +165,8 @@ async def _rasterize(
         lease=lease,
         resources=resources,
         asset_publisher=asset_publisher,
-        resolve_mode=effective_resource_resolve_mode(
-            resource_policy,
-            resources.strategy.resolve_mode,
+        resolve_mode=(
+            materialization_policy or resources.strategy.materialization_policy
         ),
         telemetry_op="playwright.html_render.rasterize_html",
     )
@@ -183,39 +184,42 @@ async def _probe(lease: PlaywrightLease) -> None:
 
 @final
 class PlaywrightProvider:
-    """First-party provider for the Playwright browser engine."""
+    """First-party render provider backed by Playwright."""
 
-    id: EngineId = PLAYWRIGHT_PROVIDER_ID
+    id: ProviderId = PLAYWRIGHT_PROVIDER_ID
 
-    def parse_settings(self, raw: Mapping[str, object]) -> PlaywrightConfig:
+    def parse_config(self, raw: Mapping[str, object]) -> PlaywrightConfig:
         return PlaywrightConfig.model_validate(dict(raw))
 
-    def availability(self, settings: PlaywrightConfig) -> ProviderAvailability:
-        config = self._narrow(settings)
+    def check_availability(self, config: PlaywrightConfig) -> ProviderAvailability:
+        config = self._narrow(config)
         from entari_plugin_htmlrender.adapters.playwright.availability import (  # noqa: PLC0415
             playwright_availability,
         )
 
         return playwright_availability(config)
 
-    def resource_strategy(self, settings: PlaywrightConfig) -> ResourceStrategy:
-        config = self._narrow(settings)
-        return ResourceStrategy(
-            is_remote=bool(config.connect_ws.endpoint or config.connect_cdp.endpoint),
-            resolve_mode=config.resource_resolve_mode,
-            remote_local_policy=config.remote_local_resource_policy,
-            local_local_policy=config.local_local_resource_policy,
+    def resource_strategy(self, config: PlaywrightConfig) -> ResourceStrategy:
+        config = self._narrow(config)
+        if config.connect_ws.endpoint or config.connect_cdp.endpoint:
+            return RemoteResourceStrategy(
+                materialization_policy=config.materialization_policy,
+                local_resource_policy=config.remote_local_resource_policy,
+            )
+        return LocalResourceStrategy(
+            materialization_policy=config.materialization_policy,
+            local_resource_policy=config.local_local_resource_policy,
         )
 
     def compose(
         self,
-        settings: PlaywrightConfig,
+        config: PlaywrightConfig,
         dependencies: ProviderDependencies,
-    ) -> EngineBindings:
-        config = self._narrow(settings)
+    ) -> ProviderBinding:
+        config = self._narrow(config)
 
         from entari_plugin_htmlrender.adapters.playwright.capabilities import (  # noqa: PLC0415
-            PlaywrightAccessAdapter,
+            PlaywrightCapabilityAdapter,
         )
         from entari_plugin_htmlrender.capabilities import (  # noqa: PLC0415
             PLAYWRIGHT,
@@ -229,6 +233,7 @@ class PlaywrightProvider:
             create=engine.create_lease,
             is_alive=engine.is_alive,
             close=engine.close_lease,
+            provider_id=str(PLAYWRIGHT_PROVIDER_ID),
             observer=dependencies.operation_observer,
             translate=_translate,
             observation_attributes=_OBSERVATION_ATTRIBUTES,
@@ -239,13 +244,13 @@ class PlaywrightProvider:
             lease: PlaywrightLease,
             prepared: PreparedHtml,
             options: RasterOptions,
-            resource_policy: ResourcePolicy | None,
+            materialization_policy: ResourceMaterializationPolicy | None,
         ) -> RenderedImage:
             return await _rasterize(
                 lease,
                 prepared,
                 options,
-                resource_policy,
+                materialization_policy,
                 resources=dependencies.resources,
                 asset_publisher=dependencies.asset_publisher,
             )
@@ -255,15 +260,16 @@ class PlaywrightProvider:
             rasterize=rasterize,
             translate=_translate,
             observer=dependencies.operation_observer,
-            operation="playwright.html_render.rasterize_html",
+            telemetry_operation="playwright.html_render.rasterize_html",
             observation_attributes=_OBSERVATION_ATTRIBUTES,
         )
-        adapter = PlaywrightAccessAdapter(
+        adapter = PlaywrightCapabilityAdapter(
             leases,
             dependencies.operation_observer,
+            operation_admission=dependencies.operation_admission,
         )
         capabilities = CapabilityCatalog().with_capability(PLAYWRIGHT, adapter)
-        return EngineBindings(
+        return ProviderBinding(
             lifecycle=leases,
             prepared_html_executor=executor,
             provider_capabilities=capabilities,
@@ -272,9 +278,11 @@ class PlaywrightProvider:
     @staticmethod
     def _narrow(settings: object) -> PlaywrightConfig:
         if not isinstance(settings, PlaywrightConfig):
-            raise ProviderExecutionError(
+            raise ProviderConfigurationError(
                 "Playwright provider received settings that were not produced "
-                "by parse_settings()."
+                "by parse_config().",
+                provider_id=str(PLAYWRIGHT_PROVIDER_ID),
+                operation="compose",
             )
         return settings
 

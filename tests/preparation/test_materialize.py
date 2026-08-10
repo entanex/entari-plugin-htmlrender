@@ -8,19 +8,19 @@ from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
-    build_resource_reader,
+    build_resource_fetcher,
 )
 from entari_plugin_htmlrender.preparation import parse_html
 from entari_plugin_htmlrender.preparation.materialize import (
     AssetMaterializationError,
     materialize_local_assets,
 )
-from entari_plugin_htmlrender.rendering.errors import ResourceResolutionError
 from entari_plugin_htmlrender.resources.config import (
+    LocalResourceStrategy,
     ResourceCacheSettings,
-    ResourceResolveMode,
-    ResourceStrategy,
+    ResourceMaterializationPolicy,
 )
+from entari_plugin_htmlrender.resources.models import FileResourceRef
 from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
 from entari_plugin_htmlrender.resources.service import ResourceService
 
@@ -92,17 +92,21 @@ async def test_materialize_enforces_document_root(
     observer = NoopCacheObserver()
     worker = AnyioWorkerExecutor()
     resources = ResourceService(
-        reader=build_resource_reader(
+        fetcher=build_resource_fetcher(
             ResourceCacheSettings(),
             observer,
             worker,
+            local_access=ConfiguredLocalAccessPolicy(
+                allowed_roots=(),
+                allow_any=False,
+            ),
             remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
         ),
         local_access=ConfiguredLocalAccessPolicy(
             allowed_roots=(),
             allow_any=False,
         ),
-        strategy=ResourceStrategy(),
+        strategy=LocalResourceStrategy(),
     )
     with pytest.raises(AssetMaterializationError):
         await materialize_local_assets(prepared, resources=resources)
@@ -126,8 +130,8 @@ async def test_markdown_keeps_independent_resource_bases(
     css_path.write_text('@font-face { src: url("font.woff2") }')
     font.write_bytes(b"font")
     prepared = await preparer.prepare_markdown(
-        markdown_path=str(markdown_path),
-        css_path=str(css_path),
+        FileResourceRef(markdown_path),
+        stylesheet=FileResourceRef(css_path),
     )
     materialized = await materialize_local_assets(prepared, resources=resources)
     assert {asset.source for asset in materialized.assets} == {
@@ -139,10 +143,8 @@ async def test_markdown_keeps_independent_resource_bases(
 async def test_strict_markdown_preparation_exposes_stable_resource_error(
     preparer: DefaultHtmlPreparer,
 ) -> None:
-    with pytest.raises(ResourceResolutionError, match="no filesystem base") as captured:
+    with pytest.raises(AssetMaterializationError, match="no filesystem base"):
         await preparer.prepare_markdown(
             "![missing](missing.png)",
-            resource_mode=ResourceResolveMode.STRICT,
+            materialization_policy=ResourceMaterializationPolicy.STRICT,
         )
-
-    assert isinstance(captured.value, AssetMaterializationError)

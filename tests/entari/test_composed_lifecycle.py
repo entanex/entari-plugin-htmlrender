@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, cast
 from exceptiongroup import BaseExceptionGroup
 import pytest
 
-from entari_plugin_htmlrender.host.composition import _ComposedLifecycle
+from entari_plugin_htmlrender.composition import _ComposedLifecycle
+from entari_plugin_htmlrender.errors import ProviderLifecycleError
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.adapters.resources import RemoteTransportExecutor
@@ -52,14 +53,15 @@ class _Transport:
 
 
 def _lifecycle(
-    engine: _Component,
+    provider: _Component,
     resources: _Component,
     templates: _Component,
     publisher: _Component,
     transport: _Transport | None = None,
 ) -> _ComposedLifecycle:
     return _ComposedLifecycle(
-        engine=cast("RuntimeLifecycle", engine),
+        provider_id="fake",
+        provider=cast("RuntimeLifecycle", provider),
         resources=cast("ResourceService", resources),
         templates=cast("JinjaTemplateCompiler", templates),
         publisher=cast("AssetPublisher", publisher),
@@ -71,36 +73,36 @@ async def test_startup_failure_rolls_back_completed_steps_in_reverse_and_retries
     None
 ):
     events: list[str] = []
-    engine = _Component(
-        "engine",
+    provider = _Component(
+        "provider",
         events,
-        startup_errors=[RuntimeError("engine unavailable")],
+        startup_errors=[RuntimeError("provider unavailable")],
     )
     resources = _Component("resources", events)
     templates = _Component("templates", events)
     publisher = _Component("publisher", events)
-    lifecycle = _lifecycle(engine, resources, templates, publisher)
+    lifecycle = _lifecycle(provider, resources, templates, publisher)
 
-    with pytest.raises(RuntimeError, match="engine unavailable"):
+    with pytest.raises(RuntimeError, match="provider unavailable"):
         await lifecycle.startup()
 
     # The one completed step (publisher.startup) is rolled back first, then the
     # stateless caches are cleared.
     assert events == [
         "publisher.startup",
-        "engine.startup",
+        "provider.startup",
         "publisher.clear",
         "templates.clear",
         "resources.clear",
     ]
 
     await lifecycle.startup()
-    assert events[-2:] == ["publisher.startup", "engine.startup"]
+    assert events[-2:] == ["publisher.startup", "provider.startup"]
 
 
 async def test_startup_does_not_roll_back_a_step_that_never_started() -> None:
     events: list[str] = []
-    engine = _Component("engine", events)
+    provider = _Component("provider", events)
     resources = _Component("resources", events)
     templates = _Component("templates", events)
     publisher = _Component(
@@ -108,12 +110,12 @@ async def test_startup_does_not_roll_back_a_step_that_never_started() -> None:
         events,
         startup_errors=[RuntimeError("publisher unavailable")],
     )
-    lifecycle = _lifecycle(engine, resources, templates, publisher)
+    lifecycle = _lifecycle(provider, resources, templates, publisher)
 
     with pytest.raises(RuntimeError, match="publisher unavailable"):
         await lifecycle.startup()
 
-    # Publisher startup failed, so its undo never runs and the engine never
+    # Publisher startup failed, so its undo never runs and the provider never
     # started; only the stateless caches are cleared.
     assert events == [
         "publisher.startup",
@@ -124,10 +126,10 @@ async def test_startup_does_not_roll_back_a_step_that_never_started() -> None:
 
 async def test_rollback_failure_poisons_composition_and_blocks_retry() -> None:
     events: list[str] = []
-    engine = _Component(
-        "engine",
+    provider = _Component(
+        "provider",
         events,
-        startup_errors=[RuntimeError("engine unavailable")],
+        startup_errors=[RuntimeError("provider unavailable")],
     )
     resources = _Component("resources", events)
     templates = _Component("templates", events)
@@ -136,19 +138,15 @@ async def test_rollback_failure_poisons_composition_and_blocks_retry() -> None:
         events,
         clear_errors=[RuntimeError("publisher rollback failed")],
     )
-    lifecycle = _lifecycle(engine, resources, templates, publisher)
+    lifecycle = _lifecycle(provider, resources, templates, publisher)
 
     with pytest.raises(BaseExceptionGroup) as captured:
         await lifecycle.startup()
-    assert "poisoned" in str(captured.value)
+    assert "startup and rollback both failed" in str(captured.value)
     assert {str(error) for error in captured.value.exceptions} == {
-        "engine unavailable",
+        "provider unavailable",
         "publisher rollback failed",
     }
-
-    from entari_plugin_htmlrender.rendering.errors import (  # noqa: PLC0415
-        ProviderLifecycleError,
-    )
 
     with pytest.raises(ProviderLifecycleError, match="poisoned"):
         await lifecycle.startup()
@@ -156,10 +154,10 @@ async def test_rollback_failure_poisons_composition_and_blocks_retry() -> None:
 
 async def test_shutdown_attempts_every_component_and_is_retryable() -> None:
     events: list[str] = []
-    engine = _Component(
-        "engine",
+    provider = _Component(
+        "provider",
         events,
-        close_errors=[RuntimeError("engine close failed")],
+        close_errors=[RuntimeError("provider close failed")],
     )
     resources = _Component("resources", events)
     templates = _Component(
@@ -172,18 +170,18 @@ async def test_shutdown_attempts_every_component_and_is_retryable() -> None:
         events,
         clear_errors=[RuntimeError("publisher clear failed")],
     )
-    lifecycle = _lifecycle(engine, resources, templates, publisher)
+    lifecycle = _lifecycle(provider, resources, templates, publisher)
 
     with pytest.raises(BaseExceptionGroup) as captured:
         await lifecycle.aclose()
 
     assert [str(error) for error in captured.value.exceptions] == [
-        "engine close failed",
+        "provider close failed",
         "template clear failed",
         "publisher clear failed",
     ]
     assert events == [
-        "engine.aclose",
+        "provider.aclose",
         "templates.clear",
         "resources.clear",
         "publisher.clear",
@@ -192,7 +190,7 @@ async def test_shutdown_attempts_every_component_and_is_retryable() -> None:
 
     await lifecycle.aclose()
     assert events[-5:] == [
-        "engine.aclose",
+        "provider.aclose",
         "templates.clear",
         "resources.clear",
         "publisher.clear",

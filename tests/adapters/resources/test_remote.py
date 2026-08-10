@@ -18,15 +18,19 @@ if TYPE_CHECKING:
 from entari_plugin_htmlrender.adapters.resources.remote import (
     ConfiguredRemoteAccessPolicy,
     RemoteTransportExecutor,
-    read_remote,
+    fetch_remote,
 )
 from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
 from entari_plugin_htmlrender.resources.config import RemoteAccessSettings
 from entari_plugin_htmlrender.resources.errors import (
-    ResourceAccessDenied,
-    ResourceNotFound,
-    ResourceResolutionError,
-    ResourceSizeExceeded,
+    ResourceAccessDeniedError,
+    ResourceAuthenticationError,
+    ResourceFetchError,
+    ResourceNetworkError,
+    ResourceNotFoundError,
+    ResourceRemoteResponseError,
+    ResourceTimeoutError,
+    ResourceTooLargeError,
 )
 from entari_plugin_htmlrender.resources.models import (
     NotModified,
@@ -56,7 +60,7 @@ async def _wait_for(event: threading.Event) -> None:
 def test_default_policy_denies_private_address_literals(url: str) -> None:
     policy = ConfiguredRemoteAccessPolicy()
 
-    with pytest.raises(ResourceAccessDenied):
+    with pytest.raises(ResourceAccessDeniedError):
         policy.authorize_url(url)
 
 
@@ -73,7 +77,7 @@ def test_default_policy_allows_public_destinations(url: str) -> None:
 
 @pytest.mark.parametrize("scheme", ["file", "ftp", "gopher", "data"])
 def test_policy_rejects_non_http_schemes(scheme: str) -> None:
-    with pytest.raises(ResourceAccessDenied):
+    with pytest.raises(ResourceAccessDeniedError):
         ConfiguredRemoteAccessPolicy().authorize_url(f"{scheme}://example.com/x")
 
 
@@ -82,9 +86,9 @@ def test_policy_denies_dns_answers_in_private_ranges() -> None:
     url = "http://rebind.example.com/asset"
 
     policy.authorize_url(url)
-    with pytest.raises(ResourceAccessDenied):
+    with pytest.raises(ResourceAccessDeniedError):
         policy.authorize_address(url, ip_address("10.0.0.1"))
-    with pytest.raises(ResourceAccessDenied):
+    with pytest.raises(ResourceAccessDeniedError):
         policy.authorize_address(url, ip_address("169.254.169.254"))
     policy.authorize_address(url, ip_address("93.184.216.34"))
 
@@ -96,7 +100,7 @@ def test_allow_hosts_whitelists_private_destinations_including_subdomains() -> N
 
     policy.authorize_address("http://internal.test/asset", ip_address("10.0.0.1"))
     policy.authorize_address("http://cdn.internal.test/asset", ip_address("10.0.0.1"))
-    with pytest.raises(ResourceAccessDenied):
+    with pytest.raises(ResourceAccessDeniedError):
         policy.authorize_address("http://other.test/asset", ip_address("10.0.0.1"))
 
 
@@ -108,9 +112,9 @@ def test_deny_hosts_wins_over_public_and_allowed_hosts() -> None:
         )
     )
 
-    with pytest.raises(ResourceAccessDenied):
+    with pytest.raises(ResourceAccessDeniedError):
         policy.authorize_url("https://blocked.test/asset")
-    with pytest.raises(ResourceAccessDenied):
+    with pytest.raises(ResourceAccessDeniedError):
         policy.authorize_url("https://sub.blocked.test/asset")
 
 
@@ -145,8 +149,8 @@ async def test_dns_resolution_to_private_range_is_rejected_before_connecting(
 
     monkeypatch.setattr(socket, "create_connection", failing_connection)
 
-    with pytest.raises(ResourceAccessDenied):
-        await read_remote(
+    with pytest.raises(ResourceAccessDeniedError):
+        await fetch_remote(
             RemoteResourceRef("http://rebind.example.com/asset"),
             policy=ConfiguredRemoteAccessPolicy(),
             transport=_transport(),
@@ -179,6 +183,24 @@ class _Handler(BaseHTTPRequestHandler):
             time.sleep(0.06)
             self.send_response(302)
             self.send_header("Location", "/slow-redirect")
+            self.end_headers()
+        elif self.path == "/bad-redirect":
+            self.send_response(302)
+            self.end_headers()
+        elif self.path == "/unauthorized":
+            self.send_response(401)
+            self.end_headers()
+        elif self.path == "/forbidden":
+            self.send_response(403)
+            self.end_headers()
+        elif self.path == "/teapot":
+            self.send_response(418)
+            self.end_headers()
+        elif self.path == "/rate-limited":
+            self.send_response(429)
+            self.end_headers()
+        elif self.path == "/server-error":
+            self.send_response(503)
             self.end_headers()
         elif self.path == "/conditional":
             if self.headers.get("If-None-Match") == '"tag-1"':
@@ -220,7 +242,7 @@ _LOOPBACK_ALLOWED = RemoteAccessSettings(allow_hosts=("127.0.0.1",))
 
 @pytest.mark.anyio
 async def test_fetch_returns_content_from_allowed_host(loopback_server: str) -> None:
-    content = await read_remote(
+    content = await fetch_remote(
         RemoteResourceRef(f"{loopback_server}/ok"),
         policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
         transport=_transport(),
@@ -234,8 +256,8 @@ async def test_fetch_returns_content_from_allowed_host(loopback_server: str) -> 
 
 @pytest.mark.anyio
 async def test_redirect_into_private_range_is_blocked(loopback_server: str) -> None:
-    with pytest.raises(ResourceAccessDenied):
-        await read_remote(
+    with pytest.raises(ResourceAccessDeniedError):
+        await fetch_remote(
             RemoteResourceRef(f"{loopback_server}/redirect-private"),
             policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
             transport=_transport(),
@@ -249,8 +271,8 @@ async def test_redirect_chain_is_bounded(loopback_server: str) -> None:
         RemoteAccessSettings(allow_hosts=("127.0.0.1",), max_redirects=2)
     )
 
-    with pytest.raises(ResourceResolutionError, match="redirects"):
-        await read_remote(
+    with pytest.raises(ResourceFetchError, match="redirects"):
+        await fetch_remote(
             RemoteResourceRef(f"{loopback_server}/loop"),
             policy=policy,
             transport=_transport(),
@@ -260,8 +282,8 @@ async def test_redirect_chain_is_bounded(loopback_server: str) -> None:
 
 @pytest.mark.anyio
 async def test_missing_remote_resource_maps_to_not_found(loopback_server: str) -> None:
-    with pytest.raises(ResourceNotFound):
-        await read_remote(
+    with pytest.raises(ResourceNotFoundError):
+        await fetch_remote(
             RemoteResourceRef(f"{loopback_server}/missing"),
             policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
             transport=_transport(),
@@ -270,12 +292,77 @@ async def test_missing_remote_resource_maps_to_not_found(loopback_server: str) -
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("path", "status_code"),
+    [("unauthorized", 401), ("forbidden", 403)],
+)
+async def test_authentication_responses_have_a_distinct_error(
+    loopback_server: str,
+    path: str,
+    status_code: int,
+) -> None:
+    with pytest.raises(ResourceAuthenticationError) as captured:
+        await fetch_remote(
+            RemoteResourceRef(f"{loopback_server}/{path}"),
+            policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
+            transport=_transport(),
+            max_resource_bytes=1024,
+        )
+
+    assert captured.value.status_code == status_code
+    assert captured.value.retryable is False
+    assert captured.value.operation == "fetch"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("path", "status_code", "retryable"),
+    [
+        ("teapot", 418, False),
+        ("rate-limited", 429, True),
+        ("server-error", 503, True),
+    ],
+)
+async def test_remote_response_status_is_structured(
+    loopback_server: str,
+    path: str,
+    status_code: int,
+    retryable: object,
+) -> None:
+    with pytest.raises(ResourceRemoteResponseError) as captured:
+        await fetch_remote(
+            RemoteResourceRef(f"{loopback_server}/{path}"),
+            policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
+            transport=_transport(),
+            max_resource_bytes=1024,
+        )
+
+    assert captured.value.status_code == status_code
+    assert captured.value.retryable is retryable
+
+
+@pytest.mark.anyio
+async def test_malformed_redirect_response_preserves_status(
+    loopback_server: str,
+) -> None:
+    with pytest.raises(ResourceRemoteResponseError) as captured:
+        await fetch_remote(
+            RemoteResourceRef(f"{loopback_server}/bad-redirect"),
+            policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
+            transport=_transport(),
+            max_resource_bytes=1024,
+        )
+
+    assert captured.value.status_code == 302
+
+
+@pytest.mark.anyio
 async def test_conditional_read_maps_validator_and_304(loopback_server: str) -> None:
     policy = ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED)
     transport = _transport()
     reference = RemoteResourceRef(f"{loopback_server}/conditional")
 
-    first = await read_remote(
+    first = await fetch_remote(
         reference,
         policy=policy,
         transport=transport,
@@ -286,7 +373,7 @@ async def test_conditional_read_maps_validator_and_304(loopback_server: str) -> 
     assert revision is not None
     assert revision == ResourceRevision('etag:"tag-1"')
 
-    second = await read_remote(
+    second = await fetch_remote(
         reference,
         policy=policy,
         transport=transport,
@@ -298,8 +385,8 @@ async def test_conditional_read_maps_validator_and_304(loopback_server: str) -> 
 
 @pytest.mark.anyio
 async def test_remote_read_respects_size_limit(loopback_server: str) -> None:
-    with pytest.raises(ResourceSizeExceeded):
-        await read_remote(
+    with pytest.raises(ResourceTooLargeError):
+        await fetch_remote(
             RemoteResourceRef(f"{loopback_server}/big"),
             policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
             transport=_transport(),
@@ -319,14 +406,67 @@ async def test_deadline_returns_control_promptly_on_slow_hop(
     monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
 
     with anyio.fail_after(0.05):
-        with pytest.raises(ResourceResolutionError, match="deadline"):
-            await read_remote(
+        with pytest.raises(ResourceTimeoutError, match="deadline") as captured:
+            await fetch_remote(
                 RemoteResourceRef("http://slow.example.com/asset"),
                 policy=ConfiguredRemoteAccessPolicy(),
                 transport=_transport(),
                 max_resource_bytes=1024,
                 request_timeout_seconds=0.02,
             )
+    assert captured.value.timeout_seconds == 0.02
+    assert captured.value.retryable is True
+
+
+@pytest.mark.anyio
+async def test_dns_failure_maps_to_network_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_getaddrinfo(*args: object, **kwargs: object) -> list[object]:
+        del args, kwargs
+        raise socket.gaierror("name lookup failed")
+
+    monkeypatch.setattr(socket, "getaddrinfo", failing_getaddrinfo)
+
+    with pytest.raises(ResourceNetworkError) as captured:
+        await fetch_remote(
+            RemoteResourceRef("http://missing.example/asset"),
+            policy=ConfiguredRemoteAccessPolicy(),
+            transport=_transport(),
+            max_resource_bytes=1024,
+        )
+
+    assert captured.value.retryable is True
+    assert captured.value.operation == "fetch"
+
+
+@pytest.mark.anyio
+async def test_connection_failure_maps_to_network_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def public_getaddrinfo(*args: object, **kwargs: object) -> list[object]:
+        del args, kwargs
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80)),
+        ]
+
+    def failing_connection(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise ConnectionRefusedError("connection refused")
+
+    monkeypatch.setattr(socket, "getaddrinfo", public_getaddrinfo)
+    monkeypatch.setattr(socket, "create_connection", failing_connection)
+
+    with pytest.raises(ResourceNetworkError) as captured:
+        await fetch_remote(
+            RemoteResourceRef("http://unreachable.example/asset"),
+            policy=ConfiguredRemoteAccessPolicy(),
+            transport=_transport(),
+            max_resource_bytes=1024,
+        )
+
+    assert captured.value.retryable is True
+    assert captured.value.operation == "fetch"
 
 
 @pytest.mark.anyio
@@ -356,7 +496,7 @@ async def test_concurrency_bound_survives_repeated_cancellation(
     # pool holds every slot until the blocking DNS call finishes.
     for _ in range(8):
         with anyio.move_on_after(0.01):
-            await read_remote(
+            await fetch_remote(
                 RemoteResourceRef("http://slow.example.com/asset"),
                 policy=ConfiguredRemoteAccessPolicy(),
                 transport=transport,
@@ -384,7 +524,7 @@ async def test_aclose_cancels_admission_waiters_and_rejects_new_runs() -> None:
         nonlocal waiter_error
         try:
             await transport.run(lambda: None)
-        except ResourceResolutionError as error:
+        except ResourceNetworkError as error:
             waiter_error = error
 
     async with anyio.create_task_group() as task_group:
@@ -395,8 +535,8 @@ async def test_aclose_cancels_admission_waiters_and_rejects_new_runs() -> None:
         release.set()
         await transport.aclose()
 
-    assert isinstance(waiter_error, ResourceResolutionError)
-    with pytest.raises(ResourceResolutionError, match="closed"):
+    assert isinstance(waiter_error, ResourceNetworkError)
+    with pytest.raises(ResourceNetworkError, match="closed"):
         await transport.run(lambda: None)
 
 
@@ -430,8 +570,8 @@ async def test_deadline_is_not_reset_by_redirect_hops(loopback_server: str) -> N
     )
 
     started = time.monotonic()
-    with pytest.raises(ResourceResolutionError, match="deadline"):
-        await read_remote(
+    with pytest.raises(ResourceTimeoutError, match="deadline"):
+        await fetch_remote(
             RemoteResourceRef(f"{loopback_server}/slow-redirect"),
             policy=policy,
             transport=_transport(),

@@ -6,18 +6,17 @@ import anyio
 from anyio import wait_all_tasks_blocked
 import pytest
 
-from entari_plugin_htmlrender.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.errors import InvalidRenderInputError
 from entari_plugin_htmlrender.graphics.errors import RasterBackendExecutionError
 from entari_plugin_htmlrender.graphics.execution import (
     RasterWorkBudget,
-    run_raster_backend,
+    rasterize_with_backend,
 )
 from entari_plugin_htmlrender.graphics.models import (
     FillRect,
     PixelRect,
     RasterEncodeOptions,
     RasterScene,
-    RenderRasterSceneRequest,
     RGBAColor,
 )
 from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
@@ -51,7 +50,7 @@ class _InlineWorker:
 async def test_budget_rejects_oversized_scene_before_reserving_work() -> None:
     budget = RasterWorkBudget(max_pixels=15, max_concurrency=1)
 
-    with pytest.raises(InvalidRenderRequest, match="16 pixels"):
+    with pytest.raises(InvalidRenderInputError, match="16 pixels"):
         async with budget.reserve(RasterScene(4, 4)):
             raise AssertionError("oversized scene entered the work slot")
 
@@ -63,7 +62,7 @@ async def test_budget_rejects_scene_with_too_many_draw_commands() -> None:
     )
     scene = RasterScene(4, 4, commands=commands)
 
-    with pytest.raises(InvalidRenderRequest, match="3 draw commands"):
+    with pytest.raises(InvalidRenderInputError, match="3 draw commands"):
         async with budget.reserve(scene):
             raise AssertionError("over-budget scene entered the work slot")
 
@@ -96,18 +95,17 @@ async def test_budget_is_shared_across_concurrent_scene_work() -> None:
     assert budget.max_concurrency == 1
 
 
-async def test_run_raster_backend_owns_worker_and_observation_contract() -> None:
-    request = RenderRasterSceneRequest(
-        RasterScene(2, 3),
-        RasterEncodeOptions(),
-    )
+async def test_rasterize_with_backend_owns_worker_and_observation_contract() -> None:
+    scene = RasterScene(2, 3)
+    output = RasterEncodeOptions()
     worker = _InlineWorker()
     observer = RecordingOperationObserver()
 
-    result = await run_raster_backend(
+    result = await rasterize_with_backend(
         "pillow",
-        request,
-        lambda _: rendered_image(width=2, height=3),
+        scene,
+        output,
+        lambda _scene, _output: rendered_image(width=2, height=3),
         worker=worker,
         observer=observer,
         operation_admission=OperationAdmissionGate(),
@@ -118,23 +116,25 @@ async def test_run_raster_backend_owns_worker_and_observation_contract() -> None
     assert worker.calls == 1
     assert observer.operations == [
         (
-            "graphics.pillow.render_scene",
+            "graphics.pillow.rasterize",
             {"render.backend": "pillow", "render.format": "png"},
             "success",
         )
     ]
 
 
-async def test_run_raster_backend_translates_worker_failure() -> None:
-    request = RenderRasterSceneRequest(RasterScene(1, 1), RasterEncodeOptions())
+async def test_rasterize_with_backend_translates_worker_failure() -> None:
+    scene = RasterScene(1, 1)
+    output = RasterEncodeOptions()
 
-    def fail(_: RenderRasterSceneRequest) -> RenderedImage:
+    def fail(_: RasterScene, __: RasterEncodeOptions) -> RenderedImage:
         raise RuntimeError("native failure")
 
     with pytest.raises(RasterBackendExecutionError) as raised:
-        await run_raster_backend(
+        await rasterize_with_backend(
             "skia",
-            request,
+            scene,
+            output,
             fail,
             worker=_InlineWorker(),
             observer=RecordingOperationObserver(),

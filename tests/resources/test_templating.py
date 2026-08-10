@@ -12,7 +12,7 @@ from entari_plugin_htmlrender.adapters.resources import (
     ConfiguredLocalAccessPolicy,
 )
 from entari_plugin_htmlrender.adapters.templates import JinjaTemplateCompiler
-from entari_plugin_htmlrender.resources.errors import ResourceAccessDenied
+from entari_plugin_htmlrender.resources.errors import ResourceAccessDeniedError
 from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
 from entari_plugin_htmlrender.resources.source import PackageResourceSource
 from entari_plugin_htmlrender.resources.templating import (
@@ -127,7 +127,7 @@ async def test_filesystem_loader_uses_injected_local_access_policy(
         ),
     )
 
-    with pytest.raises(ResourceAccessDenied, match="outside allowed roots"):
+    with pytest.raises(ResourceAccessDeniedError, match="outside allowed roots"):
         await compiler.render(outside, "card.html", {})
 
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entari_plugin_htmlrender.adapters import observability as telemetry
-from entari_plugin_htmlrender.rendering import ProviderExecutionError
+from entari_plugin_htmlrender.errors import ProviderExecutionError
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
@@ -117,6 +117,8 @@ async def test_track_render_records_bounded_rendering_error_metadata(
         async with telemetry.track_render("render.error", sentry=True):
             raise ProviderExecutionError(
                 "Render failed.",
+                provider_id="playwright",
+                operation="html_to_image",
                 source=RuntimeError("native failure"),
             )
 
@@ -273,8 +275,8 @@ def test_operation_observer_exports_only_to_its_selected_integrations(
     [
         ("playwright.rasterize_html", "playwright"),
         ("takumi.rasterize_html", "takumi"),
-        ("graphics.pillow.render_scene", "pillow"),
-        ("graphics.skia.render_scene", "skia"),
+        ("graphics.pillow.rasterize", "pillow"),
+        ("graphics.skia.rasterize", "skia"),
     ],
 )
 def test_new_backend_observation_stubs_fan_out_to_both_exporters(

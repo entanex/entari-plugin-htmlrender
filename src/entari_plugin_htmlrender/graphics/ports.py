@@ -1,4 +1,4 @@
-"""Ports implemented by independent raster-scene adapters."""
+"""Stable graphics contract implemented by the selected adapter."""
 
 from __future__ import annotations
 
@@ -7,14 +7,23 @@ from typing import Protocol, runtime_checkable
 # Public protocol annotations must remain resolvable through get_type_hints().
 from entari_plugin_htmlrender.rendering.artifacts import RenderedImage  # noqa: TC001
 
-from .models import RenderRasterSceneRequest  # noqa: TC001
+from .models import (
+    DEFAULT_RASTER_ENCODE_OPTIONS,
+    RasterEncodeOptions,
+    RasterScene,
+)
 
 
 @runtime_checkable
-class RasterSceneRenderer(Protocol):
-    """Render a neutral physical-pixel scene without exposing native objects."""
+class GraphicsRenderer(Protocol):
+    """Rasterize neutral physical-pixel scenes without exposing backend selection."""
 
-    async def render(self, request: RenderRasterSceneRequest) -> RenderedImage: ...
+    async def rasterize(
+        self,
+        scene: RasterScene,
+        *,
+        output: RasterEncodeOptions = DEFAULT_RASTER_ENCODE_OPTIONS,
+    ) -> RenderedImage: ...
 
 
-__all__ = ["RasterSceneRenderer"]
+__all__ = ["GraphicsRenderer"]

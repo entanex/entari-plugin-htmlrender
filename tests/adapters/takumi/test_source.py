@@ -22,8 +22,8 @@ from entari_plugin_htmlrender.preparation import (
     parse_html,
 )
 from entari_plugin_htmlrender.resources.config import (
-    ResourceResolveMode,
-    ResourceStrategy,
+    LocalResourceStrategy,
+    ResourceMaterializationPolicy,
 )
 from tests.adapters.takumi.helpers import resource_service
 
@@ -259,7 +259,9 @@ async def test_resolve_mode_off_skips_local_materialization(
     document = await materialize_takumi_document(
         prepared,
         resources=resource_service(
-            strategy=ResourceStrategy(resolve_mode=ResourceResolveMode.OFF)
+            strategy=LocalResourceStrategy(
+                materialization_policy=ResourceMaterializationPolicy.OFF
+            )
         ),
     )
 
@@ -279,7 +281,9 @@ async def test_auto_tolerates_but_strict_rejects_missing_local_resource(
     automatic = await materialize_takumi_document(
         prepared,
         resources=resource_service(
-            strategy=ResourceStrategy(resolve_mode=ResourceResolveMode.AUTO)
+            strategy=LocalResourceStrategy(
+                materialization_policy=ResourceMaterializationPolicy.AUTO
+            )
         ),
     )
 
@@ -288,7 +292,9 @@ async def test_auto_tolerates_but_strict_rejects_missing_local_resource(
         await materialize_takumi_document(
             prepared,
             resources=resource_service(
-                strategy=ResourceStrategy(resolve_mode=ResourceResolveMode.STRICT)
+                strategy=LocalResourceStrategy(
+                    materialization_policy=ResourceMaterializationPolicy.STRICT
+                )
             ),
         )
 

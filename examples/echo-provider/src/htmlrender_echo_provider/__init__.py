@@ -1,11 +1,11 @@
-"""Minimal render engine demonstrating the htmlrender provider SDK.
+"""Minimal render provider demonstrating the htmlrender provider SDK.
 
 Configure it under the Entari ``htmlrender`` plugin key with
 ``provider: echo`` and ``provider_config.color``.
 
-Every render command returns a fixed 1x1 PNG in the configured color;
-useful for validating entry-point discovery, settings parsing, lifecycle,
-and executor wiring without any native engine.
+Every rasterize operation returns a fixed 1x1 PNG in the configured color;
+useful for validating entry-point discovery, config parsing, lifecycle,
+and executor wiring without a native renderer.
 """
 
 from __future__ import annotations
@@ -15,25 +15,29 @@ import struct
 from typing import TYPE_CHECKING, final
 import zlib
 
+from entari_plugin_htmlrender.errors import (
+    ProviderExecutionError,
+    UnsupportedRasterOptionError,
+)
 from entari_plugin_htmlrender.providers import (
-    EngineBindings,
-    EngineId,
-    EngineProvider,
+    LocalResourceStrategy,
     ProviderAvailability,
+    ProviderAvailable,
+    ProviderBinding,
     ProviderDependencies,
+    ProviderId,
+    RenderProvider,
     ResourceStrategy,
 )
-from entari_plugin_htmlrender.rendering import (
-    ProviderExecutionError,
-    RenderedImage,
-    UnsupportedRenderOption,
-)
+from entari_plugin_htmlrender.rendering import RenderedImage, RenderOperation
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from entari_plugin_htmlrender.preparation import PreparedHtml, RasterOptions
-    from entari_plugin_htmlrender.rendering import ResourcePolicy
+    from entari_plugin_htmlrender.resources.config import (
+        ResourceMaterializationPolicy,
+    )
 
 
 @dataclass(frozen=True)
@@ -89,16 +93,19 @@ class _EchoExecutor:
         prepared: PreparedHtml,
         options: RasterOptions,
         *,
-        resource_policy: ResourcePolicy | None = None,
-        timeout_seconds: float | None = None,
+        operation: RenderOperation,
+        materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> RenderedImage:
-        del prepared, resource_policy, timeout_seconds
-        # A render option the engine cannot honour is a stable
-        # UnsupportedRenderOption; ProviderExecutionError is reserved for
+        del prepared, materialization_policy
+        # A raster option the provider cannot honour is a stable
+        # UnsupportedRasterOptionError; ProviderExecutionError is reserved for
         # actual runtime failures.
         if options.format != "png":
-            raise UnsupportedRenderOption(
-                f"The echo provider renders PNG only, not {options.format!r}."
+            raise UnsupportedRasterOptionError(
+                operation.value,
+                "format",
+                provider_id="echo",
+                value=options.format,
             )
         try:
             return RenderedImage.from_bytes(
@@ -108,6 +115,8 @@ class _EchoExecutor:
         except ValueError as error:
             raise ProviderExecutionError(
                 "Echo rasterization failed.",
+                provider_id="echo",
+                operation=operation.value,
                 source=error,
             ) from error
 
@@ -116,9 +125,9 @@ class _EchoExecutor:
 class EchoProvider:
     """A provider that always renders one constant pixel."""
 
-    id: EngineId = "echo"
+    id: ProviderId = ProviderId("echo")
 
-    def parse_settings(self, raw: Mapping[str, object]) -> EchoSettings:
+    def parse_config(self, raw: Mapping[str, object]) -> EchoSettings:
         unknown = set(raw) - {"color"}
         if unknown:
             raise ValueError(f"Unknown provider_config keys: {sorted(unknown)!r}")
@@ -128,26 +137,26 @@ class EchoProvider:
         _parse_color(color)
         return EchoSettings(color=color)
 
-    def availability(self, settings: EchoSettings) -> ProviderAvailability:
-        del settings
-        return ProviderAvailability(available=True)
+    def check_availability(self, config: EchoSettings) -> ProviderAvailability:
+        del config
+        return ProviderAvailable()
 
-    def resource_strategy(self, settings: EchoSettings) -> ResourceStrategy:
-        del settings
-        return ResourceStrategy()
+    def resource_strategy(self, config: EchoSettings) -> ResourceStrategy:
+        del config
+        return LocalResourceStrategy()
 
     def compose(
         self,
-        settings: EchoSettings,
+        config: EchoSettings,
         dependencies: ProviderDependencies,
-    ) -> EngineBindings:
+    ) -> ProviderBinding:
         del dependencies
-        return EngineBindings(
+        return ProviderBinding(
             lifecycle=_EchoLifecycle(),
-            prepared_html_executor=_EchoExecutor(settings),
+            prepared_html_executor=_EchoExecutor(config),
         )
 
 
-PROVIDER: EngineProvider[EchoSettings] = EchoProvider()
+PROVIDER: RenderProvider[EchoSettings] = EchoProvider()
 
 __all__ = ["PROVIDER", "EchoProvider", "EchoSettings"]

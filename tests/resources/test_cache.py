@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from functools import partial
+from hashlib import sha256
 from typing import TYPE_CHECKING
 
 import anyio
@@ -10,23 +11,22 @@ import pytest
 
 from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
-    CachingResourceReader,
-    CompositeResourceReader,
+    CachingResourceFetcher,
+    CompositeResourceFetcher,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
-    build_resource_reader,
+    build_resource_fetcher,
 )
 from entari_plugin_htmlrender.adapters.resources import reader as reader_module
-from entari_plugin_htmlrender.rendering.errors import (
-    ResourceAccessDenied,
-    ResourceNotFound,
-    ResourceResolutionError,
-    ResourceSizeExceeded,
-)
 from entari_plugin_htmlrender.resources.config import ResourceCacheSettings
+from entari_plugin_htmlrender.resources.errors import (
+    ResourceAccessDeniedError,
+    ResourceFetchError,
+    ResourceNotFoundError,
+    ResourceTooLargeError,
+)
 from entari_plugin_htmlrender.resources.models import (
     FileResourceRef,
-    InlineResourceRef,
     NotModified,
     PackageResourceRef,
     RemoteResourceRef,
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
     from pytest_mock import MockerFixture
 
-    from entari_plugin_htmlrender.resources.ports import ResourceReader
+    from entari_plugin_htmlrender.resources.ports import ResourceFetcher
     from tests.resources.conftest import (
         FailingCacheObserver,
         RecordingCacheObserver,
@@ -54,6 +54,10 @@ def _content(value: bytes, revision: str) -> ResourceContent:
     )
 
 
+def _ref(value: bytes) -> RemoteResourceRef:
+    return RemoteResourceRef(f"https://cache.example/{sha256(value).hexdigest()}")
+
+
 class MemoryReader:
     def __init__(self, contents: dict[object, ResourceContent]) -> None:
         self.contents = contents
@@ -63,35 +67,35 @@ class MemoryReader:
         self.invalidated: list[object] = []
         self.clear_calls = 0
 
-    async def read(
+    async def fetch(
         self,
         reference: ResourceRef,
         *,
         refresh: bool = False,
     ) -> ResourceContent:
-        key = reference.cache_key
+        key = reference.identity
         self.reads.append(key)
         self.refreshes.append(refresh)
         return self.contents[key]
 
-    async def read_conditional(
+    async def fetch_if_changed(
         self,
         reference: ResourceRef,
         revision: ResourceRevision,
     ) -> ResourceContent | NotModified:
-        key = reference.cache_key
+        key = reference.identity
         self.revisions.append(key)
         if self.contents[key].revision == revision:
             return NotModified(revision)
-        return await self.read(reference)
+        return await self.fetch(reference)
 
-    async def revision(self, reference: ResourceRef) -> ResourceRevision | None:
-        key = reference.cache_key
+    async def fetch_revision(self, reference: ResourceRef) -> ResourceRevision | None:
+        key = reference.identity
         self.revisions.append(key)
         return self.contents[key].revision
 
     async def invalidate(self, reference: ResourceRef) -> None:
-        self.invalidated.append(reference.cache_key)
+        self.invalidated.append(reference.identity)
 
     async def clear(self) -> None:
         self.clear_calls += 1
@@ -104,13 +108,13 @@ class BlockingReader(MemoryReader):
         self.release = anyio.Event()
         self.error: BaseException | None = None
 
-    async def read(
+    async def fetch(
         self,
         reference: ResourceRef,
         *,
         refresh: bool = False,
     ) -> ResourceContent:
-        key = reference.cache_key
+        key = reference.identity
         self.reads.append(key)
         self.refreshes.append(refresh)
         self.started.set()
@@ -126,13 +130,13 @@ class RefreshBlockingReader(MemoryReader):
         self.refresh_started = anyio.Event()
         self.release_refresh = anyio.Event()
 
-    async def read(
+    async def fetch(
         self,
         reference: ResourceRef,
         *,
         refresh: bool = False,
     ) -> ResourceContent:
-        key = reference.cache_key
+        key = reference.identity
         self.reads.append(key)
         self.refreshes.append(refresh)
         if refresh:
@@ -149,13 +153,13 @@ class TwoLoadBlockingReader(MemoryReader):
         self.second_started = anyio.Event()
         self.release_second = anyio.Event()
 
-    async def read(
+    async def fetch(
         self,
         reference: ResourceRef,
         *,
         refresh: bool = False,
     ) -> ResourceContent:
-        key = reference.cache_key
+        key = reference.identity
         self.reads.append(key)
         self.refreshes.append(refresh)
         captured = self.contents[key]
@@ -193,14 +197,14 @@ def _observed_events(observer: RecordingCacheObserver) -> Counter[str]:
 
 
 def _cache(
-    inner: ResourceReader,
+    inner: ResourceFetcher,
     *,
     max_entries: int = 8,
     max_bytes: int = 1024,
     revalidate_seconds: float = 60.0,
     observer: RecordingCacheObserver | FailingCacheObserver | None = None,
-) -> CachingResourceReader:
-    return CachingResourceReader(
+) -> CachingResourceFetcher:
+    return CachingResourceFetcher(
         inner,
         settings=ResourceCacheSettings(
             max_entries=max_entries,
@@ -212,27 +216,28 @@ def _cache(
 
 
 @pytest.mark.anyio
-async def test_composite_reader_supports_all_reference_kinds(
+async def test_composite_fetcher_supports_all_locator_kinds(
     tmp_path: Path,
     mocker: MockerFixture,
 ) -> None:
     path = tmp_path / "asset.txt"
     path.write_text("filesystem", encoding="utf-8")
-    reader = CompositeResourceReader(
+    reader = CompositeResourceFetcher(
         AnyioWorkerExecutor(),
+        local_access=ConfiguredLocalAccessPolicy(
+            allowed_roots=(tmp_path,),
+            allow_any=False,
+        ),
         remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
     )
 
-    file_content = await reader.read(FileResourceRef(path))
-    package_content = await reader.read(
+    file_content = await reader.fetch(FileResourceRef(path))
+    package_content = await reader.fetch(
         PackageResourceRef(
             "entari_plugin_htmlrender",
             "templates/text/text.html",
         )
     )
-    inline = InlineResourceRef(b"inline", "text/plain")
-    inline_content = await reader.read(inline)
-
     remote_content = ResourceContent(
         b"remote",
         "text/plain",
@@ -240,27 +245,24 @@ async def test_composite_reader_supports_all_reference_kinds(
     )
     remote_read = mocker.patch.object(
         reader_module,
-        "read_remote",
+        "fetch_remote",
         new=mocker.AsyncMock(return_value=remote_content),
     )
     remote = RemoteResourceRef("https://assets.example/card.css")
 
     assert file_content.data == b"filesystem"
     assert file_content.media_type == "text/plain"
-    assert file_content.revision == await reader.revision(FileResourceRef(path))
+    assert file_content.revision == await reader.fetch_revision(FileResourceRef(path))
     assert b"<head>" in package_content.data.lower()
     assert package_content.media_type == "text/html"
-    assert package_content.revision == await reader.revision(
+    assert package_content.revision == await reader.fetch_revision(
         PackageResourceRef(
             "entari_plugin_htmlrender",
             "templates/text/text.html",
         )
     )
-    assert inline_content.data == b"inline"
-    assert inline_content.media_type == "text/plain"
-    assert inline_content.revision == await reader.revision(inline)
-    assert await reader.read(remote) is remote_content
-    assert await reader.revision(remote) is None
+    assert await reader.fetch(remote) is remote_content
+    assert await reader.fetch_revision(remote) is None
     remote_read.assert_called_once()
     assert remote_read.call_args.args == (remote,)
     assert remote_read.call_args.kwargs["max_resource_bytes"] == 64 * 1024 * 1024
@@ -272,16 +274,18 @@ async def test_composite_reader_enforces_per_resource_size_limit(
 ) -> None:
     path = tmp_path / "large.bin"
     path.write_bytes(b"12345")
-    reader = CompositeResourceReader(
+    reader = CompositeResourceFetcher(
         AnyioWorkerExecutor(),
+        local_access=ConfiguredLocalAccessPolicy(
+            allowed_roots=(tmp_path,),
+            allow_any=False,
+        ),
         remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
         max_resource_bytes=4,
     )
 
-    with pytest.raises(ResourceSizeExceeded, match="4-byte read limit"):
-        await reader.read(FileResourceRef(path))
-    with pytest.raises(ResourceSizeExceeded, match="Inline resource"):
-        await reader.read(InlineResourceRef(b"12345"))
+    with pytest.raises(ResourceTooLargeError, match="4-byte fetch limit"):
+        await reader.fetch(FileResourceRef(path))
 
 
 @pytest.mark.anyio
@@ -289,54 +293,62 @@ async def test_composite_reader_translates_source_errors(
     tmp_path: Path,
     mocker: MockerFixture,
 ) -> None:
-    reader = CompositeResourceReader(
+    reader = CompositeResourceFetcher(
         AnyioWorkerExecutor(),
+        local_access=ConfiguredLocalAccessPolicy(
+            allowed_roots=(tmp_path,),
+            allow_any=False,
+        ),
         remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
     )
     missing = FileResourceRef(tmp_path / "missing.bin")
 
-    with pytest.raises(ResourceNotFound):
-        await reader.read(missing)
-    with pytest.raises(ResourceNotFound):
-        await reader.revision(missing)
+    with pytest.raises(ResourceNotFoundError):
+        await reader.fetch(missing)
+    with pytest.raises(ResourceNotFoundError):
+        await reader.fetch_revision(missing)
 
     denied = FileResourceRef(tmp_path / "denied.bin")
     mocker.patch.object(
         reader_module, "_read_file", side_effect=PermissionError("denied")
     )
-    with pytest.raises(ResourceAccessDenied, match="denied"):
-        await reader.read(denied)
+    with pytest.raises(ResourceAccessDeniedError, match="denied"):
+        await reader.fetch(denied)
 
     remote = RemoteResourceRef("https://assets.example/missing.css")
     mocker.patch.object(
         reader_module,
-        "read_remote",
+        "fetch_remote",
         new=mocker.AsyncMock(
-            side_effect=ResourceNotFound(f"Remote resource was not found: {remote.url}")
+            side_effect=ResourceNotFoundError(
+                f"Remote resource was not found: {remote.url}",
+                reference=remote,
+                operation="fetch",
+            )
         ),
     )
-    with pytest.raises(ResourceNotFound, match="was not found"):
-        await reader.read(remote)
+    with pytest.raises(ResourceNotFoundError, match="was not found"):
+        await reader.fetch(remote)
 
     mocker.patch.object(
         reader_module,
-        "read_remote",
+        "fetch_remote",
         new=mocker.AsyncMock(side_effect=OSError("connection reset")),
     )
-    with pytest.raises(ResourceResolutionError, match="connection reset"):
-        await reader.read(remote)
+    with pytest.raises(ResourceFetchError, match="connection reset"):
+        await reader.fetch(remote)
 
 
 @pytest.mark.anyio
 async def test_caching_reader_hits_and_revalidates_by_revision(
     recording_observer: RecordingCacheObserver,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = MemoryReader({reference.cache_key: _content(b"v1", "one")})
+    reference = _ref(b"key")
+    inner = MemoryReader({reference.identity: _content(b"v1", "one")})
     cached = _cache(inner, revalidate_seconds=0, observer=recording_observer)
 
-    assert (await cached.read(reference)).data == b"v1"
-    assert (await cached.read(reference)).data == b"v1"
+    assert (await cached.fetch(reference)).data == b"v1"
+    assert (await cached.fetch(reference)).data == b"v1"
     assert len(inner.reads) == 1
     assert len(inner.revisions) == 1
     assert recording_observer.calls[-1] == (
@@ -346,8 +358,8 @@ async def test_caching_reader_hits_and_revalidates_by_revision(
         2,
     )
 
-    inner.contents[reference.cache_key] = _content(b"v2", "two")
-    assert (await cached.read(reference)).data == b"v2"
+    inner.contents[reference.identity] = _content(b"v2", "two")
+    assert (await cached.fetch(reference)).data == b"v2"
     assert len(inner.reads) == 2
 
 
@@ -355,10 +367,10 @@ async def test_caching_reader_hits_and_revalidates_by_revision(
 async def test_caching_reader_enforces_lru_and_byte_limits(
     recording_observer: RecordingCacheObserver,
 ) -> None:
-    references = [InlineResourceRef(str(index).encode()) for index in range(4)]
+    references = [_ref(str(index).encode()) for index in range(4)]
     inner = MemoryReader(
         {
-            reference.cache_key: _content(bytes([index, index]), str(index))
+            reference.identity: _content(bytes([index, index]), str(index))
             for index, reference in enumerate(references)
         }
     )
@@ -369,49 +381,49 @@ async def test_caching_reader_enforces_lru_and_byte_limits(
         observer=recording_observer,
     )
 
-    await cached.read(references[0])
-    await cached.read(references[1])
-    await cached.read(references[0])
-    await cached.read(references[2])
-    await cached.read(references[1])
+    await cached.fetch(references[0])
+    await cached.fetch(references[1])
+    await cached.fetch(references[0])
+    await cached.fetch(references[2])
+    await cached.fetch(references[1])
 
     assert inner.reads == [
-        references[0].cache_key,
-        references[1].cache_key,
-        references[2].cache_key,
-        references[1].cache_key,
+        references[0].identity,
+        references[1].identity,
+        references[2].identity,
+        references[1].identity,
     ]
     assert _observed_events(recording_observer)["eviction"] == 2
 
 
 @pytest.mark.anyio
 async def test_caching_reader_bypasses_oversized_content() -> None:
-    reference = InlineResourceRef(b"large")
-    inner = MemoryReader({reference.cache_key: _content(b"12345", "one")})
+    reference = _ref(b"large")
+    inner = MemoryReader({reference.identity: _content(b"12345", "one")})
     cached = _cache(inner, max_bytes=4)
 
-    assert (await cached.read(reference)).data == b"12345"
-    assert (await cached.read(reference)).data == b"12345"
+    assert (await cached.fetch(reference)).data == b"12345"
+    assert (await cached.fetch(reference)).data == b"12345"
     assert len(inner.reads) == 2
 
 
 @pytest.mark.anyio
 async def test_caching_reader_invalidate_and_clear_are_instance_local() -> None:
-    reference = InlineResourceRef(b"key")
-    first_inner = MemoryReader({reference.cache_key: _content(b"first", "one")})
-    second_inner = MemoryReader({reference.cache_key: _content(b"second", "two")})
+    reference = _ref(b"key")
+    first_inner = MemoryReader({reference.identity: _content(b"first", "one")})
+    second_inner = MemoryReader({reference.identity: _content(b"second", "two")})
     first = _cache(first_inner)
     second = _cache(second_inner)
 
-    assert (await first.read(reference)).data == b"first"
-    assert (await second.read(reference)).data == b"second"
+    assert (await first.fetch(reference)).data == b"first"
+    assert (await second.fetch(reference)).data == b"second"
     await first.invalidate(reference)
-    await first.read(reference)
+    await first.fetch(reference)
     await first.clear()
-    await first.read(reference)
+    await first.fetch(reference)
 
     assert len(first_inner.reads) == 3
-    assert first_inner.invalidated == [reference.cache_key]
+    assert first_inner.invalidated == [reference.identity]
     assert first_inner.clear_calls == 1
     assert len(second_inner.reads) == 1
 
@@ -419,22 +431,22 @@ async def test_caching_reader_invalidate_and_clear_are_instance_local() -> None:
 @pytest.mark.anyio
 @pytest.mark.parametrize("operation", ["invalidate", "clear"])
 async def test_cache_reset_detaches_stale_inflight_writeback(operation: str) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = TwoLoadBlockingReader({reference.cache_key: _content(b"old", "one")})
+    reference = _ref(b"key")
+    inner = TwoLoadBlockingReader({reference.identity: _content(b"old", "one")})
     cached = _cache(inner)
     old_results: list[bytes] = []
     new_results: list[bytes] = []
 
     async def load_old() -> None:
-        old_results.append((await cached.read(reference)).data)
+        old_results.append((await cached.fetch(reference)).data)
 
     async def load_new() -> None:
-        new_results.append((await cached.read(reference)).data)
+        new_results.append((await cached.fetch(reference)).data)
 
     async with anyio.create_task_group() as group:
         group.start_soon(load_old)
         await inner.first_started.wait()
-        inner.contents[reference.cache_key] = _content(b"new", "two")
+        inner.contents[reference.identity] = _content(b"new", "two")
         if operation == "invalidate":
             await cached.invalidate(reference)
         else:
@@ -448,7 +460,7 @@ async def test_cache_reset_detaches_stale_inflight_writeback(operation: str) -> 
         inner.release_second.set()
 
     assert new_results == [b"new"]
-    assert (await cached.read(reference)).data == b"new"
+    assert (await cached.fetch(reference)).data == b"new"
     assert len(inner.reads) == 2
 
 
@@ -457,12 +469,12 @@ async def test_cache_reset_detaches_stale_inflight_writeback(operation: str) -> 
 async def test_cache_reset_blocks_new_reads_until_inner_reset_finishes(
     operation: str,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = ResetBlockingReader({reference.cache_key: _content(b"old", "one")})
+    reference = _ref(b"key")
+    inner = ResetBlockingReader({reference.identity: _content(b"old", "one")})
     cached = _cache(inner)
 
-    assert (await cached.read(reference)).data == b"old"
-    inner.contents[reference.cache_key] = _content(b"new", "two")
+    assert (await cached.fetch(reference)).data == b"old"
+    inner.contents[reference.identity] = _content(b"new", "two")
     results: list[bytes] = []
 
     async def reset() -> None:
@@ -471,13 +483,13 @@ async def test_cache_reset_blocks_new_reads_until_inner_reset_finishes(
         else:
             await cached.clear()
 
-    async def read() -> None:
-        results.append((await cached.read(reference)).data)
+    async def fetch() -> None:
+        results.append((await cached.fetch(reference)).data)
 
     async with anyio.create_task_group() as group:
         group.start_soon(reset)
         await inner.reset_started.wait()
-        group.start_soon(read)
+        group.start_soon(fetch)
         await wait_all_tasks_blocked()
         assert results == []
         assert len(inner.reads) == 1
@@ -489,20 +501,20 @@ async def test_cache_reset_blocks_new_reads_until_inner_reset_finishes(
 
 @pytest.mark.anyio
 async def test_singleflight_deduplicates_concurrent_reads() -> None:
-    reference = InlineResourceRef(b"key")
+    reference = _ref(b"key")
     content = _content(b"value", "one")
-    inner = BlockingReader({reference.cache_key: content})
+    inner = BlockingReader({reference.identity: content})
     reader = _cache(inner, max_entries=0, max_bytes=0, revalidate_seconds=0)
     results: list[ResourceContent] = []
 
-    async def read() -> None:
-        results.append(await reader.read(reference))
+    async def fetch() -> None:
+        results.append(await reader.fetch(reference))
 
     async with anyio.create_task_group() as group:
-        group.start_soon(read)
+        group.start_soon(fetch)
         await inner.started.wait()
         for _ in range(8):
-            group.start_soon(read)
+            group.start_soon(fetch)
         await wait_all_tasks_blocked()
         inner.release.set()
 
@@ -512,22 +524,22 @@ async def test_singleflight_deduplicates_concurrent_reads() -> None:
 
 @pytest.mark.anyio
 async def test_singleflight_broadcasts_errors_without_caching_them() -> None:
-    reference = InlineResourceRef(b"key")
-    inner = BlockingReader({reference.cache_key: _content(b"value", "one")})
+    reference = _ref(b"key")
+    inner = BlockingReader({reference.identity: _content(b"value", "one")})
     inner.error = RuntimeError("read failed")
     reader = _cache(inner, max_entries=0, max_bytes=0, revalidate_seconds=0)
     errors: list[str] = []
 
-    async def read() -> None:
+    async def fetch() -> None:
         with pytest.raises(RuntimeError, match="read failed") as captured:
-            await reader.read(reference)
+            await reader.fetch(reference)
         errors.append(str(captured.value))
 
     async with anyio.create_task_group() as group:
-        group.start_soon(read)
+        group.start_soon(fetch)
         await inner.started.wait()
         for _ in range(4):
-            group.start_soon(read)
+            group.start_soon(fetch)
         await wait_all_tasks_blocked()
         inner.release.set()
 
@@ -535,7 +547,7 @@ async def test_singleflight_broadcasts_errors_without_caching_them() -> None:
     assert len(inner.reads) == 1
 
     inner.error = None
-    assert (await reader.read(reference)).data == b"value"
+    assert (await reader.fetch(reference)).data == b"value"
     assert len(inner.reads) == 2
 
 
@@ -543,19 +555,19 @@ async def test_singleflight_broadcasts_errors_without_caching_them() -> None:
 async def test_caching_reader_singleflights_metrics_and_writeback(
     recording_observer: RecordingCacheObserver,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = BlockingReader({reference.cache_key: _content(b"value", "one")})
+    reference = _ref(b"key")
+    inner = BlockingReader({reference.identity: _content(b"value", "one")})
     reader = _cache(inner, observer=recording_observer)
     results: list[bytes] = []
 
-    async def read() -> None:
-        results.append((await reader.read(reference)).data)
+    async def fetch() -> None:
+        results.append((await reader.fetch(reference)).data)
 
     async with anyio.create_task_group() as group:
-        group.start_soon(read)
+        group.start_soon(fetch)
         await inner.started.wait()
         for _ in range(6):
-            group.start_soon(read)
+            group.start_soon(fetch)
         await wait_all_tasks_blocked()
         inner.release.set()
 
@@ -571,16 +583,16 @@ async def test_caching_reader_singleflights_metrics_and_writeback(
 async def test_concurrent_refreshes_coalesce_and_supersede_cached_reads(
     recording_observer: RecordingCacheObserver,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = RefreshBlockingReader({reference.cache_key: _content(b"old", "one")})
+    reference = _ref(b"key")
+    inner = RefreshBlockingReader({reference.identity: _content(b"old", "one")})
     reader = _cache(inner, observer=recording_observer)
 
-    assert (await reader.read(reference)).data == b"old"
-    inner.contents[reference.cache_key] = _content(b"new", "two")
+    assert (await reader.fetch(reference)).data == b"old"
+    inner.contents[reference.identity] = _content(b"new", "two")
     results: dict[str, bytes] = {}
 
     async def load(label: str, *, refresh: bool) -> None:
-        results[label] = (await reader.read(reference, refresh=refresh)).data
+        results[label] = (await reader.fetch(reference, refresh=refresh)).data
 
     async with anyio.create_task_group() as group:
         group.start_soon(partial(load, "refresh-owner", refresh=True))
@@ -601,31 +613,31 @@ async def test_concurrent_refreshes_coalesce_and_supersede_cached_reads(
     assert _observed_events(recording_observer) == Counter(
         {"miss": 2, "load": 2, "wait": 2}
     )
-    assert (await reader.read(reference)).data == b"new"
+    assert (await reader.fetch(reference)).data == b"new"
 
 
 @pytest.mark.anyio
 async def test_refresh_replaces_cold_load_without_crossing_waiter_groups(
     recording_observer: RecordingCacheObserver,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = TwoLoadBlockingReader({reference.cache_key: _content(b"old", "one")})
+    reference = _ref(b"key")
+    inner = TwoLoadBlockingReader({reference.identity: _content(b"old", "one")})
     reader = _cache(inner, observer=recording_observer)
     old_results: list[bytes] = []
     refreshed_results: dict[str, bytes] = {}
 
     async def load_old() -> None:
-        old_results.append((await reader.read(reference)).data)
+        old_results.append((await reader.fetch(reference)).data)
 
     async def load_refreshed(label: str, *, refresh: bool) -> None:
-        refreshed_results[label] = (await reader.read(reference, refresh=refresh)).data
+        refreshed_results[label] = (await reader.fetch(reference, refresh=refresh)).data
 
     async with anyio.create_task_group() as group:
         group.start_soon(load_old)
         await inner.first_started.wait()
         group.start_soon(load_old)
         await wait_all_tasks_blocked()
-        inner.contents[reference.cache_key] = _content(b"new", "two")
+        inner.contents[reference.identity] = _content(b"new", "two")
         group.start_soon(partial(load_refreshed, "refresh-owner", refresh=True))
         await inner.second_started.wait()
         group.start_soon(partial(load_refreshed, "refresh-waiter", refresh=True))
@@ -643,7 +655,7 @@ async def test_refresh_replaces_cold_load_without_crossing_waiter_groups(
         "ordinary-waiter": b"new",
     }
     assert inner.refreshes == [False, True]
-    assert (await reader.read(reference)).data == b"new"
+    assert (await reader.fetch(reference)).data == b"new"
     assert len(inner.reads) == 2
     assert _observed_events(recording_observer) == Counter(
         {"miss": 2, "load": 2, "wait": 3, "hit": 1}
@@ -654,8 +666,8 @@ async def test_refresh_replaces_cold_load_without_crossing_waiter_groups(
 async def test_singleflight_leader_cancellation_makes_waiter_retry(
     recording_observer: RecordingCacheObserver,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = BlockingReader({reference.cache_key: _content(b"value", "one")})
+    reference = _ref(b"key")
+    inner = BlockingReader({reference.identity: _content(b"value", "one")})
     reader = _cache(inner, observer=recording_observer)
     owner_scope: anyio.CancelScope | None = None
     waiter_results: list[bytes] = []
@@ -664,10 +676,10 @@ async def test_singleflight_leader_cancellation_makes_waiter_retry(
         nonlocal owner_scope
         with anyio.CancelScope() as scope:
             owner_scope = scope
-            await reader.read(reference)
+            await reader.fetch(reference)
 
     async def waiter() -> None:
-        waiter_results.append((await reader.read(reference)).data)
+        waiter_results.append((await reader.fetch(reference)).data)
 
     async with anyio.create_task_group() as group:
         group.start_soon(owner)
@@ -685,7 +697,7 @@ async def test_singleflight_leader_cancellation_makes_waiter_retry(
 
     assert waiter_results == [b"value"]
     assert len(inner.reads) == 2
-    assert (await reader.read(reference)).data == b"value"
+    assert (await reader.fetch(reference)).data == b"value"
     assert _observed_events(recording_observer) == Counter(
         {"miss": 2, "load": 1, "wait": 1, "hit": 1}
     )
@@ -695,20 +707,20 @@ async def test_singleflight_leader_cancellation_makes_waiter_retry(
 async def test_singleflight_waiter_cancellation_keeps_shared_load_alive(
     recording_observer: RecordingCacheObserver,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = BlockingReader({reference.cache_key: _content(b"value", "one")})
+    reference = _ref(b"key")
+    inner = BlockingReader({reference.identity: _content(b"value", "one")})
     reader = _cache(inner, observer=recording_observer)
     waiter_scope: anyio.CancelScope | None = None
     owner_results: list[bytes] = []
 
     async def owner() -> None:
-        owner_results.append((await reader.read(reference)).data)
+        owner_results.append((await reader.fetch(reference)).data)
 
     async def waiter() -> None:
         nonlocal waiter_scope
         with anyio.CancelScope() as scope:
             waiter_scope = scope
-            await reader.read(reference)
+            await reader.fetch(reference)
 
     async with anyio.create_task_group() as group:
         group.start_soon(owner)
@@ -723,7 +735,7 @@ async def test_singleflight_waiter_cancellation_keeps_shared_load_alive(
         inner.release.set()
 
     assert owner_results == [b"value"]
-    assert (await reader.read(reference)).data == b"value"
+    assert (await reader.fetch(reference)).data == b"value"
     assert len(inner.reads) == 1
 
 
@@ -731,31 +743,35 @@ async def test_singleflight_waiter_cancellation_keeps_shared_load_alive(
 async def test_reader_survives_failing_observer(
     failing_observer: FailingCacheObserver,
 ) -> None:
-    reference = InlineResourceRef(b"key")
-    inner = MemoryReader({reference.cache_key: _content(b"value", "one")})
+    reference = _ref(b"key")
+    inner = MemoryReader({reference.identity: _content(b"value", "one")})
     reader = _cache(inner, observer=failing_observer)
 
-    assert (await reader.read(reference)).data == b"value"
-    assert (await reader.read(reference)).data == b"value"
+    assert (await reader.fetch(reference)).data == b"value"
+    assert (await reader.fetch(reference)).data == b"value"
 
 
 @pytest.mark.anyio
 async def test_built_reader_serves_files_and_refreshes(tmp_path: Path) -> None:
     path = tmp_path / "resource.txt"
     path.write_text("one", encoding="utf-8")
-    reader = build_resource_reader(
+    reader = build_resource_fetcher(
         ResourceCacheSettings(revalidate_seconds=60),
         NoopCacheObserver(),
         AnyioWorkerExecutor(),
+        local_access=ConfiguredLocalAccessPolicy(
+            allowed_roots=(tmp_path,),
+            allow_any=False,
+        ),
         remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
     )
     reference = FileResourceRef(path)
 
-    assert (await reader.read(reference)).data == b"one"
+    assert (await reader.fetch(reference)).data == b"one"
     path.write_text("two", encoding="utf-8")
-    assert (await reader.read(reference)).data == b"one"
+    assert (await reader.fetch(reference)).data == b"one"
     await reader.invalidate(reference)
-    assert (await reader.read(reference)).data == b"two"
+    assert (await reader.fetch(reference)).data == b"two"
 
 
 def test_configured_local_access_policy_keeps_instances_isolated(
@@ -774,5 +790,5 @@ def test_configured_local_access_policy_keeps_instances_isolated(
 
     assert first.authorize(first_path) == first_path.resolve()
     assert second.authorize(second_path) == second_path.resolve()
-    with pytest.raises(ResourceAccessDenied, match="outside allowed roots"):
+    with pytest.raises(ResourceAccessDeniedError, match="outside allowed roots"):
         first.authorize(second_path)

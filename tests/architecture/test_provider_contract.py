@@ -63,73 +63,81 @@ def _argument_annotation(method: ast.FunctionDef, name: str) -> str | None:
     raise AssertionError(f"{method.name} must accept {name}")
 
 
-def _is_protocol_of_settings(base: ast.expr) -> bool:
+def _is_protocol_of_config(base: ast.expr) -> bool:
     return (
         isinstance(base, ast.Subscript)
         and _annotation_name(base.value) == "Protocol"
-        and _annotation_name(base.slice) == "SettingsT"
+        and _annotation_name(base.slice) == "ConfigT"
     )
 
 
-def test_engine_provider_is_generic_over_one_typed_settings_flow() -> None:
+def test_render_provider_is_generic_over_one_typed_config_flow() -> None:
     tree = _tree(SDK_PATH)
-    provider = _class(tree, "EngineProvider")
-    assert any(_is_protocol_of_settings(base) for base in provider.bases), (
-        "EngineProvider must be declared as Protocol[SettingsT]"
+    provider = _class(tree, "RenderProvider")
+    assert any(_is_protocol_of_config(base) for base in provider.bases), (
+        "RenderProvider must be declared as Protocol[ConfigT]"
     )
 
-    typed_settings_methods = (
-        "availability",
+    typed_config_methods = (
+        "check_availability",
         "compose",
         "resource_strategy",
     )
-    for name in typed_settings_methods:
+    for name in typed_config_methods:
         method = _method(provider, name)
-        assert _argument_annotation(method, "settings") == "SettingsT", (
-            f"EngineProvider.{name} must consume SettingsT"
+        assert _argument_annotation(method, "config") == "ConfigT", (
+            f"RenderProvider.{name} must consume ConfigT"
         )
 
-    parse_settings = _method(provider, "parse_settings")
-    assert _annotation_name(parse_settings.returns) == "SettingsT"
+    parse_config = _method(provider, "parse_config")
+    assert _annotation_name(parse_config.returns) == "ConfigT"
     resource_strategy = _method(provider, "resource_strategy")
     assert _annotation_name(resource_strategy.returns) == "ResourceStrategy"
 
     method_names = {
         node.name for node in provider.body if isinstance(node, ast.FunctionDef)
     }
-    assert "bootstrap_requirements" not in method_names, (
-        "Host plugin requirements do not belong in the provider SDK"
-    )
-    assert "resource_configuration" not in method_names, (
-        "The transitional resource_configuration hook must not return"
-    )
+    assert method_names == {
+        "id",
+        "parse_config",
+        "check_availability",
+        "resource_strategy",
+        "compose",
+    }
 
 
 def test_provider_dtos_carry_the_final_resource_dependencies_and_strategy() -> None:
     tree = _tree(SDK_PATH)
     dependencies = _field_names(_class(tree, "ProviderDependencies"))
-    bindings = _field_names(_class(tree, "EngineBindings"))
+    bindings = _field_names(_class(tree, "ProviderBinding"))
 
     assert dependencies == EXPECTED_PROVIDER_DEPENDENCIES, (
         "ProviderDependencies must expose only the provider-facing resource boundary"
     )
     assert "resource_strategy" not in bindings, (
         "ResourceStrategy must have one source of truth: "
-        "EngineProvider.resource_strategy(), evaluated before composition"
+        "RenderProvider.resource_strategy(), evaluated before composition"
     )
     assert {"description", "observation_attributes"}.isdisjoint(bindings), (
-        "EngineBindings must not advertise metadata fields with no runtime contract"
+        "ProviderBinding must not advertise metadata fields with no runtime contract"
     )
 
 
-def test_runtime_exposes_renderer_preparation_and_resources_from_composition() -> None:
+def test_runtime_exposes_dedicated_service_facades_from_composition() -> None:
     runtime = _class(_tree(RUNTIME_PATH), "RenderRuntime")
     initializer = _method(runtime, "__init__")
     parameters = {
         argument.arg
         for argument in (*initializer.args.args, *initializer.args.kwonlyargs)
     }
-    assert {"renderer", "preparation", "resources"} <= parameters
+    expected_services = {
+        "renderer",
+        "templates",
+        "resources",
+        "graphics",
+        "capabilities",
+    }
+    assert expected_services <= parameters
 
     properties = {
         node.name
@@ -140,4 +148,4 @@ def test_runtime_exposes_renderer_preparation_and_resources_from_composition() -
             for decorator in node.decorator_list
         )
     }
-    assert {"renderer", "preparation", "resources"} <= properties
+    assert expected_services <= properties

@@ -11,18 +11,32 @@ from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
 from entari_plugin_htmlrender._logging import logger
-from entari_plugin_htmlrender.resources.errors import ResourceResolutionError
+from entari_plugin_htmlrender.resources.errors import ResourceFetchError
+from entari_plugin_htmlrender.resources.models import FileResourceRef
 
 from .assets import PreparedAssetIndex, resolve_document_reference
 from .models import PreparedAsset, PreparedHtml
 from .references import css_resource_references
 
 if TYPE_CHECKING:
-    from entari_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
 
 
-class AssetMaterializationError(ResourceResolutionError):
+class AssetMaterializationError(ResourceFetchError):
     """Raised when a local document resource cannot be materialized safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            reference=None,
+            operation="materialize",
+            source=source,
+        )
 
 
 def _file_url_path(url: str) -> Path:
@@ -39,7 +53,7 @@ def _file_url_path(url: str) -> Path:
 def _validate_local_path(
     path: Path,
     *,
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
 ) -> Path:
     return resources.authorize_local(path)
 
@@ -66,7 +80,7 @@ def _queue_stylesheet_children(
 async def materialize_local_assets(
     prepared: PreparedHtml,
     *,
-    resources: ProviderResources,
+    resources: ProviderResourceAccess,
     strict: bool = True,
     fallback_base_url: str | None = None,
 ) -> PreparedHtml:
@@ -128,7 +142,7 @@ async def materialize_local_assets(
                 path,
                 resources=resources,
             )
-            payload = await resources.read_bytes(path)
+            payload = await resources.fetch_bytes(FileResourceRef(path))
         except Exception as error:
             if strict:
                 raise AssetMaterializationError(

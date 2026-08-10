@@ -1,55 +1,88 @@
 from __future__ import annotations
 
-from inspect import isawaitable
+import codecs
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeGuard
+from types import MappingProxyType
+from typing import Any, Generic, TypeAlias, TypeGuard, TypeVar
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import anyio
+from exceptiongroup import BaseExceptionGroup
 
 from entari_plugin_htmlrender._logging import logger
-from entari_plugin_htmlrender.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.errors import (
+    InvalidRenderInputError,
+    ResourceAccessDeniedError,
+    ResourceError,
+    ResourceFetchError,
+    ResourceNotFoundError,
+    ResourcePublishError,
+)
 
-from ._traversal import ResourceTraversalBudget, VariableResolutionPlan
+from ._publication import normalize_publication_suffix
+from ._traversal import ResourceTraversalBudget, VariableMaterializationPlan
 from .config import (
     LocalLocalResourcePolicy,
     RemoteLocalResourcePolicy,
-    ResourceResolveMode,
+    ResourceMaterializationPolicy,
+    ResourceStrategy,
 )
-from .errors import ResourceAccessDenied, ResourceNotFound, ResourceResolutionError
 from .models import (
     FileResourceRef,
-    InlineResourceRef,
+    InlineResource,
     PackageResourceRef,
+    PublicationLeaseId,
     PublishedResource,
     RemoteResourceRef,
+    ResourceContent,
     ResourceRef,
-    ResourceResolution,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-
-    from .config import ResourceStrategy
-    from .ports import (
-        AssetPublisher,
-        LocalAccessPolicy,
-        ResourceReader,
-        ResourceResolver,
-    )
+from .ports import (
+    AssetPublisher,
+    LocalAccessPolicy,
+    ResourceFetcher,
+    ResourceMaterializer,
+)
 
 _WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
-TransportPolicy: TypeAlias = "LocalLocalResourcePolicy | RemoteLocalResourcePolicy"
-ResolverSpec: TypeAlias = "str | ResourceResolver | None"
-RequestHeadersByUrl: TypeAlias = "dict[str, Mapping[str, str]]"
+_TransportPolicy: TypeAlias = LocalLocalResourcePolicy | RemoteLocalResourcePolicy
+_MaterializerSpec: TypeAlias = str | ResourceMaterializer | None
+_RequestHeadersByUrl: TypeAlias = dict[str, Mapping[str, str]]
+T = TypeVar("T")
+_RESOURCE_REF_TYPES = (FileResourceRef, PackageResourceRef, RemoteResourceRef)
+
+
+@dataclass(frozen=True, slots=True)
+class _MaterializationResult(Generic[T]):
+    """Internal value rewrite with exact authorization for rewritten URLs."""
+
+    value: T
+    request_headers_by_url: Mapping[str, Mapping[str, str]] = field(
+        default_factory=dict
+    )
+
+    def __post_init__(self) -> None:
+        frozen_headers = {
+            url: MappingProxyType(dict(headers))
+            for url, headers in sorted(self.request_headers_by_url.items())
+        }
+        object.__setattr__(
+            self,
+            "request_headers_by_url",
+            MappingProxyType(frozen_headers),
+        )
+
 
 # Derived from the enum members themselves so a value rename cannot leave a
 # stale string behind.  Members whose values overlap across the two enums
 # (passthrough/filehost) share identical semantics in ``_resolve_scalar``.
-_EXPLICIT_POLICIES: Mapping[str, TransportPolicy] = {
+_EXPLICIT_POLICIES: Mapping[str, _TransportPolicy] = {
     member.value: member
     for enum_cls in (RemoteLocalResourcePolicy, LocalLocalResourcePolicy)
     for member in enum_cls
@@ -64,8 +97,10 @@ def _resolve_local_path(value: str | Path, *, label: str) -> Path:
     try:
         return Path(value).expanduser().resolve()
     except (OSError, RuntimeError, ValueError) as error:
-        raise ResourceResolutionError(
+        raise ResourceAccessDeniedError(
             f"Could not normalize {label}.",
+            reference=value,
+            operation="authorize",
             source=error,
         ) from error
 
@@ -81,8 +116,10 @@ def _split_resource_url(value: str) -> SplitResult:
     try:
         return urlsplit(value)
     except ValueError as error:
-        raise ResourceResolutionError(
+        raise ResourceFetchError(
             f"Invalid resource URL {value!r}.",
+            reference=value,
+            operation="materialize",
             source=error,
         ) from error
 
@@ -135,43 +172,47 @@ def _candidate(value: str | Path, template_base: Path | None) -> Path:
             path = template_base / path
         return path.resolve()
     except (OSError, RuntimeError, ValueError) as error:
-        raise ResourceResolutionError(
+        raise ResourceAccessDeniedError(
             "Could not normalize local resource path.",
+            reference=value,
+            operation="authorize",
             source=error,
         ) from error
 
 
-class _ConflictingRequestAuthorization(ResourceResolutionError):
+class _ConflictingRequestAuthorization(ResourcePublishError):
     """A publisher reused one URL with incompatible request capabilities."""
 
 
 def _record_published_resource(
     published: PublishedResource,
-    request_headers_by_url: RequestHeadersByUrl,
+    request_headers_by_url: _RequestHeadersByUrl,
 ) -> None:
     headers = dict(published.request_headers)
     existing = request_headers_by_url.get(published.url)
     if existing is not None and dict(existing) != headers:
         raise _ConflictingRequestAuthorization(
-            "The asset publisher returned conflicting authorization for one URL."
+            "The asset publisher returned conflicting authorization for one URL.",
+            reference=published.url,
+            operation="publish",
         )
     request_headers_by_url[published.url] = headers
 
 
 class ResourceService:
-    """Composition-owned resource reading and value-resolution service."""
+    """Composition-owned resource access and internal materialization service."""
 
     def __init__(
         self,
         *,
-        reader: ResourceReader,
+        fetcher: ResourceFetcher,
         local_access: LocalAccessPolicy,
         strategy: ResourceStrategy,
         publisher: AssetPublisher | None = None,
         traversal_budget: ResourceTraversalBudget | None = None,
     ) -> None:
         budget = traversal_budget or ResourceTraversalBudget()
-        self._reader = reader
+        self._fetcher = fetcher
         self._local_access = local_access
         self._strategy = strategy
         self._publisher = publisher
@@ -188,83 +229,210 @@ class ResourceService:
     ) -> Path:
         try:
             return self._local_access.authorize(path)
-        except ResourceResolutionError:
+        except ResourceError:
             raise
         except (OSError, RuntimeError, ValueError) as error:
-            raise ResourceResolutionError(
+            raise ResourceAccessDeniedError(
                 "Could not authorize a local resource path.",
+                reference=path,
+                operation="authorize",
                 source=error,
             ) from error
 
-    async def read_bytes(
+    async def fetch(
         self,
-        reference: str | Path | ResourceRef,
+        resource: ResourceRef,
+        *,
+        refresh: bool = False,
+    ) -> ResourceContent:
+        if not isinstance(resource, _RESOURCE_REF_TYPES):
+            raise InvalidRenderInputError(
+                "fetch() requires an explicit ResourceRef locator.",
+                operation="fetch",
+                field="resource",
+            )
+        if type(refresh) is not bool:
+            raise InvalidRenderInputError(
+                "refresh must be a boolean.",
+                operation="fetch",
+                field="refresh",
+            )
+        try:
+            return await self._fetcher.fetch(resource, refresh=refresh)
+        except ResourceError:
+            raise
+        except Exception as error:
+            raise ResourceFetchError(
+                "The configured resource fetcher failed.",
+                reference=resource,
+                operation="fetch",
+                source=error,
+            ) from error
+
+    async def fetch_bytes(
+        self,
+        resource: ResourceRef,
         *,
         refresh: bool = False,
     ) -> bytes:
-        normalized = self._reference(reference)
-        if isinstance(normalized, FileResourceRef):
-            normalized = FileResourceRef(self.authorize_local(normalized.path))
-        return (await self._reader.read(normalized, refresh=refresh)).data
+        return (await self.fetch(resource, refresh=refresh)).data
 
-    async def read_text(
+    async def fetch_text(
         self,
-        reference: str | Path | ResourceRef,
+        resource: ResourceRef,
         *,
         encoding: str = "utf-8",
         errors: str = "strict",
         refresh: bool = False,
     ) -> str:
-        content = await self.read_bytes(
-            reference,
+        if not isinstance(encoding, str) or not encoding:
+            raise InvalidRenderInputError(
+                "Resource text encoding must be a non-empty string.",
+                operation="fetch_text",
+                field="encoding",
+            )
+        if not isinstance(errors, str) or not errors:
+            raise InvalidRenderInputError(
+                "Resource text error handler must be a non-empty string.",
+                operation="fetch_text",
+                field="errors",
+            )
+        try:
+            codecs.lookup(encoding)
+        except LookupError as error:
+            raise InvalidRenderInputError(
+                f"Unknown resource text encoding: {encoding!r}.",
+                operation="fetch_text",
+                field="encoding",
+                source=error,
+            ) from error
+        try:
+            codecs.lookup_error(errors)
+        except LookupError as error:
+            raise InvalidRenderInputError(
+                f"Unknown resource text error handler: {errors!r}.",
+                operation="fetch_text",
+                field="errors",
+                source=error,
+            ) from error
+        content = await self.fetch_bytes(
+            resource,
             refresh=refresh,
         )
         try:
             return content.decode(encoding, errors)
         except (LookupError, UnicodeError) as error:
-            raise ResourceResolutionError(
+            raise ResourceFetchError(
                 f"Could not decode resource as {encoding}.",
+                reference=resource,
+                operation="fetch_text",
                 source=error,
             ) from error
 
-    @staticmethod
-    def _reference(reference: str | Path | ResourceRef) -> ResourceRef:
-        if isinstance(
-            reference,
-            (
-                FileResourceRef,
-                PackageResourceRef,
-                RemoteResourceRef,
-                InlineResourceRef,
-            ),
-        ):
-            return reference
-        return FileResourceRef(_resolve_local_path(reference, label="resource path"))
-
-    def _policy(self, resolver: ResolverSpec) -> TransportPolicy | ResourceResolver:
-        if resolver is None or resolver == "auto":
-            return (
-                self._strategy.remote_local_policy
-                if self._strategy.is_remote
-                else self._strategy.local_local_policy
-            )
-        if isinstance(resolver, str):
-            member = _EXPLICIT_POLICIES.get(resolver)
-            if member is None:
-                raise InvalidRenderRequest(f"Unknown resource policy: {resolver!r}")
-            return member
-        if callable(getattr(resolver, "resolve", None)):
-            return resolver
-        raise InvalidRenderRequest("Custom resource resolver must expose resolve().")
-
-    def should_resolve(self, resolver: ResolverSpec = None) -> bool:
-        if resolver is not None:
-            return True
-        return self._strategy.resolve_mode is not ResourceResolveMode.OFF
-
-    async def _resolve_with_custom(
+    @asynccontextmanager
+    async def publish(
         self,
-        resolver: ResourceResolver,
+        content: ResourceContent | InlineResource,
+        *,
+        suffix: str | None = None,
+    ) -> AsyncIterator[PublishedResource]:
+        """Publish one resource for exactly the scope of the context."""
+
+        if not isinstance(content, (ResourceContent, InlineResource)):
+            raise InvalidRenderInputError(
+                "publish() requires ResourceContent or InlineResource payload.",
+                operation="publish",
+                field="content",
+            )
+        normalized_suffix = normalize_publication_suffix(suffix)
+        publisher = self._publisher
+        if publisher is None:
+            raise ResourcePublishError(
+                "This composition has no resource publication transport.",
+                reference=content,
+                operation="publish",
+            )
+        lease_id = publisher.create_lease()
+        primary_error: BaseException | None = None
+        try:
+            try:
+                published = await publisher.publish(
+                    content,
+                    lease_id=lease_id,
+                    suffix=normalized_suffix,
+                )
+            except ResourceError:
+                raise
+            except Exception as error:
+                raise ResourcePublishError(
+                    "Could not publish resource content.",
+                    reference=content,
+                    operation="publish",
+                    source=error,
+                ) from error
+            yield published
+        except BaseException as error:
+            primary_error = error
+        finally:
+            release_error: BaseException | None = None
+            try:
+                with anyio.CancelScope(shield=True):
+                    await publisher.release(lease_id)
+            except ResourceError as error:
+                release_error = error
+            except Exception as error:
+                release_error = ResourcePublishError(
+                    "Could not release the scoped publication lease.",
+                    reference=content,
+                    operation="publish",
+                    source=error,
+                )
+            except BaseException as error:
+                release_error = error
+
+            if primary_error is not None and release_error is not None:
+                raise BaseExceptionGroup(
+                    "Publication scope and lease release both failed.",
+                    [primary_error, release_error],
+                ) from None
+            if primary_error is not None:
+                raise primary_error
+            if release_error is not None:
+                raise release_error
+
+    def _policy(
+        self, materializer: _MaterializerSpec
+    ) -> _TransportPolicy | ResourceMaterializer:
+        if materializer is None or materializer == "auto":
+            return self._strategy.local_resource_policy
+        if isinstance(materializer, str):
+            member = _EXPLICIT_POLICIES.get(materializer)
+            if member is None:
+                raise InvalidRenderInputError(
+                    f"Unknown resource policy: {materializer!r}",
+                    operation="materialize",
+                    field="materializer",
+                )
+            return member
+        if callable(getattr(materializer, "materialize", None)):
+            return materializer
+        raise InvalidRenderInputError(
+            "Custom resource materializer must expose async materialize().",
+            operation="materialize",
+            field="materializer",
+        )
+
+    def _should_materialize(self, materializer: _MaterializerSpec = None) -> bool:
+        if materializer is not None:
+            return True
+        return (
+            self._strategy.materialization_policy
+            is not ResourceMaterializationPolicy.OFF
+        )
+
+    async def _materialize_with_custom(
+        self,
+        materializer: ResourceMaterializer,
         value: object,
         *,
         template_base: Path | None,
@@ -272,17 +440,19 @@ class ResourceService:
         custom_value = value
         if isinstance(value, (str, Path)):
             custom_value = self.authorize_local(_candidate(value, template_base))
-        result = resolver.resolve(custom_value, template_base=template_base)
-        return await result if isawaitable(result) else result
+        return await materializer.materialize(
+            custom_value,
+            template_base=template_base,
+        )
 
-    async def _resolve_with_policy(
+    async def _materialize_with_policy(
         self,
-        policy: TransportPolicy,
+        policy: _TransportPolicy,
         value: object,
         *,
         template_base: Path | None,
-        lease_id: str | None,
-        request_headers_by_url: RequestHeadersByUrl,
+        lease_id: PublicationLeaseId | None,
+        request_headers_by_url: _RequestHeadersByUrl,
     ) -> object:
         if policy in (
             LocalLocalResourcePolicy.PASSTHROUGH,
@@ -290,13 +460,17 @@ class ResourceService:
         ):
             return value
         if policy is RemoteLocalResourcePolicy.ERROR:
-            raise ResourceResolutionError(
-                "Local resources are disabled by the resource strategy."
+            raise ResourceAccessDeniedError(
+                "Local resources are disabled by the resource strategy.",
+                reference=value,
+                operation="materialize",
             )
         if policy is LocalLocalResourcePolicy.FILE:
             if not isinstance(value, (str, Path)):
-                raise ResourceResolutionError(
-                    "The file policy only accepts path values."
+                raise InvalidRenderInputError(
+                    "The file policy only accepts path values.",
+                    operation="materialize",
+                    field="resource",
                 )
             return self.authorize_local(_candidate(value, template_base)).as_uri()
         if policy in (
@@ -304,42 +478,55 @@ class ResourceService:
             RemoteLocalResourcePolicy.FILEHOST,
         ):
             if self._publisher is None:
-                raise ResourceResolutionError(
-                    "The filehost policy requires an AssetPublisher."
+                raise ResourcePublishError(
+                    "The filehost policy requires an asset publisher.",
+                    reference=value,
+                    operation="publish",
                 )
-            publish_value: str | Path | bytes
+            publish_content: ResourceContent | InlineResource
             if isinstance(value, str):
                 value = _candidate(value, template_base)
             if isinstance(value, Path):
-                publish_value = self.authorize_local(value)
+                reference = FileResourceRef(self.authorize_local(value))
+                publish_content = await self.fetch(reference)
             elif isinstance(value, BytesIO):
-                publish_value = value.getvalue()
+                publish_content = InlineResource(value.getvalue())
             elif isinstance(value, bytearray):
-                publish_value = bytes(value)
+                publish_content = InlineResource(bytes(value))
             elif isinstance(value, bytes):
-                publish_value = value
+                publish_content = InlineResource(value)
             else:
-                raise ResourceResolutionError(
-                    "The filehost policy only accepts paths or bytes."
+                raise InvalidRenderInputError(
+                    "The filehost policy only accepts paths or bytes.",
+                    operation="publish",
+                    field="resource",
                 )
-            published = await self._publisher.publish(publish_value, lease_id=lease_id)
+            published = await self._publisher.publish(
+                publish_content,
+                lease_id=lease_id,
+            )
             _record_published_resource(published, request_headers_by_url)
             return published.url
-        raise ResourceResolutionError(f"Unsupported resource policy: {policy!r}")
+        raise ResourcePublishError(
+            f"Unsupported resource policy: {policy!r}",
+            reference=value,
+            operation="materialize",
+        )
 
-    async def _resolve_scalar(
+    async def _materialize_scalar(
         self,
         value: object,
         *,
         template_base: Path | None,
         strict: bool | None,
-        resolver: ResolverSpec,
-        lease_id: str | None,
-        request_headers_by_url: RequestHeadersByUrl,
+        materializer: _MaterializerSpec,
+        lease_id: PublicationLeaseId | None,
+        request_headers_by_url: _RequestHeadersByUrl,
     ) -> object:
-        policy = self._policy(resolver)
+        policy = self._policy(materializer)
         effective_strict = (
-            self._strategy.resolve_mode is ResourceResolveMode.STRICT
+            self._strategy.materialization_policy
+            is ResourceMaterializationPolicy.STRICT
             if strict is None
             else strict
         )
@@ -348,14 +535,14 @@ class ResourceService:
                 if isinstance(
                     policy, (LocalLocalResourcePolicy, RemoteLocalResourcePolicy)
                 ):
-                    return await self._resolve_with_policy(
+                    return await self._materialize_with_policy(
                         policy,
                         value,
                         template_base=template_base,
                         lease_id=lease_id,
                         request_headers_by_url=request_headers_by_url,
                     )
-                return await self._resolve_with_custom(
+                return await self._materialize_with_custom(
                     policy,
                     value,
                     template_base=template_base,
@@ -364,36 +551,45 @@ class ResourceService:
             if isinstance(error, _ConflictingRequestAuthorization):
                 raise
             if policy is RemoteLocalResourcePolicy.ERROR or effective_strict:
-                if isinstance(error, ResourceResolutionError):
+                if isinstance(error, (ResourceError, InvalidRenderInputError)):
                     raise
                 if isinstance(error, FileNotFoundError):
-                    raise ResourceNotFound(
-                        "Resource was not found.", source=error
+                    raise ResourceNotFoundError(
+                        "Resource was not found.",
+                        reference=value,
+                        operation="materialize",
+                        source=error,
                     ) from error
                 if isinstance(error, PermissionError):
-                    raise ResourceAccessDenied(
-                        "Resource access was denied.", source=error
+                    raise ResourceAccessDeniedError(
+                        "Resource access was denied.",
+                        reference=value,
+                        operation="materialize",
+                        source=error,
                     ) from error
-                raise ResourceResolutionError(
-                    "Resource resolution failed.", source=error
+                raise ResourceFetchError(
+                    "Resource materialization failed.",
+                    reference=value,
+                    operation="materialize",
+                    source=error,
                 ) from error
             logger.warning(
-                "Failed to resolve a resource (non-strict policy): %s",
+                "Failed to materialize a resource (non-strict policy): %s",
                 type(error).__name__,
             )
             return value
 
-    async def _resolve_any(
+    async def _materialize_any(
         self,
         value: object,
         *,
         template_base: Path | None,
         strict: bool | None,
-        resolver: ResolverSpec,
-        lease_id: str | None,
-        request_headers_by_url: RequestHeadersByUrl,
+        materializer: _MaterializerSpec,
+        lease_id: PublicationLeaseId | None,
+        request_headers_by_url: _RequestHeadersByUrl,
     ) -> object:
-        plan = VariableResolutionPlan.build(
+        plan = VariableMaterializationPlan.build(
             value,
             budget=self._traversal_budget,
         )
@@ -420,11 +616,11 @@ class ResourceService:
             while (job := await take_job()) is not None:
                 node_index, leaf_value = job
                 try:
-                    resolved[node_index] = await self._resolve_scalar(
+                    resolved[node_index] = await self._materialize_scalar(
                         leaf_value,
                         template_base=template_base,
                         strict=strict,
-                        resolver=resolver,
+                        materializer=materializer,
                         lease_id=lease_id,
                         request_headers_by_url=request_headers_by_url,
                     )
@@ -441,90 +637,116 @@ class ResourceService:
             for leaf in jobs:
                 if error := errors.get(leaf.node_index):
                     raise error
-            raise RuntimeError("Variable resolution failed without a recorded error.")
+            raise RuntimeError(
+                "Variable materialization failed without a recorded error."
+            )
 
         return plan.rebuild(resolved)
 
-    async def resolve_template_vars(
+    async def _materialize_template_vars(
         self,
         template_vars: Mapping[str, Any],
         *,
         template_base: str | Path | None = None,
         strict: bool | None = None,
-        resolver: ResolverSpec = None,
-        lease_id: str | None = None,
-    ) -> ResourceResolution[dict[str, Any]]:
-        request_headers_by_url: RequestHeadersByUrl = {}
-        if not self.should_resolve(resolver):
-            return ResourceResolution(dict(template_vars))
-        result = await self._resolve_any(
+        materializer: _MaterializerSpec = None,
+        lease_id: PublicationLeaseId | None = None,
+    ) -> _MaterializationResult[dict[str, Any]]:
+        request_headers_by_url: _RequestHeadersByUrl = {}
+        if not self._should_materialize(materializer):
+            return _MaterializationResult(dict(template_vars))
+        result = await self._materialize_any(
             template_vars,
             template_base=_normalize_template_base(template_base),
             strict=strict,
-            resolver=resolver,
+            materializer=materializer,
             lease_id=lease_id,
             request_headers_by_url=request_headers_by_url,
         )
         if not isinstance(result, dict):
-            raise ResourceResolutionError(
-                "Resolved template variables must remain a mapping."
+            raise ResourceFetchError(
+                "Materialized template variables must remain a mapping.",
+                reference=template_vars,
+                operation="materialize",
             )
         if not _is_string_keyed_dict(result):
-            raise ResourceResolutionError(
-                "Resolved template variable keys must remain strings."
+            raise ResourceFetchError(
+                "Materialized template variable keys must remain strings.",
+                reference=template_vars,
+                operation="materialize",
             )
-        return ResourceResolution(
+        return _MaterializationResult(
             result,
             request_headers_by_url,
         )
 
-    async def resolve_resource_url(
+    async def materialize_template_variables(
+        self,
+        variables: Mapping[str, object],
+        *,
+        materializer: ResourceMaterializer,
+        strict: bool,
+        template_base: Path | None,
+    ) -> dict[str, object]:
+        """Materialize template data through the internal preparation port."""
+
+        result = await self._materialize_template_vars(
+            variables,
+            template_base=template_base,
+            strict=strict,
+            materializer=materializer,
+        )
+        return result.value
+
+    async def _materialize_resource_url(
         self,
         value: str | Path | bytes,
         *,
         template_base: str | Path | None = None,
         strict: bool | None = None,
-        resolver: ResolverSpec = None,
-        lease_id: str | None = None,
-    ) -> ResourceResolution[str]:
-        request_headers_by_url: RequestHeadersByUrl = {}
-        result = await self._resolve_any(
+        materializer: _MaterializerSpec = None,
+        lease_id: PublicationLeaseId | None = None,
+    ) -> _MaterializationResult[str]:
+        request_headers_by_url: _RequestHeadersByUrl = {}
+        result = await self._materialize_any(
             value,
             template_base=_normalize_template_base(template_base),
             strict=strict,
-            resolver=resolver,
+            materializer=materializer,
             lease_id=lease_id,
             request_headers_by_url=request_headers_by_url,
         )
         if not isinstance(result, str):
-            raise ResourceResolutionError(
-                f"Resolved resource is not URL text: {type(result).__name__}."
+            raise ResourceFetchError(
+                f"Materialized resource is not URL text: {type(result).__name__}.",
+                reference=value,
+                operation="materialize",
             )
-        return ResourceResolution(result, request_headers_by_url)
+        return _MaterializationResult(result, request_headers_by_url)
 
-    async def resolve_url_tokens(
+    async def _materialize_url_tokens(
         self,
         values: Sequence[str],
         *,
         template_base: str | Path | None = None,
         strict: bool | None = None,
-        resolver: ResolverSpec = None,
-        lease_id: str | None = None,
-    ) -> ResourceResolution[list[str]]:
+        materializer: _MaterializerSpec = None,
+        lease_id: PublicationLeaseId | None = None,
+    ) -> _MaterializationResult[list[str]]:
         base = _normalize_template_base(template_base)
         resolved: list[str] = []
-        request_headers_by_url: RequestHeadersByUrl = {}
+        request_headers_by_url: _RequestHeadersByUrl = {}
         for raw in values:
             parsed = _split_resource_url(raw)
             if parsed.scheme or parsed.netloc or raw.startswith(("data:", "#")):
                 resolved.append(raw)
                 continue
-            token_headers_by_url: RequestHeadersByUrl = {}
-            value = await self._resolve_scalar(
+            token_headers_by_url: _RequestHeadersByUrl = {}
+            value = await self._materialize_scalar(
                 parsed.path,
                 template_base=base,
                 strict=strict,
-                resolver=resolver,
+                materializer=materializer,
                 lease_id=lease_id,
                 request_headers_by_url=token_headers_by_url,
             )
@@ -548,10 +770,10 @@ class ResourceService:
                     PublishedResource(resolved_url, headers),
                     request_headers_by_url,
                 )
-        return ResourceResolution(resolved, request_headers_by_url)
+        return _MaterializationResult(resolved, request_headers_by_url)
 
     async def clear(self) -> None:
-        await self._reader.clear()
+        await self._fetcher.clear()
 
 
-__all__ = ["ResolverSpec", "ResourceService", "TransportPolicy"]
+__all__ = ["ResourceService"]

@@ -2,18 +2,20 @@
 
 from .playwright import (
     PLAYWRIGHT,
-    PlaywrightAccess,
+    PlaywrightCapability,
+    PlaywrightPageOptions,
 )
 from .takumi import (
     TAKUMI,
-    TakumiAccess,
-    TakumiAPI,
+    TakumiCapability,
+    TakumiSession,
 )
 
 __all__ = [
     "PLAYWRIGHT",
     "TAKUMI",
-    "PlaywrightAccess",
-    "TakumiAPI",
-    "TakumiAccess",
+    "PlaywrightCapability",
+    "PlaywrightPageOptions",
+    "TakumiCapability",
+    "TakumiSession",
 ]

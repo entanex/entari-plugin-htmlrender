@@ -1,14 +1,10 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import Literal, TypeAlias
 from urllib.parse import urlsplit
 
 from .headers import validate_request_header_name, validate_request_header_value
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def normalize_public_base_url(value: str) -> str:
@@ -30,7 +26,7 @@ def normalize_public_base_url(value: str) -> str:
     return value if value.endswith("/") else f"{value}/"
 
 
-class ResourceResolveMode(str, Enum):
+class ResourceMaterializationPolicy(str, Enum):
     """Whether document-local resources are resolved before execution."""
 
     OFF = "off"
@@ -153,21 +149,62 @@ class AssetPublisherSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class ResourceStrategy:
-    """Provider-selected resource transport expressed as immutable data."""
+class LocalResourceStrategy:
+    """Resource transport for a provider running in this process."""
 
-    is_remote: bool = False
-    resolve_mode: ResourceResolveMode = ResourceResolveMode.AUTO
-    remote_local_policy: RemoteLocalResourcePolicy = RemoteLocalResourcePolicy.MEMORY
-    local_local_policy: LocalLocalResourcePolicy = LocalLocalResourcePolicy.FILE
+    kind: Literal["local"] = field(default="local", init=False)
+    materialization_policy: ResourceMaterializationPolicy = (
+        ResourceMaterializationPolicy.AUTO
+    )
+    local_resource_policy: LocalLocalResourcePolicy = LocalLocalResourcePolicy.FILE
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.materialization_policy,
+            ResourceMaterializationPolicy,
+        ):
+            raise ValueError(
+                "materialization_policy must be a ResourceMaterializationPolicy"
+            )
+        if not isinstance(self.local_resource_policy, LocalLocalResourcePolicy):
+            raise ValueError("local_resource_policy must be a LocalLocalResourcePolicy")
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteResourceStrategy:
+    """Resource transport for a provider running across a process boundary."""
+
+    kind: Literal["remote"] = field(default="remote", init=False)
+    materialization_policy: ResourceMaterializationPolicy = (
+        ResourceMaterializationPolicy.AUTO
+    )
+    local_resource_policy: RemoteLocalResourcePolicy = RemoteLocalResourcePolicy.MEMORY
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.materialization_policy,
+            ResourceMaterializationPolicy,
+        ):
+            raise ValueError(
+                "materialization_policy must be a ResourceMaterializationPolicy"
+            )
+        if not isinstance(self.local_resource_policy, RemoteLocalResourcePolicy):
+            raise ValueError(
+                "local_resource_policy must be a RemoteLocalResourcePolicy"
+            )
+
+
+ResourceStrategy: TypeAlias = LocalResourceStrategy | RemoteResourceStrategy
 
 
 __all__ = [
     "AssetPublisherSettings",
     "LocalLocalResourcePolicy",
+    "LocalResourceStrategy",
     "RemoteAccessSettings",
     "RemoteLocalResourcePolicy",
+    "RemoteResourceStrategy",
     "ResourceCacheSettings",
-    "ResourceResolveMode",
+    "ResourceMaterializationPolicy",
     "ResourceStrategy",
 ]

@@ -1,96 +1,72 @@
-"""Public library facade and conditional Entari composition entry point."""
+"""Caller-first contracts and values for HTMLRender.
+
+The package root deliberately excludes runtime composition, Provider SDK,
+adapter, and Entari lifecycle types.  Ordinary code receives the contracts
+exported here through constructor or host injection.
+"""
 
 from importlib.metadata import PackageNotFoundError, version
 
-from entari_plugin_htmlrender.api import RuntimeResolver as RuntimeResolver
-from entari_plugin_htmlrender.api import RuntimeSource as RuntimeSource
-from entari_plugin_htmlrender.api import parse_html as parse_html
-from entari_plugin_htmlrender.api import prepare_markdown as prepare_markdown
-from entari_plugin_htmlrender.api import prepare_template as prepare_template
-from entari_plugin_htmlrender.api import prepare_text as prepare_text
-from entari_plugin_htmlrender.api import rasterize_html as rasterize_html
-from entari_plugin_htmlrender.api import render_html as render_html
-from entari_plugin_htmlrender.api import render_markdown as render_markdown
-from entari_plugin_htmlrender.api import render_template as render_template
-from entari_plugin_htmlrender.api import (
-    render_template_html as render_template_html,
+from entari_plugin_htmlrender.errors import (
+    CapabilityUnavailableError as CapabilityUnavailableError,
 )
-from entari_plugin_htmlrender.api import render_text as render_text
-from entari_plugin_htmlrender.api import resolve_resource_url as resolve_resource_url
-from entari_plugin_htmlrender.api import resolve_runtime as resolve_runtime
-from entari_plugin_htmlrender.api import (
-    resolve_template_vars as resolve_template_vars,
+from entari_plugin_htmlrender.errors import HtmlRenderError as HtmlRenderError
+from entari_plugin_htmlrender.errors import (
+    InvalidRenderInputError as InvalidRenderInputError,
 )
-from entari_plugin_htmlrender.api import runtime_context as runtime_context
-from entari_plugin_htmlrender.host.config import RenderSettings as RenderSettings
-from entari_plugin_htmlrender.host.config import (
-    RenderStartupMode as RenderStartupMode,
+from entari_plugin_htmlrender.errors import ProviderError as ProviderError
+from entari_plugin_htmlrender.errors import (
+    RenderOutputLimitError as RenderOutputLimitError,
 )
-from entari_plugin_htmlrender.preparation import DocumentBase as DocumentBase
-from entari_plugin_htmlrender.preparation import PreparedAsset as PreparedAsset
-from entari_plugin_htmlrender.preparation import PreparedHtml as PreparedHtml
-from entari_plugin_htmlrender.preparation import (
+from entari_plugin_htmlrender.errors import (
+    RenderTimeoutError as RenderTimeoutError,
+)
+from entari_plugin_htmlrender.errors import ResourceError as ResourceError
+from entari_plugin_htmlrender.errors import (
+    RuntimeUnavailableError as RuntimeUnavailableError,
+)
+from entari_plugin_htmlrender.errors import (
+    UnsupportedOperationError as UnsupportedOperationError,
+)
+from entari_plugin_htmlrender.preparation.html import parse_html as parse_html
+from entari_plugin_htmlrender.preparation.models import (
+    DocumentBase as DocumentBase,
+)
+from entari_plugin_htmlrender.preparation.models import (
+    DocumentRequirement as DocumentRequirement,
+)
+from entari_plugin_htmlrender.preparation.models import (
+    PreparedAsset as PreparedAsset,
+)
+from entari_plugin_htmlrender.preparation.models import (
+    PreparedHtml as PreparedHtml,
+)
+from entari_plugin_htmlrender.preparation.models import (
     PreparedStylesheet as PreparedStylesheet,
 )
-from entari_plugin_htmlrender.preparation import RasterOptions as RasterOptions
-from entari_plugin_htmlrender.preparation import (
-    RenderRequirement as RenderRequirement,
+from entari_plugin_htmlrender.preparation.models import (
+    RasterOptions as RasterOptions,
 )
+from entari_plugin_htmlrender.preparation.models import TemplateRef as TemplateRef
 from entari_plugin_htmlrender.raster import RasterImageFormat as RasterImageFormat
-from entari_plugin_htmlrender.rendering import (
-    CapabilityUnavailable as CapabilityUnavailable,
+from entari_plugin_htmlrender.rendering.artifacts import (
+    RenderedHtml as RenderedHtml,
 )
-from entari_plugin_htmlrender.rendering import ErrorCause as ErrorCause
-from entari_plugin_htmlrender.rendering import (
-    InvalidRenderRequest as InvalidRenderRequest,
+from entari_plugin_htmlrender.rendering.artifacts import (
+    RenderedImage as RenderedImage,
 )
-from entari_plugin_htmlrender.rendering import PreparationError as PreparationError
-from entari_plugin_htmlrender.rendering import (
-    ProviderExecutionError as ProviderExecutionError,
+from entari_plugin_htmlrender.rendering.contracts import (
+    HtmlRenderer as HtmlRenderer,
 )
-from entari_plugin_htmlrender.rendering import (
-    ProviderLifecycleError as ProviderLifecycleError,
+from entari_plugin_htmlrender.rendering.contracts import (
+    TemplateRenderer as TemplateRenderer,
 )
-from entari_plugin_htmlrender.rendering import ProviderNotFound as ProviderNotFound
-from entari_plugin_htmlrender.rendering import (
-    ProviderUnavailable as ProviderUnavailable,
+from entari_plugin_htmlrender.rendering.models import (
+    RenderOperation as RenderOperation,
 )
-from entari_plugin_htmlrender.rendering import (
-    RasterizeHtmlRequest as RasterizeHtmlRequest,
+from entari_plugin_htmlrender.resources.config import (
+    ResourceMaterializationPolicy as ResourceMaterializationPolicy,
 )
-from entari_plugin_htmlrender.rendering import RenderCommand as RenderCommand
-from entari_plugin_htmlrender.rendering import RenderedHtml as RenderedHtml
-from entari_plugin_htmlrender.rendering import RenderedImage as RenderedImage
-from entari_plugin_htmlrender.rendering import RenderHtmlRequest as RenderHtmlRequest
-from entari_plugin_htmlrender.rendering import (
-    RenderingError as RenderingError,
-)
-from entari_plugin_htmlrender.rendering import (
-    RenderMarkdownRequest as RenderMarkdownRequest,
-)
-from entari_plugin_htmlrender.rendering import (
-    RenderTemplateHtmlRequest as RenderTemplateHtmlRequest,
-)
-from entari_plugin_htmlrender.rendering import (
-    RenderTemplateRequest as RenderTemplateRequest,
-)
-from entari_plugin_htmlrender.rendering import RenderTextRequest as RenderTextRequest
-from entari_plugin_htmlrender.rendering import ResourcePolicy as ResourcePolicy
-from entari_plugin_htmlrender.rendering import (
-    ResourceResolutionError as ResourceResolutionError,
-)
-from entari_plugin_htmlrender.rendering import RuntimeNotBound as RuntimeNotBound
-from entari_plugin_htmlrender.rendering import (
-    UnsupportedRenderOption as UnsupportedRenderOption,
-)
-from entari_plugin_htmlrender.rendering import (
-    UnsupportedRequirement as UnsupportedRequirement,
-)
-from entari_plugin_htmlrender.resources import (
-    ResourceResolution as ResourceResolution,
-)
-from entari_plugin_htmlrender.runtime import HtmlRenderer as HtmlRenderer
-from entari_plugin_htmlrender.runtime import RenderRuntime as RenderRuntime
 
 try:
     __version__ = version("entari-plugin-htmlrender")
@@ -98,62 +74,36 @@ except PackageNotFoundError:
     __version__ = "0+unknown"
 
 __all__ = [
-    "CapabilityUnavailable",
+    "CapabilityUnavailableError",
     "DocumentBase",
-    "ErrorCause",
+    "DocumentRequirement",
+    "HtmlRenderError",
     "HtmlRenderer",
-    "InvalidRenderRequest",
-    "PreparationError",
+    "InvalidRenderInputError",
     "PreparedAsset",
     "PreparedHtml",
     "PreparedStylesheet",
-    "ProviderExecutionError",
-    "ProviderLifecycleError",
-    "ProviderNotFound",
-    "ProviderUnavailable",
+    "ProviderError",
     "RasterImageFormat",
     "RasterOptions",
-    "RasterizeHtmlRequest",
-    "RenderCommand",
-    "RenderHtmlRequest",
-    "RenderMarkdownRequest",
-    "RenderRequirement",
-    "RenderRuntime",
-    "RenderSettings",
-    "RenderStartupMode",
-    "RenderTemplateHtmlRequest",
-    "RenderTemplateRequest",
-    "RenderTextRequest",
+    "RenderOperation",
+    "RenderOutputLimitError",
+    "RenderTimeoutError",
     "RenderedHtml",
     "RenderedImage",
-    "RenderingError",
-    "ResourcePolicy",
-    "ResourceResolution",
-    "ResourceResolutionError",
-    "RuntimeNotBound",
-    "RuntimeResolver",
-    "RuntimeSource",
-    "UnsupportedRenderOption",
-    "UnsupportedRequirement",
+    "ResourceError",
+    "ResourceMaterializationPolicy",
+    "RuntimeUnavailableError",
+    "TemplateRef",
+    "TemplateRenderer",
+    "UnsupportedOperationError",
+    "__version__",
     "parse_html",
-    "prepare_markdown",
-    "prepare_template",
-    "prepare_text",
-    "rasterize_html",
-    "render_html",
-    "render_markdown",
-    "render_template",
-    "render_template_html",
-    "render_text",
-    "resolve_resource_url",
-    "resolve_runtime",
-    "resolve_template_vars",
-    "runtime_context",
 ]
 
 
 if "__plugin__" in globals():
-    from entari_plugin_htmlrender.host.registration import (
+    from entari_plugin_htmlrender.entari.plugin import (
         register_plugin as _register_plugin,
     )
 

@@ -1,62 +1,76 @@
-"""Render runtime aggregate: renderer, capabilities, and lifecycle."""
+"""Lifecycle-owned aggregate assembled by the composition layer."""
 
 from __future__ import annotations
 
-from enum import Enum, auto
+from enum import Enum
 from typing import TYPE_CHECKING, final
 
 import anyio
 
-from entari_plugin_htmlrender.rendering.capabilities import CapabilityCatalog
-from entari_plugin_htmlrender.rendering.errors import (
+from entari_plugin_htmlrender.errors import (
+    HtmlRenderError,
     ProviderLifecycleError,
-    RenderingError,
+    RuntimeUnavailableError,
 )
+from entari_plugin_htmlrender.rendering.capabilities import CapabilityCatalog
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
+    from entari_plugin_htmlrender.graphics.ports import GraphicsRenderer
     from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
+    from entari_plugin_htmlrender.rendering.contracts import (
+        HtmlRenderer,
+        TemplateRenderer,
+    )
     from entari_plugin_htmlrender.rendering.ports import RuntimeLifecycle
-    from entari_plugin_htmlrender.resources.service import ResourceService
+    from entari_plugin_htmlrender.resources.ports import ResourceAccess
 
-    from .facades import RuntimeResources
-    from .renderer import HtmlRenderer
-
-from .extensions import RuntimeExtensions
-from .facades import AdmittedHtmlPreparer, AdmittedResourceService
+from .capabilities import RuntimeCapabilities
+from .facades import _AdmittedResourceAccess
 
 
-class _RuntimeState(Enum):
-    NEW = auto()
-    STARTED = auto()
-    CLOSING = auto()
-    CLOSED = auto()
+class RuntimeState(str, Enum):
+    """Observable lifecycle state of one composed render runtime."""
+
+    OPEN = "open"
+    CLOSING = "closing"
+    CLOSED = "closed"
 
 
 @final
 class RenderRuntime:
-    """Host-neutral aggregate composed once for one rendering lifetime."""
+    """Advanced composition aggregate owned by one host lifetime.
+
+    Ordinary business code receives one of ``renderer``, ``templates``,
+    ``resources``, ``graphics``, or ``capabilities`` instead of this lifecycle
+    controller.
+    """
 
     def __init__(
         self,
         *,
         renderer: HtmlRenderer,
-        preparation: HtmlPreparer,
-        resources: ResourceService,
+        templates: TemplateRenderer,
+        resources: ResourceAccess,
+        graphics: GraphicsRenderer,
         lifecycle: RuntimeLifecycle,
         operation_admission: OperationAdmissionGate,
-        extensions: CapabilityCatalog | None = None,
+        capabilities: CapabilityCatalog | None = None,
+        provider_id: str | None = None,
     ) -> None:
         self._renderer = renderer
-        self._operation_admission = operation_admission
-        self._preparation = AdmittedHtmlPreparer(preparation, self._operation_admission)
-        self._resources = AdmittedResourceService(resources, self._operation_admission)
+        self._templates = templates
+        self._resources = _AdmittedResourceAccess(resources, operation_admission)
+        self._graphics = graphics
+        self._capabilities = RuntimeCapabilities(
+            capabilities if capabilities is not None else CapabilityCatalog()
+        )
         self._lifecycle = lifecycle
-        catalog = extensions if extensions is not None else CapabilityCatalog()
-        self._extensions = RuntimeExtensions(catalog)
-        self._state = _RuntimeState.NEW
+        self._operation_admission = operation_admission
+        self._provider_id = provider_id
+        self._state = RuntimeState.OPEN
+        self._started = False
         self._lock = anyio.Lock()
 
     @property
@@ -64,16 +78,25 @@ class RenderRuntime:
         return self._renderer
 
     @property
-    def preparation(self) -> HtmlPreparer:
-        return self._preparation
+    def templates(self) -> TemplateRenderer:
+        return self._templates
 
     @property
-    def resources(self) -> RuntimeResources:
+    def resources(self) -> ResourceAccess:
         return self._resources
 
     @property
-    def extensions(self) -> RuntimeExtensions:
-        return self._extensions
+    def graphics(self) -> GraphicsRenderer:
+        return self._graphics
+
+    @property
+    def capabilities(self) -> RuntimeCapabilities:
+        return self._capabilities
+
+    @property
+    def state(self) -> RuntimeState:
+        """Return the current lifecycle state without performing I/O."""
+        return self._state
 
     async def _run_lifecycle(
         self,
@@ -82,46 +105,51 @@ class RenderRuntime:
     ) -> None:
         try:
             await callback()
-        except RenderingError:
+        except HtmlRenderError:
             raise
         except Exception as error:
             raise ProviderLifecycleError(
-                f"Render runtime lifecycle {operation} failed.",
+                f"Render provider lifecycle {operation} failed.",
+                provider_id=self._provider_id,
+                operation=operation,
+                retryable=True,
                 source=error,
             ) from error
 
     async def startup(self) -> None:
-        """Start the provider runtime; idempotent and concurrency-safe."""
+        """Start the selected provider; idempotent and concurrency-safe."""
         async with self._lock:
-            if self._state in {_RuntimeState.CLOSING, _RuntimeState.CLOSED}:
-                raise ProviderLifecycleError(
-                    "Render runtime is closing or closed; build a new composition "
-                    "to render again."
+            if self._state in {RuntimeState.CLOSING, RuntimeState.CLOSED}:
+                raise RuntimeUnavailableError(
+                    self._state.value,
+                    operation="startup",
                 )
-            if self._state is _RuntimeState.STARTED:
+            if self._started:
                 return
             await self._run_lifecycle("startup", self._lifecycle.startup)
-            self._state = _RuntimeState.STARTED
+            self._started = True
 
     async def probe(self) -> None:
-        """Run the provider-defined minimal probe."""
+        """Run the provider-defined minimal readiness probe."""
         await self.startup()
         async with self._lock:
-            if self._state is not _RuntimeState.STARTED:
-                raise ProviderLifecycleError(
-                    "Render runtime is closing or closed; build a new composition "
-                    "to probe again."
+            if self._state is not RuntimeState.OPEN:
+                raise RuntimeUnavailableError(
+                    self._state.value,
+                    operation="probe",
                 )
             await self._run_lifecycle("probe", self._lifecycle.probe)
 
     async def aclose(self) -> None:
-        """Close the provider runtime; idempotent for multiple callers."""
+        """Drain caller operations and close the composition; failures retry."""
         async with self._lock:
-            if self._state is _RuntimeState.CLOSED:
+            if self._state is RuntimeState.CLOSED:
                 return
-            # A failed teardown remains retryable, but startup is permanently
-            # rejected once closing has begun.
-            self._state = _RuntimeState.CLOSING
+            self._state = RuntimeState.CLOSING
             await self._operation_admission.stop_accepting_and_drain()
             await self._run_lifecycle("aclose", self._lifecycle.aclose)
-            self._state = _RuntimeState.CLOSED
+            await self._operation_admission.mark_closed()
+            self._state = RuntimeState.CLOSED
+
+
+__all__ = ["RenderRuntime", "RuntimeState"]
