@@ -7,16 +7,16 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nonebot_plugin_htmlrender.adapters.resources import (
+    from entari_plugin_htmlrender.adapters.resources import (
         ConfiguredLocalAccessPolicy,
     )
-    from nonebot_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
-    from nonebot_plugin_htmlrender.resources.service import ResourceService
+    from entari_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
+    from entari_plugin_htmlrender.resources.service import ResourceService
 
 
 @pytest.fixture
 def local_access(tmp_path: Path) -> ConfiguredLocalAccessPolicy:
-    from nonebot_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
         ConfiguredLocalAccessPolicy,
     )
 
@@ -28,19 +28,19 @@ def local_access(tmp_path: Path) -> ConfiguredLocalAccessPolicy:
 
 @pytest.fixture
 def resources(local_access: ConfiguredLocalAccessPolicy) -> ResourceService:
-    from nonebot_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
         AnyioWorkerExecutor,
         RemoteTransportExecutor,
         build_resource_reader,
     )
-    from nonebot_plugin_htmlrender.resources.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         ResourceCacheSettings,
         ResourceStrategy,
     )
-    from nonebot_plugin_htmlrender.resources.observation import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.observation import (  # noqa: PLC0415
         NoopCacheObserver,
     )
-    from nonebot_plugin_htmlrender.resources.service import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.service import (  # noqa: PLC0415
         ResourceService,
     )
 
@@ -64,16 +64,16 @@ def preparer(
     resources: ResourceService,
     local_access: ConfiguredLocalAccessPolicy,
 ) -> DefaultHtmlPreparer:
-    from nonebot_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
         AnyioWorkerExecutor,
     )
-    from nonebot_plugin_htmlrender.adapters.templates import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.templates import (  # noqa: PLC0415
         JinjaTemplateCompiler,
     )
-    from nonebot_plugin_htmlrender.preparation.service import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation.service import (  # noqa: PLC0415
         DefaultHtmlPreparer,
     )
-    from nonebot_plugin_htmlrender.resources.observation import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.observation import (  # noqa: PLC0415
         NoopCacheObserver,
     )
 

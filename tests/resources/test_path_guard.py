@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from nonebot_plugin_htmlrender.resources import path_guard
-from nonebot_plugin_htmlrender.resources.path_guard import (
+from entari_plugin_htmlrender.resources import path_guard
+from entari_plugin_htmlrender.resources.path_guard import (
     is_subpath,
     sensitive_local_root,
     validate_local_access,

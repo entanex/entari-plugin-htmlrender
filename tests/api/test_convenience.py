@@ -7,42 +7,37 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender import api
-from nonebot_plugin_htmlrender.adapters.resources import (
+from entari_plugin_htmlrender import api
+from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
     build_resource_reader,
 )
-from nonebot_plugin_htmlrender.adapters.templates import JinjaTemplateCompiler
-from nonebot_plugin_htmlrender.api._default import (
-    set_default_application,
-    set_default_application_factory,
-)
-from nonebot_plugin_htmlrender.application import build_application
-from nonebot_plugin_htmlrender.bootstrap.composition import prepare_runtime
-from nonebot_plugin_htmlrender.bootstrap.settings import RenderSettings
-from nonebot_plugin_htmlrender.preparation import prepare_html
-from nonebot_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
-from nonebot_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
-from nonebot_plugin_htmlrender.providers.sdk import EngineBindings
-from nonebot_plugin_htmlrender.rendering import (
-    ApplicationNotInitialized,
+from entari_plugin_htmlrender.adapters.templates import JinjaTemplateCompiler
+from entari_plugin_htmlrender.preparation import parse_html
+from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
+from entari_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
+from entari_plugin_htmlrender.providers.sdk import EngineBindings
+from entari_plugin_htmlrender.rendering import (
     CapabilityUnavailable,
     InvalidRenderRequest,
+    RenderCommand,
     RenderedImage,
     ResourcePolicy,
+    RuntimeNotBound,
 )
-from nonebot_plugin_htmlrender.resources.config import (
+from entari_plugin_htmlrender.resources.config import (
     ResourceCacheSettings,
     ResourceStrategy,
 )
-from nonebot_plugin_htmlrender.resources.observation import NoopCacheObserver
-from nonebot_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
+from entari_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.runtime import RenderRuntime, build_runtime
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncIterator
     from pathlib import Path
     from typing import Literal
 
@@ -57,6 +52,14 @@ class _FakeLifecycle:
 
     async def aclose(self) -> None:
         return None
+
+
+@dataclass(frozen=True)
+class _StaticResolver:
+    runtime: RenderRuntime
+
+    def resolve_runtime(self) -> RenderRuntime:
+        return self.runtime
 
 
 @dataclass
@@ -97,7 +100,7 @@ class _FakeExecutor:
 
 
 @pytest.fixture
-def default_executor() -> Iterator[_FakeExecutor]:
+async def default_executor() -> AsyncIterator[_FakeExecutor]:
     executor = _FakeExecutor()
     observer = NoopCacheObserver()
     worker = AnyioWorkerExecutor()
@@ -125,7 +128,7 @@ def default_executor() -> Iterator[_FakeExecutor]:
         ),
         worker=worker,
     )
-    application = build_application(
+    runtime = build_runtime(
         engine=EngineBindings(
             lifecycle=_FakeLifecycle(),
             prepared_html_executor=executor,
@@ -133,46 +136,56 @@ def default_executor() -> Iterator[_FakeExecutor]:
         preparer=preparer,
         resources=resources,
     )
-    previous = set_default_application(application)
-    yield executor
-    set_default_application(previous)
-
-
-def test_default_accessors_require_initialization() -> None:
-    previous_application = set_default_application(None)
-    previous_factory = set_default_application_factory(None)
     try:
-        with pytest.raises(ApplicationNotInitialized, match="not initialized"):
-            api.get_default_application()
-        with pytest.raises(ApplicationNotInitialized, match="not initialized"):
-            api.get_default_renderer()
+        with api.runtime_context(_StaticResolver(runtime)):
+            assert api.resolve_runtime() is runtime
+            yield executor
     finally:
-        set_default_application(previous_application)
-        set_default_application_factory(previous_factory)
+        await runtime.aclose()
 
 
-async def test_default_factory_builds_provider_free_application(
+def test_runtime_resolution_requires_explicit_or_context_source() -> None:
+    with pytest.raises(RuntimeNotBound, match="current context"):
+        api.resolve_runtime()
+
+
+async def test_explicit_provider_free_runtime_only_renders_template_html(
     tmp_path: Path,
 ) -> None:
-    settings = RenderSettings.model_validate(
-        {
-            "resources": {
-                "local_access": {
-                    "allowed_paths": [tmp_path],
-                }
-            }
-        }
+    observer = NoopCacheObserver()
+    worker = AnyioWorkerExecutor()
+    local_access = ConfiguredLocalAccessPolicy(
+        allowed_roots=(tmp_path,),
+        allow_any=False,
     )
-    runtime = prepare_runtime(settings)
-    previous_application = set_default_application(None)
-    previous_factory = set_default_application_factory(runtime.build_application)
-    application = None
+    resources = ResourceService(
+        reader=build_resource_reader(
+            ResourceCacheSettings(),
+            observer,
+            worker,
+            remote_transport=RemoteTransportExecutor(max_concurrent_fetches=2),
+        ),
+        local_access=local_access,
+        strategy=ResourceStrategy(),
+    )
+    preparer = DefaultHtmlPreparer(
+        resources=resources,
+        templates=JinjaTemplateCompiler(
+            max_entries=8,
+            observer=observer,
+            worker=worker,
+            local_access=local_access,
+        ),
+        worker=worker,
+    )
+    runtime = build_runtime(
+        engine=EngineBindings(lifecycle=_FakeLifecycle()),
+        preparer=preparer,
+        resources=resources,
+    )
     try:
-        application = api.get_default_application()
-
-        assert application is api.get_default_application()
-        assert application.renderer.supported_commands == frozenset(
-            {"render_template_html"}
+        assert runtime.renderer.supported_commands == frozenset(
+            {RenderCommand.TEMPLATE_HTML}
         )
 
         (tmp_path / "page.html").write_text(
@@ -183,16 +196,14 @@ async def test_default_factory_builds_provider_free_application(
             tmp_path,
             "page.html",
             {"title": "Provider-free"},
+            runtime=runtime,
         )
 
         assert "<h1>Provider-free</h1>" in str(rendered)
         with pytest.raises(CapabilityUnavailable, match="render_html"):
-            await api.render_html("<p>requires a provider</p>")
+            await api.render_html("<p>requires a provider</p>", runtime=runtime)
     finally:
-        if application is not None:
-            await application.aclose()
-        set_default_application(previous_application)
-        set_default_application_factory(previous_factory)
+        await runtime.aclose()
 
 
 async def test_render_html_returns_typed_artifact(
@@ -292,7 +303,18 @@ async def test_prepare_markdown_uses_stable_validation_error(
 
 def test_public_resource_helpers_do_not_expose_publisher_leases() -> None:
     assert "lease_id" not in signature(api.resolve_template_vars).parameters
-    assert "lease_id" not in signature(api.to_resource_url).parameters
+    assert "lease_id" not in signature(api.resolve_resource_url).parameters
+
+
+async def test_resolve_resource_url_uses_runtime_resources(
+    default_executor: _FakeExecutor,
+) -> None:
+    del default_executor
+
+    result = await api.resolve_resource_url("https://assets.example/card.png")
+
+    assert result.value == "https://assets.example/card.png"
+    assert result.request_headers_by_url == {}
 
 
 async def test_render_template_and_template_html(
@@ -320,7 +342,7 @@ async def test_render_template_and_template_html(
 async def test_rasterize_html_uses_given_prepared(
     default_executor: _FakeExecutor,
 ) -> None:
-    prepared = prepare_html("<p>direct</p>")
+    prepared = parse_html("<p>direct</p>")
 
     artifact = await api.rasterize_html(
         prepared,

@@ -1,36 +1,15 @@
-# Pillow/Skia RasterScene 示例
+# Pillow/Skia RasterScene
 
-展示如何显式获取 Pillow 或 Skia 的 `RasterSceneRenderer` typed Capability，并渲染同一个后端中立、物理像素级场景。Pillow/Skia 不是 HTML Provider，也不会消费`render.provider_config`。
+[`example.py`](example.py) 接收 `RuntimeSource`，从 runtime 的 typed extensions 中选择 Pillow 或 Skia，并渲染同一个 backend-neutral、物理像素级 `RasterScene`。
 
-## 命令
-
-| 命令 | 说明 |
-| --- | --- |
-| `/graphics_scene [pillow\|skia]` | 使用已启用的 graphics backend 渲染场景 |
-
-## Pillow 安装与配置
-
-```bash
-nb create  # 创建 NoneBot 项目并选择 OneBot V11 adapter
-uv add "nonebot-plugin-htmlrender[pillow]>=0.8.0,<0.9"
-uv add nonebot-plugin-alconna
+```yaml
+plugins:
+  htmlrender:
+    provider: null
+    graphics:
+      backends: [pillow, skia]
+      max_pixels: 16777216
+      max_concurrency: 2
 ```
 
-复制 `plugins/graphics_render` 到项目插件目录，并写入：
-
-```dotenv
-RENDER={"provider":null,"graphics":{"backends":["pillow"],"max_pixels":16777216,"max_concurrency":2}}
-```
-
-## 同时启用 Skia
-
-```bash
-uv add "nonebot-plugin-htmlrender[pillow,skia]>=0.8.0,<0.9"
-```
-
-```dotenv
-RENDER={"provider":null,"graphics":{"backends":["pillow","skia"],"max_pixels":16777216,"max_concurrency":2}}
-```
-
-两个 backend 共用 composition-owned 像素与并发预算，但各自拥有独立的 capability
-key。Skia 的 wheel 和系统图形库存在平台限制；不受支持的环境应只启用 Pillow。
+Pillow 与 Skia 不是 HTML Provider，也不读取 `provider_config`。它们共享 runtime拥有的像素与并发预算，但各自通过独立 capability 暴露。

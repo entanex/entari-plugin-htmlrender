@@ -10,25 +10,25 @@ from typing import TYPE_CHECKING
 import anyio
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.resources import (
+from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
     build_resource_reader,
 )
-from nonebot_plugin_htmlrender.rendering.errors import (
+from entari_plugin_htmlrender.rendering.errors import (
     InvalidRenderRequest,
     ResourceResolutionError,
 )
-from nonebot_plugin_htmlrender.resources._traversal import ResourceTraversalBudget
-from nonebot_plugin_htmlrender.resources.config import (
+from entari_plugin_htmlrender.resources._traversal import ResourceTraversalBudget
+from entari_plugin_htmlrender.resources.config import (
     LocalLocalResourcePolicy,
     RemoteLocalResourcePolicy,
     ResourceCacheSettings,
     ResourceResolveMode,
     ResourceStrategy,
 )
-from nonebot_plugin_htmlrender.resources.models import (
+from entari_plugin_htmlrender.resources.models import (
     FileResourceRef,
     InlineResourceRef,
     NotModified,
@@ -38,8 +38,8 @@ from nonebot_plugin_htmlrender.resources.models import (
     ResourceRef,
     ResourceRevision,
 )
-from nonebot_plugin_htmlrender.resources.observation import NoopCacheObserver
-from nonebot_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
+from entari_plugin_htmlrender.resources.service import ResourceService
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -244,7 +244,7 @@ async def test_read_api_accepts_concrete_resource_references(tmp_path: Path) -> 
     assert await resources.read_text(InlineResourceRef("内联".encode())) == "内联"
     assert "{{ text" in await resources.read_text(
         PackageResourceRef(
-            "nonebot_plugin_htmlrender",
+            "entari_plugin_htmlrender",
             "templates/text/text.html",
         )
     )
@@ -327,7 +327,7 @@ async def test_local_file_strategy_resolves_nested_values(tmp_path: Path) -> Non
         "nested": [expected, (expected,), {expected}],
         "plain": "hello world",
     }
-    assert (await resources.to_resource_url(image)).value == expected
+    assert (await resources.resolve_resource_url(image)).value == expected
     assert result.request_headers_by_url == {}
 
 
@@ -459,7 +459,7 @@ async def test_filehost_single_url_carries_exact_request_headers(
         publisher=RecordingPublisher(),
     )
 
-    result = await resources.to_resource_url(b"single")
+    result = await resources.resolve_resource_url(b"single")
 
     assert result.value == "https://assets.example/single"
     assert result.request_headers_by_url == {result.value: {"X-Test-Asset": "token"}}

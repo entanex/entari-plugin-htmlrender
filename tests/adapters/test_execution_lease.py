@@ -8,26 +8,26 @@ import anyio
 from anyio.lowlevel import checkpoint
 import pytest
 
-from nonebot_plugin_htmlrender.adapters import _lease as lease_module
-from nonebot_plugin_htmlrender.adapters._lease import (
+from entari_plugin_htmlrender.adapters import _lease as lease_module
+from entari_plugin_htmlrender.adapters._lease import (
     ExecutionLeaseProvider,
     PreparedHtmlLeaseExecutor,
 )
-from nonebot_plugin_htmlrender.preparation import prepare_html
-from nonebot_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
-from nonebot_plugin_htmlrender.rendering.errors import (
+from entari_plugin_htmlrender.preparation import parse_html
+from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
+from entari_plugin_htmlrender.rendering.errors import (
     ProviderExecutionError,
     ProviderLifecycleError,
     RenderingError,
 )
-from nonebot_plugin_htmlrender.rendering.observers import NoopOperationObserver
+from entari_plugin_htmlrender.rendering.observers import NoopOperationObserver
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from nonebot_plugin_htmlrender.rendering import RenderedImage
-    from nonebot_plugin_htmlrender.rendering.requests import ResourcePolicy
+    from entari_plugin_htmlrender.rendering import RenderedImage
+    from entari_plugin_htmlrender.rendering.requests import ResourcePolicy
 
 
 @dataclass(slots=True)
@@ -371,9 +371,11 @@ async def test_concurrent_close_calls_share_one_close_attempt() -> None:
     assert close_calls == 1
 
 
-async def test_runtime_created_after_close_is_disposed_without_reopening() -> None:
+async def test_close_waits_for_first_create_and_releases_before_returning() -> None:
     create_entered = anyio.Event()
     finish_create = anyio.Event()
+    close_started = anyio.Event()
+    close_returned = anyio.Event()
     created: list[_Lease] = []
     closed: list[_Lease] = []
     errors: list[ProviderLifecycleError] = []
@@ -398,17 +400,79 @@ async def test_runtime_created_after_close_is_disposed_without_reopening() -> No
         except ProviderLifecycleError as error:
             errors.append(error)
 
+    async def close_provider() -> None:
+        close_started.set()
+        await provider.aclose()
+        close_returned.set()
+
     async with anyio.create_task_group() as task_group:
         task_group.start_soon(acquire)
         await create_entered.wait()
-        await provider.aclose()
+        task_group.start_soon(close_provider)
+        await close_started.wait()
+        await checkpoint()
+
+        assert not close_returned.is_set()
+        assert closed == []
         finish_create.set()
+        await close_returned.wait()
+
+        # Returning from close is the ownership boundary: no native resource
+        # created by the losing acquire may still be alive at this point.
+        assert closed == created
 
     assert closed == created
     assert len(errors) == 1
     with pytest.raises(ProviderLifecycleError, match="closing or closed"):
         async with provider.lease():
             pass
+
+
+async def test_drain_timeout_retains_late_create_for_close_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(lease_module, "_DRAIN_TIMEOUT_SECONDS", 0.01)
+    create_entered = anyio.Event()
+    finish_create = anyio.Event()
+    acquire_finished = anyio.Event()
+    created: list[_Lease] = []
+    closed: list[_Lease] = []
+
+    async def create() -> _Lease:
+        create_entered.set()
+        await finish_create.wait()
+        lease = _Lease(1)
+        created.append(lease)
+        return lease
+
+    async def close(lease: _Lease) -> None:
+        lease.alive = False
+        closed.append(lease)
+
+    provider = _provider(create, close)
+
+    async def acquire() -> None:
+        try:
+            async with provider.lease():
+                pytest.fail("A lease created after close timeout must not be admitted")
+        except ProviderLifecycleError:
+            pass
+        finally:
+            acquire_finished.set()
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(acquire)
+        await create_entered.wait()
+
+        with pytest.raises(ProviderLifecycleError, match="did not drain"):
+            await provider.aclose()
+
+        finish_create.set()
+        await acquire_finished.wait()
+        assert created and closed == []
+
+        await provider.aclose()
+        assert closed == created
 
 
 async def test_prepared_executor_holds_lease_until_rasterize_finishes() -> None:
@@ -450,7 +514,7 @@ async def test_prepared_executor_holds_lease_until_rasterize_finishes() -> None:
     async def execute() -> None:
         results.append(
             await executor.execute(
-                prepare_html("<p>test</p>"),
+                parse_html("<p>test</p>"),
                 RasterOptions(width=64, height=32),
             )
         )
@@ -467,7 +531,7 @@ async def test_prepared_executor_holds_lease_until_rasterize_finishes() -> None:
     assert len(closed) == 1
     with pytest.raises(ProviderLifecycleError, match="closing or closed"):
         await executor.execute(
-            prepare_html("<p>closed</p>"),
+            parse_html("<p>closed</p>"),
             RasterOptions(width=64, height=32),
         )
 
@@ -500,7 +564,7 @@ async def test_prepared_executor_timeout_includes_lazy_lease_startup() -> None:
 
     with pytest.raises(ProviderExecutionError, match="timed out"):
         await executor.execute(
-            prepare_html("<p>test</p>"),
+            parse_html("<p>test</p>"),
             RasterOptions(width=64, height=32),
             timeout_seconds=0.01,
         )

@@ -7,10 +7,10 @@ from typing_extensions import TypeAlias
 from PIL import Image
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.pillow import PillowRasterSceneRenderer
-from nonebot_plugin_htmlrender.adapters.resources import AnyioWorkerExecutor
-from nonebot_plugin_htmlrender.adapters.skia import SkiaRasterSceneRenderer
-from nonebot_plugin_htmlrender.graphics import (
+from entari_plugin_htmlrender.adapters.pillow import PillowRasterSceneRenderer
+from entari_plugin_htmlrender.adapters.resources import AnyioWorkerExecutor
+from entari_plugin_htmlrender.adapters.skia import SkiaRasterSceneRenderer
+from entari_plugin_htmlrender.graphics import (
     FillRect,
     PixelRect,
     RasterEncodeOptions,
@@ -18,26 +18,26 @@ from nonebot_plugin_htmlrender.graphics import (
     RenderRasterSceneRequest,
     RGBAColor,
 )
-from nonebot_plugin_htmlrender.graphics.execution import RasterWorkBudget
-from nonebot_plugin_htmlrender.rendering import OperationAdmissionGate
-from nonebot_plugin_htmlrender.rendering.observers import NoopOperationObserver
+from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
+from entari_plugin_htmlrender.rendering import OperationAdmissionGate
+from entari_plugin_htmlrender.rendering.observers import NoopOperationObserver
 
 if TYPE_CHECKING:
-    from nonebot_plugin_htmlrender.rendering import RenderedImage
-    from nonebot_plugin_htmlrender.rendering.ports import OperationObserver
+    from entari_plugin_htmlrender.rendering import RenderedImage
+    from entari_plugin_htmlrender.rendering.ports import OperationObserver
     from tests.adapters.conftest import RecordingOperationObserver
 
 RendererType: TypeAlias = (
     type[PillowRasterSceneRenderer] | type[SkiaRasterSceneRenderer]
 )
-Renderer: TypeAlias = PillowRasterSceneRenderer | SkiaRasterSceneRenderer
+RasterRenderer: TypeAlias = PillowRasterSceneRenderer | SkiaRasterSceneRenderer
 
 
 def _renderer(
     renderer_type: RendererType,
     *,
     observer: OperationObserver | None = None,
-) -> Renderer:
+) -> RasterRenderer:
     return renderer_type(
         worker=AnyioWorkerExecutor(),
         observer=observer if observer is not None else NoopOperationObserver(),

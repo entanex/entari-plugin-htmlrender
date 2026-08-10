@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from nonebot_plugin_htmlrender.preparation import PreparedAsset
-from nonebot_plugin_htmlrender.preparation.assets import (
+from entari_plugin_htmlrender.preparation import PreparedAsset
+from entari_plugin_htmlrender.preparation.assets import (
     PreparedAssetIndex,
     resolve_document_reference,
 )

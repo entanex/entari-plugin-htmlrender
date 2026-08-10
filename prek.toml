@@ -1,0 +1,196 @@
+# Configuration file for `prek`, a git hook framework written in Rust.
+# See https://prek.j178.dev for more information.
+#:schema https://www.schemastore.org/prek.json
+
+fail_fast = false
+minimum_prek_version = "0.3.9"
+exclude = '''
+(?x)^(
+  src/entari_plugin_htmlrender/templates/.*
+  | docs/assets/javascripts/mermaid-.*\.min\.js
+)$
+'''
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  {
+    id = "check-merge-conflict",
+    priority = 0
+  },
+  {
+    id = "end-of-file-fixer",
+    exclude = """
+(?x)^(
+  src/entari_plugin_htmlrender/templates/.*
+  | docs/assets/.*
+)$
+""",
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/abravalheri/validate-pyproject"
+rev = "v0.25"
+hooks = [
+  {
+    id = "validate-pyproject",
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.45.1"
+hooks = [
+  {
+    id = "typos",
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/rbubley/mirrors-prettier"
+rev = "v3.8.3"
+hooks = [
+  {
+    id = "prettier",
+    types = ["yaml"],
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/zizmorcore/zizmor-pre-commit"
+rev = "v1.24.1"
+hooks = [
+  {
+    id = "zizmor",
+    args = ["--pedantic"],
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/python-jsonschema/check-jsonschema"
+rev = "0.37.1"
+hooks = [
+  {
+    id = "check-github-workflows",
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/shellcheck-py/shellcheck-py"
+rev = "v0.11.0.1"
+hooks = [
+  {
+    id = "shellcheck",
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.15.11"
+hooks = [
+  {
+    id = "ruff-format",
+    priority = 0
+  },
+  {
+    id = "ruff-check",
+    args = [
+      "--fix",
+      "--exit-non-zero-on-fix"
+    ],
+    types_or = [
+      "python",
+      "pyi"
+    ],
+    require_serial = true,
+    priority = 1
+  }
+]
+
+[[repos]]
+repo = "https://github.com/igorshubovych/markdownlint-cli"
+rev = "v0.48.0"
+hooks = [
+  {
+    id = "markdownlint-fix",
+    exclude = '''
+(?x)^(
+  docs/formatter/black\.md
+  | docs/\w+\.md
+)$
+''',
+    priority = 1
+  }
+]
+
+[[repos]]
+repo = "https://github.com/compilerla/conventional-pre-commit"
+rev = "v4.2.0"
+hooks = [
+  {
+    id = "conventional-pre-commit",
+    stages = ["commit-msg"],
+    args = [
+      "feat",
+      "fix",
+      "docs",
+      "refactor",
+      "perf",
+      "test",
+      "build",
+      "ci",
+      "chore",
+      "revert"
+    ],
+    priority = 0
+  }
+]
+
+[[repos]]
+repo = "https://github.com/adamchainz/blacken-docs"
+rev = "1.20.0"
+hooks = [
+  {
+    id = "blacken-docs",
+    language = "python",
+    args = [
+      "--pyi",
+      "--line-length",
+      "130",
+      "--skip-errors"
+    ],
+    files = '^docs/.*\.md$',
+    exclude = '''
+(?x)^(
+  .*?invalid(_.+)*_syntax\.md
+)$
+''',
+    additional_dependencies = ["black==26.1.0"],
+    priority = 2
+  }
+]
+
+[[repos]]
+repo = "https://github.com/rhysd/actionlint"
+rev = "v1.7.12"
+hooks = [
+  {
+    id = "actionlint",
+    stages = ["manual"],
+    args = [
+      "-ignore=SC2129",
+      "-ignore=SC2016"
+    ],
+    language = "golang",
+    additional_dependencies = ["github.com/wasilibs/go-shellcheck/cmd/shellcheck@v0.11.1"],
+    priority = 0
+  }
+]

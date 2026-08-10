@@ -4,7 +4,7 @@ import anyio
 import anyio.lowlevel
 import pytest
 
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.rendering import (
     OperationAdmissionGate,
     ProviderLifecycleError,
 )

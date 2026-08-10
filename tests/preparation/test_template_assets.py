@@ -3,12 +3,12 @@ from __future__ import annotations
 from io import BytesIO
 from typing import TYPE_CHECKING
 
-from nonebot_plugin_htmlrender.resources.config import ResourceResolveMode
+from entari_plugin_htmlrender.resources.config import ResourceResolveMode
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nonebot_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
+    from entari_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
 
 
 async def test_template_variables_stage_paths_and_binary_assets(

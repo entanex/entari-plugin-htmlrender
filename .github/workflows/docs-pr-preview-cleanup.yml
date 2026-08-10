@@ -3,7 +3,7 @@ name: Docs PR Preview Cleanup
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] Closed-event cleanup checks out only the trusted base and passes only the numeric PR id to pinned actions.
     types: [closed]
-    branches: [master]
+    branches: [main]
 
 permissions: {}
 

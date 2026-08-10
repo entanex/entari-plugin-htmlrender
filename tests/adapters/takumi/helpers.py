@@ -1,11 +1,11 @@
-from nonebot_plugin_htmlrender.adapters.resources.reader import (
+from entari_plugin_htmlrender.adapters.resources.reader import (
     AnyioWorkerExecutor,
     CompositeResourceReader,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
 )
-from nonebot_plugin_htmlrender.resources.config import ResourceStrategy
-from nonebot_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.resources.service import ResourceService
 
 
 def resource_service(*, strategy: ResourceStrategy | None = None) -> ResourceService:

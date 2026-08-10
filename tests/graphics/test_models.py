@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender.errors import InvalidRenderRequest
-from nonebot_plugin_htmlrender.graphics import (
+from entari_plugin_htmlrender.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.graphics import (
     FillRect,
     PixelRect,
     RasterEncodeOptions,
@@ -13,7 +13,7 @@ from nonebot_plugin_htmlrender.graphics import (
     RenderRasterSceneRequest,
     RGBAColor,
 )
-from nonebot_plugin_htmlrender.graphics.errors import (
+from entari_plugin_htmlrender.graphics.errors import (
     RasterBackendExecutionError,
     RasterBackendUnavailable,
 )

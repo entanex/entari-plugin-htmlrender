@@ -9,16 +9,16 @@ icon: lucide/folder-git-2
 ## 仓库结构
 
 ```text
-nonebot_plugin_htmlrender/
-├─ api/                 # 顶层便捷函数与默认 Application
+entari_plugin_htmlrender/
+├─ api/                 # caller-first 顶层便捷函数
 ├─ capabilities/        # 稳定的第一方 Provider Capability 契约与 lookup key
-├─ application/         # Application、Renderer、use cases、bindings
+├─ runtime/             # RenderRuntime、HtmlRenderer、use cases、bindings
 ├─ rendering/           # request、artifact、error、Capability、ports
 ├─ preparation/         # 中立 PreparedHtml pipeline
 ├─ resources/           # 资源 contracts / service
+├─ graphics/            # RasterScene contracts
 ├─ providers/           # Provider SDK 与 discovery
 ├─ adapters/
-│  ├─ htmlkit/          # litehtml/Cairo Provider
 │  ├─ playwright/       # 浏览器 Provider
 │  ├─ takumi/           # native Provider
 │  ├─ pillow/           # RasterScene adapter
@@ -26,12 +26,12 @@ nonebot_plugin_htmlrender/
 │  ├─ resources/        # filesystem/package/remote/filehost adapters
 │  ├─ templates/        # Jinja adapter
 │  └─ observability/    # Sentry/Prometheus adapters
-└─ bootstrap/           # NoneBot composition root
+└─ host/                # Entari registration、configuration 与 composition root
 ```
 
-目录按依赖方向而非工具类型组织。核心 contracts 不导入 adapters/bootstrap；新的跨层例外必须先修正抽象，不增加 architecture allowlist。
+目录按依赖方向而非工具类型组织。核心 contracts 不导入 adapters/host；新的跨层例外必须先修正抽象，不增加 architecture allowlist。
 
-Playwright 的安装、signal 与 process helper 位于 `adapters/playwright/_support`；仓库不保留按“通用工具”命名的顶层 `utils` 兼容目录。枚举也由其领域模块拥有：资源策略在 `resources.config`，浏览器配置在 `adapters.playwright.config`，启动策略在`bootstrap.settings`。
+Playwright 的安装、signal 与 process helper 由 adapter 内部拥有；仓库不保留按“通用工具”命名的顶层 `utils` 兼容目录。枚举也由其领域模块拥有：资源策略在 `resources.config`，浏览器配置在 `adapters.playwright.config`，启动策略在 `host.config`。
 
 ## 工作流入口
 
@@ -61,7 +61,7 @@ Playwright 的安装、signal 与 process helper 位于 `adapters/playwright/_su
 
 ## 提交门禁 { #prek-gates }
 
-仓库使用 `prek` 执行 `.pre-commit-config.yaml`。首次准备环境时统一通过 Makefile安装工具与两类 Git hook：
+仓库使用 `prek` 执行原生 `prek.toml`。首次准备环境时统一通过 Makefile安装工具与两类 Git hook：
 
 ```bash
 make install-prek
@@ -95,7 +95,7 @@ prek run actionlint --all-files --hook-stage=manual
 
     Ruff、Prettier、Markdownlint、Blacken Docs 和文件结尾等 hook 可能直接修改文件。首次运行因此失败并不表示可以忽略：先检查 `git diff`，确认修复符合意图，再对同一范围重新运行，直到命令不再修改文件且退出成功。不要未经审阅就暂存 hook生成的改动。
 
-`.pre-commit-config.yaml` 是 hook、stage、执行优先级和排除规则的唯一事实来源。仓库模板与自托管的 vendored runtime 等受控产物可以被定向排除；排除只避免工具破坏生成物或第三方产物，不代表可以跳过其许可证、checksum、构建或契约测试。CI 的 `Prek` workflow 对所有变更执行默认全仓检查，并额外执行 manual `actionlint`；本地最终结果必须与这两步一致。
+`prek.toml` 是 hook、stage、执行优先级和排除规则的唯一事实来源。仓库模板与自托管的 vendored runtime 等受控产物可以被定向排除；排除只避免工具破坏生成物或第三方产物，不代表可以跳过其许可证、checksum、构建或契约测试。CI 的 `Prek` workflow 对所有变更执行默认全仓检查，并额外执行 manual `actionlint`；本地最终结果必须与这两步一致。
 
 提交前至少运行 `make check`；包含文档时运行 `make docs-build`；影响引擎运行时或资源 transport 时运行对应 smoke。
 

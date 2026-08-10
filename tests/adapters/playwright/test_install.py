@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 async def test_install_env_sets_mirror_proxy_without_mutating_parent(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
         MirrorSource,
         _install_env,
     )
@@ -49,10 +49,10 @@ async def test_install_env_sets_mirror_proxy_without_mutating_parent(
 async def test_install_env_preserves_existing_parent_proxy(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
         _install_env,
     )
 
@@ -68,8 +68,8 @@ async def test_install_env_preserves_existing_parent_proxy(
 async def test_check_mirror_connectivity_includes_custom_mirror(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright import install  # noqa: PLC0415
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright import install  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
 
@@ -94,16 +94,16 @@ async def test_check_mirror_connectivity_includes_custom_mirror(
 async def test_execute_playwright_install_forwards_env_and_command(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         BrowserEngine,
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
         execute_install_command,
     )
 
     execute_mock = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install._execute_install_command",
+        "entari_plugin_htmlrender.adapters.playwright.install._execute_install_command",
         new=mocker.AsyncMock(return_value=(True, "ok")),
     )
     config = PlaywrightConfig(engine=BrowserEngine.FIREFOX)
@@ -128,16 +128,16 @@ async def test_execute_playwright_install_forwards_env_and_command(
 async def test_install_browser_retries_with_official_env(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
         MirrorSource,
         install_browser,
     )
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install.check_mirror_connectivity",
+        "entari_plugin_htmlrender.adapters.playwright.install.check_mirror_connectivity",
         new=mocker.AsyncMock(
             return_value=MirrorSource("Best", "https://mirror.example", 0)
         ),
@@ -157,7 +157,7 @@ async def test_install_browser_retries_with_official_env(
         return next(responses)
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install.execute_install_command",
+        "entari_plugin_htmlrender.adapters.playwright.install.execute_install_command",
         new=mocker.AsyncMock(side_effect=fake_execute),
     )
 
@@ -171,19 +171,19 @@ async def test_install_browser_retries_with_official_env(
 async def test_install_browser_returns_false_after_two_failures(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
         install_browser,
     )
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install.check_mirror_connectivity",
+        "entari_plugin_htmlrender.adapters.playwright.install.check_mirror_connectivity",
         new=mocker.AsyncMock(return_value=None),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install.execute_install_command",
+        "entari_plugin_htmlrender.adapters.playwright.install.execute_install_command",
         new=mocker.AsyncMock(side_effect=[(False, "first"), (False, "second")]),
     )
 
@@ -194,20 +194,20 @@ async def test_install_browser_returns_false_after_two_failures(
 async def test_install_browser_raises_on_interrupt_without_retry(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
         install_browser,
     )
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install.check_mirror_connectivity",
+        "entari_plugin_htmlrender.adapters.playwright.install.check_mirror_connectivity",
         new=mocker.AsyncMock(return_value=None),
     )
     execute = mocker.AsyncMock(side_effect=[(False, "Interrupted by signal SIGINT")])
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install.execute_install_command",
+        "entari_plugin_htmlrender.adapters.playwright.install.execute_install_command",
         new=execute,
     )
 
@@ -230,7 +230,7 @@ async def test_install_browser_raises_on_interrupt_without_retry(
     ],
 )
 def test_redact_url_removes_sensitive_components(value: str, expected: str) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.install import (  # noqa: PLC0415
         _redact_url,
     )
 

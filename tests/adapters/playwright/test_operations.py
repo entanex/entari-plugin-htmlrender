@@ -7,20 +7,20 @@ from typing import TYPE_CHECKING, cast
 import anyio
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.resources.reader import (
+from entari_plugin_htmlrender.adapters.resources.reader import (
     AnyioWorkerExecutor,
     CompositeResourceReader,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
 )
-from nonebot_plugin_htmlrender.resources.config import (
+from entari_plugin_htmlrender.resources.config import (
     LocalLocalResourcePolicy,
     RemoteLocalResourcePolicy,
     ResourceResolveMode,
     ResourceStrategy,
 )
-from nonebot_plugin_htmlrender.resources.models import PublishedResource
-from nonebot_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.resources.models import PublishedResource
+from entari_plugin_htmlrender.resources.service import ResourceService
 
 
 def _published(url: str, headers: dict[str, str] | None = None) -> PublishedResource:
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from pytest_mock import MockerFixture
 
-    from nonebot_plugin_htmlrender.adapters.playwright.render import PlaywrightLease
+    from entari_plugin_htmlrender.adapters.playwright.render import PlaywrightLease
 
 
 @dataclass(slots=True)
@@ -78,7 +78,7 @@ def _write_font_stylesheet(root: Path) -> Path:
 
 
 def test_page_config_roundtrips_document_url() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         PageConfig,
         RenderConfig,
     )
@@ -100,15 +100,15 @@ def test_page_config_roundtrips_document_url() -> None:
 async def test_remote_http_navigation_is_resource_fallback(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright import (  # noqa: PLC0415
         operations,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         PageConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
     document_url = "https://render.example/cards/card.html"
     page = PageConfig(document_url=document_url)
@@ -118,7 +118,7 @@ async def test_remote_http_navigation_is_resource_fallback(
         new=mocker.AsyncMock(return_value=b"image"),
     )
     resources = _resources()
-    prepared = prepare_html('<img src="avatar.png">')
+    prepared = parse_html('<img src="avatar.png">')
 
     assert (
         await operations.render_prepared_html(
@@ -146,19 +146,19 @@ async def test_remote_prepared_render_routes_local_assets_without_file_navigatio
     mocker: MockerFixture,
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         PageConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
     (tmp_path / "avatar.png").write_bytes(b"avatar")
     base_url = f"{tmp_path.as_uri().rstrip('/')}/"
-    prepared = prepare_html('<img src="avatar.png">', base_url=base_url)
+    prepared = parse_html('<img src="avatar.png">', base_url=base_url)
     render = RenderConfig(page=PageConfig())
     page = mocker.AsyncMock()
     page.on = mocker.MagicMock()
@@ -167,11 +167,11 @@ async def test_remote_prepared_render_routes_local_assets_without_file_navigatio
     context_manager.__aenter__ = mocker.AsyncMock(return_value=page)
     context_manager.__aexit__ = mocker.AsyncMock(return_value=None)
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations.PageContext.open",
+        "entari_plugin_htmlrender.adapters.playwright.operations.PageContext.open",
         return_value=context_manager,
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations.log_page_telemetry",
+        "entari_plugin_htmlrender.adapters.playwright.operations.log_page_telemetry",
         new=mocker.AsyncMock(),
     )
 
@@ -197,22 +197,22 @@ async def test_remote_prepared_render_routes_local_assets_without_file_navigatio
 async def test_remote_passthrough_preserves_shared_file_navigation(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         PageConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="avatar.png">',
         base_url="file:///shared/card/",
     )
     execute = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"image"),
     )
 
@@ -249,22 +249,22 @@ async def test_direct_file_policies_canonicalize_relative_document_base(
     mocker: MockerFixture,
     mode: str,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         PageConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
-    prepared = prepare_html(
+    prepared = parse_html(
         '<head><base href="assets/"></head><img src="avatar.png">',
         base_url="file:///shared/cards/document.html",
     )
     execute = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"image"),
     )
     resources = _resources(
@@ -294,24 +294,24 @@ async def test_direct_file_policies_canonicalize_relative_document_base(
 async def test_remote_error_policy_rejects_local_resources_before_page_open(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
-    from nonebot_plugin_htmlrender.preparation.materialize import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation.materialize import (  # noqa: PLC0415
         AssetMaterializationError,
     )
 
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="avatar.png">',
         base_url="file:///private/card/",
     )
     execute = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"unexpected"),
     )
 
@@ -333,21 +333,21 @@ async def test_remote_error_policy_rejects_local_resources_before_page_open(
 async def test_remote_error_policy_accepts_http_fallback_with_relative_base(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         PageConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
-    prepared = prepare_html(
+    prepared = parse_html(
         '<base href="assets/"><img src="avatar.png">',
     )
     execute = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"image"),
     )
 
@@ -374,22 +374,22 @@ async def test_remote_filehost_policy_publishes_materialized_assets(
     mocker: MockerFixture,
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
     (tmp_path / "avatar.png").write_bytes(b"avatar")
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="avatar.png">',
         base_url=f"{tmp_path.as_uri().rstrip('/')}/",
     )
     execute = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"image"),
     )
     publisher = mocker.Mock()
@@ -432,21 +432,21 @@ async def test_remote_filehost_policy_publishes_materialized_assets(
 async def test_resolve_mode_off_bypasses_filehost_without_a_publisher(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="avatar.png">',
         base_url="file:///shared/card/",
     )
     execute = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"image"),
     )
 
@@ -474,21 +474,21 @@ async def test_resolve_mode_off_bypasses_filehost_without_a_publisher(
 async def test_per_call_off_does_not_touch_composed_filehost_publisher(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import prepare_html  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
 
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="avatar.png">',
         base_url="file:///shared/card/",
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"image"),
     )
     publisher = mocker.Mock()
@@ -511,19 +511,19 @@ async def test_per_call_off_does_not_touch_composed_filehost_publisher(
 async def test_filehost_render_releases_owned_lease_under_cancellation(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright import (  # noqa: PLC0415
         operations,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.preparation import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import (  # noqa: PLC0415
         PreparedAsset,
-        prepare_html,
+        parse_html,
     )
 
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="memory:avatar">',
         assets=(PreparedAsset("memory:avatar", b"avatar", "image/png"),),
     )
@@ -573,12 +573,12 @@ async def test_filehost_render_releases_owned_lease_under_cancellation(
 async def test_filehost_asset_graph_preserves_css_and_font_suffixes(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         _publish_prepared_assets,
     )
-    from nonebot_plugin_htmlrender.preparation import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import (  # noqa: PLC0415
         PreparedAsset,
-        prepare_html,
+        parse_html,
     )
 
     font = PreparedAsset(
@@ -591,7 +591,7 @@ async def test_filehost_asset_graph_preserves_css_and_font_suffixes(
         b'@font-face { src: url("font.woff2") }',
         "text/css",
     )
-    prepared = prepare_html(
+    prepared = parse_html(
         '<link rel="stylesheet" href="site.css">',
         base_url="file:///card/document.html",
         assets=(stylesheet, font),
@@ -637,20 +637,20 @@ async def test_local_file_policy_keeps_stylesheet_io_in_browser(
     mocker: MockerFixture,
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         ContentConfig,
         RenderConfig,
     )
-    from nonebot_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
         render_prepared_html,
     )
-    from nonebot_plugin_htmlrender.preparation import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import (  # noqa: PLC0415
         PreparedStylesheet,
-        prepare_html,
+        parse_html,
     )
 
     stylesheet = _write_font_stylesheet(tmp_path)
-    prepared = prepare_html(
+    prepared = parse_html(
         "<p>ok</p>",
         stylesheets=(
             PreparedStylesheet(
@@ -660,11 +660,11 @@ async def test_local_file_policy_keeps_stylesheet_io_in_browser(
         ),
     )
     execute = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
+        "entari_plugin_htmlrender.adapters.playwright.operations._execute_browser_load_plan",
         new=mocker.AsyncMock(return_value=b"image"),
     )
     materialize = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations.materialize_local_assets",
+        "entari_plugin_htmlrender.adapters.playwright.operations.materialize_local_assets",
         new=mocker.AsyncMock(),
     )
 
@@ -690,7 +690,7 @@ async def test_local_file_policy_keeps_stylesheet_io_in_browser(
 async def test_install_filehost_request_route_injects_only_on_exact_published_url(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
         install_filehost_request_route as _install_filehost_request_route,
     )
 
@@ -749,16 +749,16 @@ async def test_page_context_uses_injected_lease(
 ) -> None:
     from playwright.async_api import Browser  # noqa: PLC0415
 
-    from nonebot_plugin_htmlrender.adapters.playwright import _page  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright import _page  # noqa: PLC0415
 
     page = mocker.AsyncMock()
     browser = mocker.AsyncMock(spec=Browser)
     browser.new_page.return_value = page
     instrument = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._page.instrument_page"
+        "entari_plugin_htmlrender.adapters.playwright._page.instrument_page"
     )
     detach = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._page.detach_page"
+        "entari_plugin_htmlrender.adapters.playwright._page.detach_page"
     )
     lease = _lease("local_pw", browser=browser)
     async with _page.PageContext(lease).open(
@@ -775,7 +775,7 @@ async def test_page_context_detaches_telemetry_on_error_and_cancellation(
 ) -> None:
     from playwright.async_api import Browser  # noqa: PLC0415
 
-    from nonebot_plugin_htmlrender.adapters.playwright import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright import (  # noqa: PLC0415
         _page,
         telemetry,
     )
@@ -822,7 +822,7 @@ async def test_page_context_detaches_telemetry_on_error_and_cancellation(
 
 
 def test_normalize_request_url_drops_default_port_and_fragment() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
         _normalize_request_url,
     )
 
@@ -840,7 +840,7 @@ def test_normalize_request_url_drops_default_port_and_fragment() -> None:
 async def test_install_filehost_request_route_no_authorization_is_noop(
     mocker: MockerFixture,
 ) -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
         install_filehost_request_route,
     )
 

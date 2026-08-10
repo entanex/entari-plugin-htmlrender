@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender.preparation import (
+from entari_plugin_htmlrender.preparation import (
     PreparedAsset,
     RasterOptions,
     RenderRequirement,
-    prepare_html,
+    parse_html,
 )
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.rendering import (
     InvalidRenderRequest,
     PreparationError,
     ResourceResolutionError,
@@ -23,12 +23,12 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any, Literal
 
-    from nonebot_plugin_htmlrender.preparation.models import PreparedHtml
-    from nonebot_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
+    from entari_plugin_htmlrender.preparation.models import PreparedHtml
+    from entari_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
 
 
-def test_prepare_html_preserves_document_and_extracts_css() -> None:
-    prepared = prepare_html(
+def test_parse_html_preserves_document_and_extracts_css() -> None:
+    prepared = parse_html(
         "<style>.card { color: red }</style><main class='card'>ok</main>",
         stylesheets=[".logo { background: url(https://cdn.example/logo.png) }"],
         assets=[PreparedAsset("memory://icon", b"icon", "image/png")],
@@ -38,15 +38,15 @@ def test_prepare_html_preserves_document_and_extracts_css() -> None:
     assert RenderRequirement.NETWORK in prepared.requirements
 
 
-def test_prepare_html_detects_script_and_local_resources() -> None:
-    prepared = prepare_html('<script>run()</script><img src="./avatar.png">')
+def test_parse_html_detects_script_and_local_resources() -> None:
+    prepared = parse_html('<script>run()</script><img src="./avatar.png">')
     assert prepared.requirements == frozenset(
         {RenderRequirement.JAVASCRIPT, RenderRequirement.LOCAL_RESOURCE}
     )
 
 
-def test_prepare_html_captures_declared_base_href_semantics() -> None:
-    prepared = prepare_html(
+def test_parse_html_captures_declared_base_href_semantics() -> None:
+    prepared = parse_html(
         '<base href="assets/"><img src="a.png">',
         base_url="https://cdn.example/cards/card.html",
     )
@@ -59,7 +59,7 @@ def test_prepare_html_captures_declared_base_href_semantics() -> None:
 def test_document_base_relative_href_resolves_against_execution_fallback() -> None:
     # No preparation base URL, but a relative <base href> and an
     # execution-time fallback document URL: resolve() combines them.
-    prepared = prepare_html('<base href="assets/"><img src="a.png">')
+    prepared = parse_html('<base href="assets/"><img src="a.png">')
     assert prepared.document_base.preparation_base_url is None
     resolved = prepared.document_base.resolve(
         fallback_base_url="https://render.example/cards/card.html"
@@ -71,14 +71,14 @@ def test_first_base_with_href_attribute_wins_even_when_empty() -> None:
     # An explicit empty href="" is a declared base distinct from an
     # undeclared one; it resolves to the document URL and a later <base>
     # must not override it.
-    prepared = prepare_html(
+    prepared = parse_html(
         '<base href=""><base href="late/"><img src="a.png">',
         base_url="https://example.test/cards/card.html",
     )
     assert prepared.document_base.declared_href == ""
     assert prepared.document_base.resolve() == "https://example.test/cards/card.html"
 
-    undeclared = prepare_html(
+    undeclared = parse_html(
         '<img src="a.png">',
         base_url="https://example.test/cards/card.html",
     )
@@ -88,7 +88,7 @@ def test_first_base_with_href_attribute_wins_even_when_empty() -> None:
 def test_structure_snapshot_survives_dataclasses_replace() -> None:
     # Execution-time asset staging uses dataclasses.replace and must keep the
     # preparation-time parse results without re-parsing the markup.
-    prepared = prepare_html(
+    prepared = parse_html(
         '<base href="assets/"><img src="a.png">',
         base_url="https://cdn.example/cards/card.html",
     )
@@ -106,12 +106,12 @@ def test_structure_snapshot_survives_dataclasses_replace() -> None:
         ("<p>plain</p>", "http://["),
     ],
 )
-def test_prepare_html_translates_invalid_resource_urls(
+def test_parse_html_translates_invalid_resource_urls(
     html: str,
     base_url: str | None,
 ) -> None:
     with pytest.raises(PreparationError, match="Invalid HTML preparation input"):
-        prepare_html(html, base_url=base_url)
+        parse_html(html, base_url=base_url)
 
 
 @pytest.mark.parametrize("ratio", [0.0, -1.0, math.nan, math.inf, -math.inf])
@@ -164,23 +164,23 @@ async def test_cpu_bound_preparation_runs_outside_the_event_loop(
     preparer: DefaultHtmlPreparer,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nonebot_plugin_htmlrender.preparation import service  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation import service  # noqa: PLC0415
 
     event_loop_thread = threading.get_ident()
     parser_threads: list[int] = []
     markdown_threads: list[int] = []
-    original_prepare_html = service.prepare_html
+    original_parse_html = service.parse_html
     original_markdown = service.markdown.markdown
 
-    def recording_prepare_html(*args: Any, **kwargs: Any) -> PreparedHtml:
+    def recording_parse_html(*args: Any, **kwargs: Any) -> PreparedHtml:
         parser_threads.append(threading.get_ident())
-        return original_prepare_html(*args, **kwargs)
+        return original_parse_html(*args, **kwargs)
 
     def recording_markdown(*args: Any, **kwargs: Any) -> str:
         markdown_threads.append(threading.get_ident())
         return original_markdown(*args, **kwargs)
 
-    monkeypatch.setattr(service, "prepare_html", recording_prepare_html)
+    monkeypatch.setattr(service, "parse_html", recording_parse_html)
     monkeypatch.setattr(service.markdown, "markdown", recording_markdown)
 
     await preparer.prepare_html("<p>hello</p>")

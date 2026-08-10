@@ -10,7 +10,7 @@ tags:
 
 # 贡献指南
 
-本文参考 [angular/angular](https://github.com/angular/angular) 的协作思路，并结合 Python、NoneBot 与多渲染后端技术栈做了裁剪。具体合并门禁见 [Pull Request 生命周期](pull-requests.md)，实现层约束见 [编码规范](coding-standards.md)。
+本文参考 [angular/angular](https://github.com/angular/angular) 的协作思路，并结合 Python、Entari 与多渲染后端技术栈做了裁剪。具体合并门禁见 [Pull Request 生命周期](pull-requests.md)，实现层约束见 [编码规范](coding-standards.md)。
 
 ## 你可以贡献什么
 
@@ -20,7 +20,7 @@ tags:
 
 ## 开始之前
 
-1. Fork 仓库并从最新 `master` 创建短生命周期分支。
+1. Fork 仓库并从最新 `main` 创建短生命周期分支。
 2. 安装依赖并准备本地环境。
 3. 如果变更涉及真实浏览器路径，先安装 Playwright Chromium。
 
@@ -60,7 +60,7 @@ prek run actionlint --all-files --hook-stage=manual  # workflow 变更
 
 Prek hook 可能自动修改文件；必须检查 diff 并重跑到无新增修改且成功退出。增量开发可以使用 `prek run --files <path>...`，但不能代替 PR 前的 `--all-files`。stage、自动修复与排除规则见[工程协作流程](engineering-workflow.md#prek-gates)。
 
-CI 会在 Python 3.10–3.14 上运行 pytest/coverage 与 [`noneload`](https://github.com/BalconyJH/noneload) 插件加载矩阵。本地单一版本通过不能替代矩阵结果。
+CI 会在 Python 3.10–3.14 上运行 pytest/coverage 与 Entari 隔离加载矩阵。本地单一版本通过不能替代矩阵结果。
 
 ## Pull Request 要求
 
@@ -78,10 +78,10 @@ PR 描述必须包含：
 - 对建议项（nit）和阻塞项（must fix）请明确区分。
 - 如评审意见影响公共行为，请在 PR 里补充说明与测试。
 - 实质性更新后重新请求 review，并等待更新后的 checks。
-- 合并前更新到最新 `master`，默认使用 squash merge，合并后删除功能分支。
+- 合并前更新到最新 `main`，默认使用 squash merge，合并后删除功能分支。
 
 !!! warning "流程约定尚未由 Ruleset 完整强制"
-    当前仓库审计未发现 `master` 已启用 branch protection / Ruleset。维护者必须人工确认 review 和适用 checks 全部满足，不得把 GitHub 允许点击合并视为门禁已通过。可导入配置和启用顺序见[仓库治理与保护](governance.md)。
+    当前仓库审计未发现 `main` 已启用 branch protection / Ruleset。维护者必须人工确认 review 和适用 checks 全部满足，不得把 GitHub 允许点击合并视为门禁已通过。可导入配置和启用顺序见[仓库治理与保护](governance.md)。
 
 ## 文档预览与包预览
 
@@ -91,4 +91,4 @@ PR 描述必须包含：
 
 ## 行为准则
 
-参与协作时默认遵守 [Code of Conduct](https://github.com/kexue-z/nonebot-plugin-htmlrender/blob/master/CODE_OF_CONDUCT.md)。
+参与协作时默认遵守 [Code of Conduct](https://github.com/kexue-z/entari-plugin-htmlrender/blob/main/CODE_OF_CONDUCT.md)。

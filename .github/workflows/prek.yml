@@ -3,7 +3,7 @@ name: Prek
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  # Keep every trusted master SHA alive: Auto Tag joins the exact push runs.
+  # Keep every trusted main SHA alive: Auto Tag joins the exact push runs.
   # Pull request updates still replace stale checks for the same PR ref.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

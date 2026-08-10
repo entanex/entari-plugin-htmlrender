@@ -5,15 +5,15 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.takumi.operations import (
+from entari_plugin_htmlrender.adapters.takumi.operations import (
     rasterize_html,
     render_prepared_html,
 )
-from nonebot_plugin_htmlrender.preparation import RasterOptions, prepare_html
+from entari_plugin_htmlrender.preparation import RasterOptions, parse_html
 
 if TYPE_CHECKING:
-    from nonebot_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
-    from nonebot_plugin_htmlrender.resources.service import ResourceService
+    from entari_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
+    from entari_plugin_htmlrender.resources.service import ResourceService
 
 from tests.adapters.takumi.helpers import resource_service
 
@@ -50,7 +50,7 @@ def _runtime_state(state: _FakeState) -> TakumiRuntimeState:
 @pytest.mark.anyio
 async def test_rasterize_html_maps_logical_dimensions_and_keeps_auto_height() -> None:
     state = _FakeState()
-    prepared = prepare_html("<style>div { color:red }</style><div>ok</div>")
+    prepared = parse_html("<style>div { color:red }</style><div>ok</div>")
 
     result = await rasterize_html(
         _runtime_state(state),
@@ -79,7 +79,7 @@ async def test_invalid_dimensions_and_device_ratios_are_rejected(
     with pytest.raises(ValueError):
         await render_prepared_html(
             _runtime_state(_FakeState()),
-            prepare_html("<div>ok</div>"),
+            parse_html("<div>ok</div>"),
             width=width,
             device_pixel_ratio=ratio,
         )
@@ -91,7 +91,7 @@ async def test_render_prepared_html_forwards_explicit_native_options() -> None:
 
     await render_prepared_html(
         _runtime_state(state),
-        prepare_html("<div>ok</div>"),
+        parse_html("<div>ok</div>"),
         width=30,
         height=20,
         image_format="webp",

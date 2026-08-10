@@ -1,39 +1,36 @@
 ---
 title: 启动与生命周期
-description: Provider 选择、启动策略、持久化目录与配置加载
-icon: lucide/sliders-horizontal
+description: Entari add_service、Launart stages、热卸载与关闭语义
 ---
 
 # 启动与生命周期
 
-| 路径 | 默认值 | 说明 |
-| --- | --- | --- |
-| `render.provider` | `null` | `htmlkit`、`playwright`、`takumi` 或第三方 Provider ID |
-| `render.startup` | `off` | `off`、`warmup`、`probe` |
-| `render.provider_config` | `{}` | 交给所选 Provider 的严格配置对象 |
-
-`off` 只延迟运行时创建，不改变 API；第一次依赖 Provider runtime 的 Renderer 或Playwright/Takumi Capability 操作会按需启动。`warmup` 在 NoneBot startup 创建运行时，`probe` 还执行最小真实探测。
-
-不选择 Provider 时，插件仍可运行 Preparation 与 `render_template_html`；需要位图执行器的调用得到 `CapabilityUnavailable`。Pillow/Skia `RasterScene` Capability不依赖 `render.provider`，由[`render.graphics`](../graphics/) 单独启用。
-
-## 持久化目录
-
-Playwright 未显式设置 `render.provider_config.storage_path` 时，会在插件数据目录保存浏览器文件和运行时快照。部署时应确保目录可写；需要独立卷或固定路径时显式设置`storage_path`。
-
-## 配置形式
-
 ```yaml
-render:
-  provider: playwright
-  startup: probe
-  resources:
-    local_access:
-      allowed_paths:
-        - /app/assets
+plugins:
+  htmlrender:
+    provider: playwright
+    startup: probe
 ```
 
-```dotenv
-RENDER={"provider":"playwright","startup":"probe","resources":{"local_access":{"allowed_paths":["/app/assets"]}}}
-```
+| 直接配置键 | 默认值 | 语义 |
+| --- | --- | --- |
+| `provider` | `null` | `playwright`、`takumi` 或第三方 Provider ID |
+| `startup` | `off` | `off`、`warmup`、`probe` |
+| `provider_config` | `{}` | 只交给选定 Provider 解析的设置 |
 
-资源限制见[资源、缓存与访问策略](resources.md)，从 0.7 升级时不要混用旧键，详见 [v0.8 迁移指南](../../guides/migration/v0.8.md)。
+`RenderStartupMode` 是 `startup` 字段对应的公开 enum。
+
+插件入口读取 `RenderSettings`，完成一次 composition，然后通过 Entari
+`add_service` 注册 `HtmlRenderService`。普通 Python import 不注册服务，也不启动adapter。
+
+## Launart stages
+
+| Stage | 行为 |
+| --- | --- |
+| `preparing` | 先启动显式 aiohttp filehost；若选择 Provider 且 startup 非 `off`，调用 runtime startup；`probe` 再执行最小探测 |
+| `blocking` | 等待 Launart 退出信号，不建立第二套生命周期 |
+| `cleanup` | 停止接收新操作、drain 在途操作、关闭 runtime，再关闭 filehost；多个失败会聚合 |
+
+Entari sideload remove/插件热卸载同样进入 cleanup。`HtmlRenderService.aclose()` 成功后幂等；关闭失败保持可重试。startup 失败会立即尝试回滚，且同时保留启动与清理错误。
+
+handler 应由 DI 注入 `HtmlRenderService`，调用时传 `runtime=service`。不要在 handler中 startup、重建或替换 service 持有的 runtime。

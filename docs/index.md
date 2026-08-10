@@ -1,6 +1,6 @@
 ---
-title: nonebot-plugin-htmlrender
-description: 面向 NoneBot 的可插拔图片渲染基础设施
+title: entari-plugin-htmlrender
+description: 面向 Entari 的可插拔图片渲染基础设施
 icon: lucide/image
 hide:
   - navigation
@@ -46,7 +46,7 @@ hide:
     <div class="htmlrender-hero__content">
       <p class="htmlrender-eyebrow">
         <span></span>
-        NoneBot rendering infrastructure
+        Entari rendering infrastructure
       </p>
       <h1 id="htmlrender-hero-title">
         把内容渲染成<strong>图片。</strong>
@@ -86,22 +86,22 @@ hide:
         </span>
       </div>
       <div class="htmlrender-preview__canvas">
-        <div class="htmlrender-nonebot__nav">
-          <span class="htmlrender-nonebot__brand">
+        <div class="htmlrender-entari__nav">
+          <span class="htmlrender-entari__brand">
             <i></i>
             <b></b>
           </span>
-          <span class="htmlrender-nonebot__links">
+          <span class="htmlrender-entari__links">
             <i></i><i></i><i></i>
           </span>
         </div>
-        <div class="htmlrender-nonebot__hero">
-          <span class="htmlrender-nonebot__ring"></span>
-          <div class="htmlrender-nonebot__wordmark">
+        <div class="htmlrender-entari__hero">
+          <span class="htmlrender-entari__ring"></span>
+          <div class="htmlrender-entari__wordmark">
             <i></i><i></i>
           </div>
-          <span class="htmlrender-nonebot__tagline"></span>
-          <div class="htmlrender-nonebot__actions">
+          <span class="htmlrender-entari__tagline"></span>
+          <div class="htmlrender-entari__actions">
             <span><i></i></span>
             <code><i></i><i></i><i></i></code>
           </div>

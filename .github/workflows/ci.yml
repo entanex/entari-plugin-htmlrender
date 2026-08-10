@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
   workflow_dispatch:
     inputs:
@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  # Keep every trusted master SHA alive: Auto Tag joins the exact push runs.
+  # Keep every trusted main SHA alive: Auto Tag joins the exact push runs.
   # Pull request updates still replace stale checks for the same PR ref.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -43,7 +43,7 @@ jobs:
       - name: Show Runner Context
         run: |
           echo "Runner: $RUNNER_NAME ($RUNNER_OS/$RUNNER_ARCH)"
-          python --version
+          python3 --version
           uv --version
 
       - name: Sync deps
@@ -301,19 +301,32 @@ jobs:
         if: always()
         run: docker compose -f tests/infra/docker-compose.remote-test.yaml down -v
 
-  noneload:
-    name: NoneBot Plugin Load
-    uses: BalconyJH/noneload/.github/workflows/load-check.yml@7af465a7f2d2fa2f7c227dc1fd9c065eed674109 # v1.0.1
-    with:
-      python-versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
-      module-name: nonebot_plugin_htmlrender
-      project-link: nonebot-plugin-htmlrender
-      package: "."
-      uv-version: "0.11.28"
-      load-dependencies: true
-      check-optional-dependencies: false
-      fail-on-error: true
-      summary: true
+  entari-load:
+    name: Entari Load (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: ${{ matrix.python-version }}
+          version: "0.11.28"
+          enable-cache: true
+          cache-suffix: entari-load-${{ matrix.python-version }}-${{ github.event_name }}
+
+      - name: Sync test environment
+        run: uv sync --locked --group test
+
+      - name: Verify library and Entari loading
+        run: uv run pytest tests/host/test_registration.py -q --no-cov
 
   result:
     name: Required Checks
@@ -325,7 +338,7 @@ jobs:
       - package
       - package-wheel-smoke
       - remote-browser-render
-      - noneload
+      - entari-load
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -334,7 +347,7 @@ jobs:
         shell: bash
         env:
           BASEDPYRIGHT_RESULT: ${{ needs.basedpyright.result }}
-          NONELOAD_RESULT: ${{ needs.noneload.result }}
+          ENTARI_LOAD_RESULT: ${{ needs.entari-load.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
           PACKAGE_WHEEL_SMOKE_RESULT: ${{ needs.package-wheel-smoke.result }}
           REMOTE_BROWSER_RESULT: ${{ needs.remote-browser-render.result }}
@@ -349,7 +362,7 @@ jobs:
             "${PACKAGE_RESULT}" \
             "${PACKAGE_WHEEL_SMOKE_RESULT}" \
             "${REMOTE_BROWSER_RESULT}" \
-            "${NONELOAD_RESULT}"; do
+            "${ENTARI_LOAD_RESULT}"; do
             if [[ "${result}" != "success" ]]; then
               failed=true
             fi

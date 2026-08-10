@@ -9,29 +9,30 @@ from playwright.async_api import Error as PlaywrightError
 from pydantic import ValidationError
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.playwright import provider as provider_module
-from nonebot_plugin_htmlrender.adapters.playwright.config import PlaywrightConfig
-from nonebot_plugin_htmlrender.adapters.playwright.provider import (
+from entari_plugin_htmlrender.adapters.playwright import provider as provider_module
+from entari_plugin_htmlrender.adapters.playwright.config import PlaywrightConfig
+from entari_plugin_htmlrender.adapters.playwright.provider import (
     PROVIDER,
     PlaywrightProvider,
 )
-from nonebot_plugin_htmlrender.preparation import prepare_html
-from nonebot_plugin_htmlrender.preparation.materialize import (
+from entari_plugin_htmlrender.preparation import parse_html
+from entari_plugin_htmlrender.preparation.materialize import (
     AssetMaterializationError,
 )
-from nonebot_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
-from nonebot_plugin_htmlrender.providers.sdk import (
+from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
+from entari_plugin_htmlrender.providers.sdk import (
     ProviderAvailability,
     ProviderDependencies,
 )
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.rendering import (
+    OperationAdmissionGate,
     ProviderExecutionError,
     RenderedImage,
     ResourcePolicy,
     ResourceResolutionError,
 )
-from nonebot_plugin_htmlrender.rendering.observers import NoopCacheObserver
-from nonebot_plugin_htmlrender.resources.config import (
+from entari_plugin_htmlrender.rendering.observers import NoopCacheObserver
+from entari_plugin_htmlrender.resources.config import (
     ResourceResolveMode,
     ResourceStrategy,
 )
@@ -40,17 +41,18 @@ from tests.image_fixtures import encoded_image, rendered_image
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
-    from nonebot_plugin_htmlrender.adapters.playwright.render import PlaywrightLease
-    from nonebot_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.adapters.playwright.render import PlaywrightLease
+    from entari_plugin_htmlrender.resources.ports import ProviderResources
     from tests.adapters.conftest import RecordingOperationObserver
 
-PREPARED = prepare_html("<p>prepared</p>")
+PREPARED = parse_html("<p>prepared</p>")
 
 
 def _dependencies(observer: RecordingOperationObserver) -> ProviderDependencies:
     resources = SimpleNamespace(strategy=ResourceStrategy())
     return ProviderDependencies(
         operation_observer=observer,
+        operation_admission=OperationAdmissionGate(),
         cache_observer=NoopCacheObserver(),
         resources=cast("ProviderResources", resources),
         asset_publisher=None,
@@ -74,7 +76,7 @@ def test_availability_uses_parsed_settings(mocker: MockerFixture) -> None:
         return ProviderAvailability(available=False, reason="nope")
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.availability.playwright_availability",
+        "entari_plugin_htmlrender.adapters.playwright.availability.playwright_availability",
         fake_available,
     )
     config = PlaywrightConfig()
@@ -90,7 +92,7 @@ def test_availability_reports_missing_playwright_extra(
     mocker: MockerFixture,
 ) -> None:
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.availability._playwright_is_installed",
+        "entari_plugin_htmlrender.adapters.playwright.availability._playwright_is_installed",
         return_value=False,
     )
 
@@ -98,18 +100,6 @@ def test_availability_reports_missing_playwright_extra(
 
     assert result.available is False
     assert "[playwright]" in (result.reason or "")
-
-
-def test_bootstrap_requirements_declare_no_external_plugins() -> None:
-    plain = PlaywrightConfig()
-    assert PROVIDER.bootstrap_requirements(plain) == ()
-
-    # The filehost transport is served by the htmlrender-owned hosted asset
-    # store, so even a filehost policy needs no external NoneBot plugin.
-    filehost = PlaywrightConfig.model_validate(
-        {"local_local_resource_policy": "filehost"}
-    )
-    assert PROVIDER.bootstrap_requirements(filehost) == ()
 
 
 def test_compose_uses_constructor_injected_settings(
@@ -153,7 +143,7 @@ async def test_standard_raster_uses_injected_operation_observer(
             assert value is lease
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.PlaywrightEngine",
+        "entari_plugin_htmlrender.adapters.playwright.render.PlaywrightEngine",
         FakeEngine,
     )
     rasterize = mocker.patch.object(
@@ -198,7 +188,7 @@ async def test_rasterize_maps_raster_options(mocker: MockerFixture) -> None:
         return encoded
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations.render_prepared_html",
+        "entari_plugin_htmlrender.adapters.playwright.operations.render_prepared_html",
         fake_render_prepared_html,
     )
 
@@ -246,7 +236,7 @@ async def test_rasterize_rejects_encoded_format_mismatch(
     mocker: MockerFixture,
 ) -> None:
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.operations.render_prepared_html",
+        "entari_plugin_htmlrender.adapters.playwright.operations.render_prepared_html",
         new=mocker.AsyncMock(return_value=encoded_image("png")),
     )
     lease = cast("PlaywrightLease", object())

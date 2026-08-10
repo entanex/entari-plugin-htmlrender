@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.observability import common, prometheus
+from entari_plugin_htmlrender.adapters.observability import common, prometheus
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
 
 def _reset_prometheus_state() -> None:
-    prometheus._plugin_loader._checked = False
-    prometheus._plugin_loader._loaded = None
+    prometheus._module_loader._checked = False
+    prometheus._module_loader._loaded = None
     prometheus._state.counter = None
     prometheus._state.histogram = None
     prometheus._state.filehost_upload_bytes = None
@@ -35,41 +35,31 @@ def _module(**attributes: object) -> types.ModuleType:
 
 
 def _seed_loaded_module(module: types.ModuleType) -> None:
-    prometheus._plugin_loader._checked = True
-    prometheus._plugin_loader._loaded = module
+    prometheus._module_loader._checked = True
+    prometheus._module_loader._loaded = module
 
 
-def test_prometheus_exporter_does_not_read_nonebot_global_config() -> None:
+def test_prometheus_exporter_does_not_read_host_global_config() -> None:
     assert not hasattr(prometheus, "get_config_value")
 
 
-def test_optional_plugin_loader_guard_paths(mocker: MockerFixture) -> None:
-    loader = common.OptionalPluginLoader(plugin="fake_plugin", module="fake_module")
+def test_optional_module_loader_returns_none_when_module_is_absent(
+    mocker: MockerFixture,
+) -> None:
+    loader = common.OptionalModuleLoader("fake_module")
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
+        "entari_plugin_htmlrender.adapters.observability.common.find_spec",
         return_value=None,
     )
     assert loader.load(reason="test") is None
 
-    loader = common.OptionalPluginLoader(plugin="fake_plugin", module="fake_module")
-    mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
-        return_value=object(),
-    )
-    mocker.patch("nonebot_plugin_htmlrender.adapters.observability.common.require")
-    sys_modules = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.sys.modules"
-    )
-    sys_modules.get.return_value = None
-    assert loader.load(reason="test") is None
 
-
-def test_optional_plugin_loader_isolates_discovery_failure(
+def test_optional_module_loader_isolates_discovery_failure(
     mocker: MockerFixture,
 ) -> None:
-    loader = common.OptionalPluginLoader(plugin="fake_plugin", module="fake_module")
+    loader = common.OptionalModuleLoader("fake_module")
     find_spec = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
+        "entari_plugin_htmlrender.adapters.observability.common.find_spec",
         side_effect=RuntimeError("discovery failed"),
     )
 
@@ -79,45 +69,42 @@ def test_optional_plugin_loader_isolates_discovery_failure(
     find_spec.assert_called_once()
 
 
-def test_optional_plugin_loader_isolates_require_failure(
+def test_optional_module_loader_isolates_import_failure(
     mocker: MockerFixture,
 ) -> None:
-    loader = common.OptionalPluginLoader(plugin="fake_plugin", module="fake_module")
+    loader = common.OptionalModuleLoader("fake_module")
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
+        "entari_plugin_htmlrender.adapters.observability.common.find_spec",
         return_value=object(),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.require",
+        "entari_plugin_htmlrender.adapters.observability.common.import_module",
         side_effect=RuntimeError("missing"),
     )
 
     assert loader.load(reason="test") is None
 
 
-def test_optional_plugin_loader_success_and_cache(mocker: MockerFixture) -> None:
-    loader = common.OptionalPluginLoader(plugin="fake_plugin", module="fake_module")
+def test_optional_module_loader_success_and_cache(mocker: MockerFixture) -> None:
+    loader = common.OptionalModuleLoader("fake_module")
     fake_module = types.ModuleType("fake_module")
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
+        "entari_plugin_htmlrender.adapters.observability.common.find_spec",
         return_value=object(),
     )
-    require = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.require"
+    import_module = mocker.patch(
+        "entari_plugin_htmlrender.adapters.observability.common.import_module",
+        return_value=fake_module,
     )
-    sys_modules = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.sys.modules"
-    )
-    sys_modules.get.return_value = fake_module
 
     assert loader.load(reason="first") is fake_module
     assert loader.load(reason="second") is fake_module
-    require.assert_called_once_with("fake_plugin")
+    import_module.assert_called_once_with("fake_module")
 
 
 def test_load_prometheus_returns_none_without_plugin(mocker: MockerFixture) -> None:
     _reset_prometheus_state()
-    mocker.patch.object(prometheus._plugin_loader, "load", return_value=None)
+    mocker.patch.object(prometheus._module_loader, "load", return_value=None)
     assert prometheus.load_prometheus() is None
 
 
@@ -141,7 +128,7 @@ def test_load_prometheus_success_and_cache(mocker: MockerFixture) -> None:
 
 def test_load_prometheus_init_exception_returns_none(mocker: MockerFixture) -> None:
     _reset_prometheus_state()
-    logger_opt = mocker.patch.object(prometheus.logger, "opt")
+    logger_warning = mocker.patch.object(prometheus.logger, "warning")
 
     def _raise(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("bad init")
@@ -149,7 +136,7 @@ def test_load_prometheus_init_exception_returns_none(mocker: MockerFixture) -> N
     _seed_loaded_module(_module(Counter=_raise, Histogram=_raise))
 
     assert prometheus.load_prometheus() is None
-    logger_opt.return_value.warning.assert_called_once()
+    logger_warning.assert_called_once()
     assert prometheus._state.counter is None
     assert prometheus._state.histogram is None
 

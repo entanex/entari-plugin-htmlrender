@@ -5,7 +5,7 @@ import subprocess
 
 import anyio
 
-from nonebot_plugin_htmlrender.adapters.playwright._support.process import (
+from entari_plugin_htmlrender.adapters.playwright._support.process import (
     create_process,
     open_process_supervisor,
 )

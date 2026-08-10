@@ -3,7 +3,7 @@ name: Docs PR Preview Build
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [master]
+    branches: [main]
 
 concurrency:
   group: docs-preview-build-${{ github.event.pull_request.number }}

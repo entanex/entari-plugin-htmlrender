@@ -1,6 +1,6 @@
 ---
 title: 仓库治理与保护
-description: master、release 分支、发布 tag 与 deployment environment 的远端保护契约
+description: main、release 分支、发布 tag 与 deployment environment 的远端保护契约
 icon: lucide/shield-check
 status: new
 tags:
@@ -17,13 +17,13 @@ tags:
 
 截至 2026-07-14，远端状态为：
 
-- `master` 没有传统 branch protection，也没有 Repository Ruleset；
+- `main` 没有传统 branch protection，也没有 Repository Ruleset；
 - merge commit、squash merge、rebase merge 全部可用；
 - 没有启用合并后自动删除 head branch，也没有提供 Update branch；
 - `release` 和 `testpypi` environment 没有 deployment branch/tag policy；
-- `github-pages` environment 只接受 `master` 和 `gh-pages`，该设置应保留。
+- `github-pages` environment 只接受 `main` 和 `gh-pages`，该设置应保留。
 
-在 Ruleset 正式启用前，GitHub 允许直接 push、force push、删除 `master` 或绕过 checks合并。文档约定不能替代平台门禁。
+在 Ruleset 正式启用前，GitHub 允许直接 push、force push、删除 `main` 或绕过 checks合并。文档约定不能替代平台门禁。
 
 ## 权威引用边界
 
@@ -31,17 +31,17 @@ tags:
 
 | 引用                    | 定位                              | 保护策略                                                  |
 | ----------------------- | --------------------------------- | --------------------------------------------------------- |
-| `master`                | 唯一可发布源码历史                | PR、review、strict checks、线性历史、禁止删除和 force push |
-| `release/v*`            | 短生命周期 release PR head        | 不单独保护；合入时完整经过 `master` Ruleset，合并后删除   |
+| `main`                | 唯一可发布源码历史                | PR、review、strict checks、线性历史、禁止删除和 force push |
+| `release/v*`            | 短生命周期 release PR head        | 不单独保护；合入时完整经过 `main` Ruleset，合并后删除   |
 | `v*`                    | 已发布源码的不可变锚点            | 允许自动创建，创建后禁止移动和删除                        |
 | `gh-pages`              | workflow 生成的 Pages 物化结果    | 不作为源码；由部署 workflow 进行非 force、带重试的更新    |
 | `feat/*`、`fix/*` 等    | 可丢弃、可重建的并行开发工作分支  | 不设远端保护，由目标分支的 PR Ruleset 约束                |
 
-保护 `release/v*` 反而会把临时协调分支误塑造成长期稳定线，并妨碍 release PR 合并后的清理。真正的版本边界是合入 `master` 的 gated SHA 和随后创建的不可移动 tag。
+保护 `release/v*` 反而会把临时协调分支误塑造成长期稳定线，并妨碍 release PR 合并后的清理。真正的版本边界是合入 `main` 的 gated SHA 和随后创建的不可移动 tag。
 
-## `Protect master` Ruleset
+## `Protect main` Ruleset
 
-导入 [`.github/rulesets/protect-master.json`](https://github.com/kexue-z/nonebot-plugin-htmlrender/blob/master/.github/rulesets/protect-master.json)，目标选择默认分支，并保持 `Active`：
+导入 [`.github/rulesets/protect-main.json`](https://github.com/kexue-z/entari-plugin-htmlrender/blob/main/.github/rulesets/protect-main.json)，目标选择默认分支，并保持 `Active`：
 
 - 禁止删除和 non-fast-forward push；
 - 要求线性历史，合并方式只允许 squash；
@@ -49,7 +49,7 @@ tags:
 - 要求一名非作者维护者 approval；新 reviewable commit 会撤销旧 approval；
 - 最新一次 reviewable push 必须由另一人确认；
 - 所有 review conversation 必须 resolved；
-- required checks 使用 GitHub Actions 作为固定来源，并严格要求分支基于最新 `master`：
+- required checks 使用 GitHub Actions 作为固定来源，并严格要求分支基于最新 `main`：
 
 | Workflow                | Required check context |
 | ----------------------- | ---------------------- |
@@ -58,13 +58,13 @@ tags:
 | `Prek`                  | `Prek`                 |
 | `Docs PR Preview Build` | `Docs Preview`         |
 
-不要绑定矩阵内部 job，也不要把只在 `master` push 上运行的 `Docs` 设为 PR required check。四个汇总 job 对所有目标为 `master` 的 PR 都会产生确定结论，包括“不涉及文档”的 PR。
+不要绑定矩阵内部 job，也不要把只在 `main` push 上运行的 `Docs` 设为 PR required check。四个汇总 job 对所有目标为 `main` 的 PR 都会产生确定结论，包括“不涉及文档”的 PR。
 
 Ruleset 不配置日常 bypass。管理员仍能编辑 Ruleset，但这应被视为显式的事故恢复操作，而不是正常合并路径。仓库设置同时应只启用 squash merge、启用 Update branch，并在合并后自动删除 head branch。
 
 ## `Protect release tags` Ruleset
 
-导入 [`.github/rulesets/protect-release-tags.json`](https://github.com/kexue-z/nonebot-plugin-htmlrender/blob/master/.github/rulesets/protect-release-tags.json)，匹配 `refs/tags/v*`：
+导入 [`.github/rulesets/protect-release-tags.json`](https://github.com/kexue-z/entari-plugin-htmlrender/blob/main/.github/rulesets/protect-release-tags.json)，匹配 `refs/tags/v*`：
 
 - 禁止删除；
 - 禁止 non-fast-forward 更新；
@@ -79,9 +79,9 @@ Ruleset 约束 Git 引用，environment 约束不可逆部署权限，两者不�
 
 | Environment    | Selected branches and tags                      | Required reviewer |
 | -------------- | ----------------------------------------------- | ----------------- |
-| `release`      | branch `master`、tag `v*`                       | 无                |
-| `testpypi`     | branch `master`、branch `release/*`             | 无                |
-| `github-pages` | 保留 branch `master`、branch `gh-pages`         | 无                |
+| `release`      | branch `main`、tag `v*`                       | 无                |
+| `testpypi`     | branch `main`、branch `release/*`             | 无                |
+| `github-pages` | 保留 branch `main`、branch `gh-pages`         | 无                |
 
 正式发布的人工批准发生在版本 PR review，而不是在 PyPI job 再重复一次。`release`
 environment 接受 Auto Tag 从 release tag 发起的正常发布，以及默认分支上的人工恢复；feature/release branch 上的 workflow 即使被手工触发，也不能取得 PyPI trusted
@@ -100,9 +100,9 @@ required check context 必须先由 GitHub Actions 实际产生。错误的启�
 1. 通过 API 复核远端实际规则，而不是只相信设置页面：
 
 ```bash
-gh api repos/kexue-z/nonebot-plugin-htmlrender/rulesets
-gh api repos/kexue-z/nonebot-plugin-htmlrender/rules/branches/master
-gh api repos/kexue-z/nonebot-plugin-htmlrender/environments
+gh api repos/kexue-z/entari-plugin-htmlrender/rulesets
+gh api repos/kexue-z/entari-plugin-htmlrender/rules/branches/main
+gh api repos/kexue-z/entari-plugin-htmlrender/environments
 ```
 
 不要用真实 release tag 测试删除或移动保护。tag Ruleset 可用一个不匹配 `v*` 的临时 tag验证普通 Git 行为，但 `v*` 的不可变规则应通过 Ruleset API 和一次正常自动发布观察确认。

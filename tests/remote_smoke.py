@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from base64 import b64decode
-from dataclasses import dataclass
 from io import BytesIO
 import os
 from pathlib import Path
@@ -11,28 +10,32 @@ import shutil
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
 from urllib.error import HTTPError
-from urllib.parse import urlsplit
 from urllib.request import urlopen
 
-from fastapi import FastAPI, Request
-import nonebot
-from nonebot.drivers import ASGIMixin
 from PIL import Image, ImageChops, ImageStat
-from uvicorn import Config as UvicornConfig
-from uvicorn import Server as UvicornServer
+
+from entari_plugin_htmlrender import (
+    ResourcePolicy,
+    render_html,
+    render_markdown,
+    render_template,
+    render_text,
+)
+from entari_plugin_htmlrender.host.composition import compose_runtime
+from entari_plugin_htmlrender.host.config import RenderSettings
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from starlette.middleware.base import RequestResponseEndpoint
-    from starlette.responses import Response
+    from entari_plugin_htmlrender.adapters.resources import HostedAssetHttpServer
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _TEMPLATE_DIR = _PROJECT_ROOT / "tests" / "templates"
 _IMAGE_FILE = _PROJECT_ROOT / "tests" / "resources" / "test_template_filter.png"
 _KATEX_FONT_CSS = (
     _PROJECT_ROOT
-    / "nonebot_plugin_htmlrender"
+    / "src"
+    / "entari_plugin_htmlrender"
     / "templates"
     / "markdown"
     / "katex"
@@ -47,23 +50,8 @@ _FILEHOST_PUBLIC_URL = os.environ.get(
     "FILEHOST_PUBLIC_URL",
     f"http://render:{_FILEHOST_BIND_PORT}/_htmlrender/assets/",
 )
-_FILEHOST_PUBLIC_PATH = f"{urlsplit(_FILEHOST_PUBLIC_URL).path.rstrip('/')}/"
 _FILEHOST_REQUEST_HEADER = "X-HTMLRender-Filehost-Request"
 _FILEHOST_REQUEST_TOKEN = "remote-smoke-filehost-token"
-
-
-@dataclass(frozen=True, slots=True)
-class _FilehostHit:
-    path: str
-    request_token: str | None
-    status_code: int
-    allow_origin: str | None
-
-
-@dataclass(slots=True)
-class _RunningServer:
-    server: UvicornServer
-    task: asyncio.Task[None]
 
 
 def _remote_resource_policy() -> str:
@@ -181,65 +169,6 @@ def _prepare_local_fixtures(root: Path) -> tuple[Path, Path]:
     return markdown, stylesheet
 
 
-def _install_filehost_probe() -> list[_FilehostHit]:
-    driver = nonebot.get_driver()
-    if not isinstance(driver, ASGIMixin) or not isinstance(driver.server_app, FastAPI):
-        raise RuntimeError("filehost smoke requires the FastAPI driver")
-
-    hits: list[_FilehostHit] = []
-
-    @driver.server_app.middleware("http")
-    async def _record_filehost_request(
-        request: Request,
-        call_next: RequestResponseEndpoint,
-    ) -> Response:
-        response = await call_next(request)
-        if request.url.path.startswith(_FILEHOST_PUBLIC_PATH):
-            hits.append(
-                _FilehostHit(
-                    path=request.url.path,
-                    request_token=request.headers.get(_FILEHOST_REQUEST_HEADER),
-                    status_code=response.status_code,
-                    allow_origin=response.headers.get("Access-Control-Allow-Origin"),
-                )
-            )
-        return response
-
-    return hits
-
-
-async def _start_filehost_server() -> _RunningServer:
-    driver = nonebot.get_driver()
-    if not isinstance(driver, ASGIMixin):
-        raise RuntimeError("filehost smoke requires an ASGI driver")
-
-    server = UvicornServer(
-        UvicornConfig(
-            driver.server_app,
-            host=_FILEHOST_BIND_HOST,
-            port=_FILEHOST_BIND_PORT,
-            log_level="info",
-        )
-    )
-    task = asyncio.create_task(server.serve())
-    for _ in range(600):
-        if server.started:
-            return _RunningServer(server=server, task=task)
-        if task.done():
-            await task
-            raise RuntimeError("filehost server stopped before becoming ready")
-        await asyncio.sleep(0.05)
-
-    server.should_exit = True
-    await task
-    raise RuntimeError("Timed out waiting for the filehost server")
-
-
-async def _stop_filehost_server(running: _RunningServer) -> None:
-    running.server.should_exit = True
-    await running.task
-
-
 def _http_status(url: str) -> int:
     try:
         with urlopen(url, timeout=5) as response:  # noqa: S310 - local smoke server
@@ -248,35 +177,36 @@ def _http_status(url: str) -> int:
         return error.code
 
 
-async def _assert_filehost_requests(hits: list[_FilehostHit]) -> None:
-    if not hits:
-        raise RuntimeError("Remote Chromium did not request any filehost assets")
-
-    invalid = [
-        hit
-        for hit in hits
-        if hit.request_token != _FILEHOST_REQUEST_TOKEN
-        or hit.status_code != 200
-        or hit.allow_origin != "*"
+async def _assert_filehost_assets(server: HostedAssetHttpServer) -> int:
+    entries = tuple(server.store._entries.values())
+    if not entries:
+        raise RuntimeError("Remote rendering did not publish any filehost assets")
+    invalid_guards = [
+        asset.name
+        for asset in entries
+        if asset.headers.get(_FILEHOST_REQUEST_HEADER) != _FILEHOST_REQUEST_TOKEN
     ]
-    if invalid:
-        raise RuntimeError(f"Invalid authenticated filehost requests: {invalid!r}")
+    if invalid_guards:
+        raise RuntimeError(f"Invalid filehost guards: {invalid_guards!r}")
 
-    suffixes = {Path(hit.path).suffix.lower() for hit in hits}
+    suffixes = {Path(asset.name).suffix.lower() for asset in entries}
     missing = {".css", ".png", ".woff2"} - suffixes
     if missing:
         raise RuntimeError(
-            f"Remote Chromium did not fetch required filehost asset types: {missing}"
+            f"Remote rendering did not publish required filehost asset types: {missing}"
         )
 
+    first = entries[0]
     status = await asyncio.to_thread(
         _http_status,
-        f"http://127.0.0.1:{_FILEHOST_BIND_PORT}{hits[0].path}",
+        f"http://127.0.0.1:{_FILEHOST_BIND_PORT}/_htmlrender/assets/"
+        f"{first.namespace}/{first.name}",
     )
     if status != 403:
         raise RuntimeError(
             f"Unauthenticated filehost request returned {status}, expected 403"
         )
+    return len(entries)
 
 
 async def _main() -> None:
@@ -284,47 +214,37 @@ async def _main() -> None:
     with TemporaryDirectory(prefix=f"htmlrender-{policy}-smoke-") as temporary:
         fixture_root = Path(temporary)
         markdown_path, stylesheet_path = _prepare_local_fixtures(fixture_root)
-        nonebot.init(
-            driver="~fastapi" if policy == "filehost" else "~none",
-            host=_FILEHOST_BIND_HOST,
-            port=_FILEHOST_BIND_PORT,
-            log_level="INFO",
-            render={
+        settings = RenderSettings.model_validate(
+            {
                 "provider": "playwright",
                 "startup": "off",
                 "provider_config": _playwright_config(policy),
                 "resources": {
                     "local_access": {"allowed_paths": [str(fixture_root)]},
                     "filehost": {
+                        "bind_host": _FILEHOST_BIND_HOST,
+                        "bind_port": _FILEHOST_BIND_PORT,
                         "public_base_url": _FILEHOST_PUBLIC_URL,
                         "request_header_name": _FILEHOST_REQUEST_HEADER,
                         "request_header_value": _FILEHOST_REQUEST_TOKEN,
                     },
                 },
-            },
+            }
         )
-        nonebot.require("nonebot_plugin_htmlrender")
-
-        from nonebot_plugin_htmlrender import (  # noqa: PLC0415
-            ResourcePolicy,
-            get_default_application,
-            render_html,
-            render_markdown,
-            render_template,
-            render_text,
-        )
+        plan = compose_runtime(settings)
+        runtime = plan.build_runtime()
+        filehost_server = plan.hosted_asset_server
 
         _ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-        filehost_hits = _install_filehost_probe() if policy == "filehost" else []
-        running_server = (
-            await _start_filehost_server() if policy == "filehost" else None
-        )
-        application = get_default_application()
+        if filehost_server is not None:
+            await filehost_server.startup()
+        filehost_assets = 0
         try:
-            await application.startup()
+            await runtime.startup()
             html_artifact = await render_html(
                 "<html><body><h1>remote smoke</h1></body></html>",
                 device_pixel_ratio=1.0,
+                runtime=runtime,
             )
             html_bytes = bytes(html_artifact)
             _assert_png(html_bytes, label="plain HTML")
@@ -342,6 +262,7 @@ async def _main() -> None:
                     height=600,
                     device_pixel_ratio=1.0,
                     resource_policy=ResourcePolicy.STRICT,
+                    runtime=runtime,
                 )
             )
             _assert_png(asset_graph_bytes, label="linked CSS asset graph")
@@ -355,6 +276,7 @@ async def _main() -> None:
                     css_path=str(stylesheet_path),
                     width=1200,
                     device_pixel_ratio=1.0,
+                    runtime=runtime,
                 )
             )
             _assert_png(text_bytes, label="text CSS assets")
@@ -365,6 +287,7 @@ async def _main() -> None:
                     markdown_path=str(markdown_path),
                     width=1200,
                     device_pixel_ratio=1.0,
+                    runtime=runtime,
                 )
             )
             markdown_rendered = _assert_png(
@@ -393,6 +316,7 @@ async def _main() -> None:
                     height=600,
                     device_pixel_ratio=1.0,
                     resource_policy=ResourcePolicy.STRICT,
+                    runtime=runtime,
                 )
             )
             (_ARTIFACT_DIR / f"remote_{policy}_template.png").write_bytes(
@@ -408,7 +332,9 @@ async def _main() -> None:
                 )
 
             if policy == "filehost":
-                await _assert_filehost_requests(filehost_hits)
+                if filehost_server is None:
+                    raise RuntimeError("filehost policy did not compose its server")
+                filehost_assets = await _assert_filehost_assets(filehost_server)
 
             print(  # noqa: T201
                 f"remote {policy.upper()} smoke passed: "
@@ -416,12 +342,14 @@ async def _main() -> None:
                 f"text={len(text_bytes)}, "
                 f"markdown={len(markdown_bytes)}, template={len(template_bytes)}, "
                 f"markdown_pixels={markdown_pixels}, "
-                f"template_diff={diff_score:.2f}, filehost_hits={len(filehost_hits)}"
+                f"template_diff={diff_score:.2f}, filehost_assets={filehost_assets}"
             )
         finally:
-            await application.aclose()
-            if running_server is not None:
-                await _stop_filehost_server(running_server)
+            try:
+                await runtime.aclose()
+            finally:
+                if filehost_server is not None:
+                    await filehost_server.aclose()
 
 
 if __name__ == "__main__":

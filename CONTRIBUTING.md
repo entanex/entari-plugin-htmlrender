@@ -1,6 +1,6 @@
 <!-- markdownlint-disable-file MD013 -->
 
-# 为 nonebot-plugin-htmlrender 贡献
+# 为 entari-plugin-htmlrender 贡献
 
 感谢你参与改进项目。完整协作契约见：
 
@@ -48,24 +48,24 @@ make remote-smoke        # 远程 Playwright / Docker 跨容器路径变更
 uvx prek run -a actionlint --hook-stage=manual  # workflow 变更
 ```
 
-CI 还会在 Python 3.10–3.14 上运行 pytest/coverage 与 `noneload` 插件加载矩阵。不要用跳过检查、放宽类型或屏蔽诊断来代替修复。
+CI 还会在 Python 3.10–3.14 上运行 pytest/coverage 与 Entari 插件加载矩阵。不要用跳过检查、放宽类型或屏蔽诊断来代替修复。
 
 ## Pull Request
 
-1. 从最新 `master` 创建一个聚焦单一主题的短生命周期分支。
+1. 从最新 `main` 创建一个聚焦单一主题的短生命周期分支。
 2. 同步提交实现、测试以及受到影响的用户或维护者文档。
 3. 使用 [Angular 风格提交消息](docs/project/commit-messages.md)，并让 PR 标题可直接作为 squash commit subject。
 4. 在 PR 描述中写明动机、方案、兼容性、风险和实际验证结果。
-5. 处理 review，更新到最新 `master`，等待所有适用 checks 重新通过。
+5. 处理 review，更新到最新 `main`，等待所有适用 checks 重新通过。
 6. 默认使用 **Squash and merge**，合并后删除功能分支。
 
-当前 `master` 未由 GitHub Ruleset 强制执行全部上述约定，维护者必须在合并前人工核对 checks 和 review 状态。详见 [Pull Request 生命周期](docs/project/pull-requests.md)。
+当前 `main` 未由 GitHub Ruleset 强制执行全部上述约定，维护者必须在合并前人工核对 checks 和 review 状态。详见 [Pull Request 生命周期](docs/project/pull-requests.md)。
 
 ## 文档预览与 TestPyPI
 
 文档相关 PR 会先在只读的 `pull_request` workflow 中严格构建，再由受信任的 `workflow_run` 部署预览并评论链接。该流程支持 fork PR；部署 workflow 不会 checkout fork 分支，也不会把 artifact 当作 workflow script 执行，但预览中的 HTML/JavaScript 会在 reviewer 的浏览器中执行。预览只是正式站点同一 GitHub Pages origin 下的路径，必须视为不可信内容，不能依赖该 origin 中的 secret 或可信 `localStorage`。PR 关闭后，预览会自动清理。
 
-正式发布由合并后的 `master` push 检测 `project.version` 前后差异；只有版本实际变化才创建 tag。因此 fork PR 可以正常成为版本 PR，而普通依赖配置变更不会误发布。
+正式发布由合并后的 `main` push 检测 `project.version` 前后差异；只有版本实际变化才创建 tag。因此 fork PR 可以正常成为版本 PR，而普通依赖配置变更不会误发布。
 
 TestPyPI 发布仅由维护者手动触发，不会为每个 PR 自动上传，也不是 required check。
 

@@ -30,9 +30,9 @@ tags:
 
 ## Python 版本矩阵
 
-项目支持 Python 3.10–3.14。`Coverage` 和 `noneload` 都覆盖完整版本范围：
+项目支持 Python 3.10–3.14。`Coverage` 和 Entari load 都覆盖完整版本范围：
 
-| Python | pytest + coverage | `noneload` | 角色                  |
+| Python | pytest + coverage | Entari load | 角色                  |
 | ------ | ----------------- | ---------- | --------------------- |
 | 3.10   | 是                | 是         | 最低支持版本          |
 | 3.11   | 是                | 是         | 兼容版本              |
@@ -42,7 +42,7 @@ tags:
 
 Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，减少工具自身版本差异；`basedpyright.pythonVersion` 保持为最低支持版本 3.10，以便静态契约不会误用较新语法或标准库。这不缩小运行时支持范围，运行时兼容性由两个矩阵承担。
 
-`make typecheck` 同时执行普通源码分析与`basedpyright --verifytypes nonebot_plugin_htmlrender --ignoreexternal`。后者要求`py.typed` 分发包的仓库内公共符号达到 100% type completeness；外部依赖自身缺少stub 不计入本仓库分数，但本仓库把 unknown/ambiguous 类型传播到公共签名仍会失败。
+`make typecheck` 同时执行普通源码分析与`basedpyright --verifytypes entari_plugin_htmlrender --ignoreexternal`。后者要求`py.typed` 分发包的仓库内公共符号达到 100% type completeness；外部依赖自身缺少stub 不计入本仓库分数，但本仓库把 unknown/ambiguous 类型传播到公共签名仍会失败。
 
 ## CPU 架构矩阵
 
@@ -55,17 +55,17 @@ Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，�
 
 每个矩阵项生成独立 coverage XML、pytest log 与 Codecov flag，并要求总覆盖率不低于 90%。某一个版本或架构失败时，不得用其他矩阵项通过来抵消。
 
-## noneload 矩阵
+## Entari load 矩阵
 
-[`BalconyJH/noneload`](https://github.com/BalconyJH/noneload) reusable workflow 对 `nonebot_plugin_htmlrender` 执行：
+该矩阵对 `entari_plugin_htmlrender` 执行：
 
 1. 在隔离环境安装当前 package；
-1. 发现并 import 插件模块；
-1. 让 NoneBot 实际 load 插件；
-1. 检查 plugin metadata、配置模型与依赖插件要求；
+1. 验证普通 import 不注册宿主 service；
+1. 让 Entari loader 实际加载插件；
+1. 检查 plugin metadata、配置模型、`HtmlRenderService` 注册与卸载；
 1. 在任一 Python 版本失败时令 job 失败。
 
-当前只检查核心依赖，不遍历全部 optional dependency 组合；extras 的依赖解析、Provider 专属能力与真实浏览器启动分别由 package、pytest 和 smoke 层承担。`noneload` 通过不意味着渲染功能已经执行。
+当前只检查核心依赖，不遍历全部 optional dependency 组合；extras 的依赖解析、Provider 专属能力与真实浏览器启动分别由 package、pytest 和 smoke 层承担。Entari load 通过不意味着渲染功能已经执行。
 
 ## 浏览器覆盖决策
 
@@ -82,10 +82,10 @@ Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，�
 ## 分发包与文档
 
 - 修改 `pyproject.toml`、`uv.lock`、包内资源、入口点或发布 workflow：运行 `make build-artifacts`；该 target 内部执行 `uv build --no-sources` 与 pinned `twine==6.2.0 check`；
-- package resource 门禁必须在仓库外、清空 `PYTHONPATH` 后安装真实 wheel；Python 3.10–3.14 均验证 package resources 与 NoneBot/preparation smoke，Python 3.12 另验证 sdist；
-- wheel/`RECORD` 检查九个内置资源均存在且非空；bare-core smoke 断言 HTMLKit、Playwright、Takumi、Pillow 与 Skia 均未安装；`[htmlkit]` 与 `[takumi]` 分别校验锁定版本并执行真实 native PNG，`[pillow,skia]` 验证独立 `RasterScene` 能力；
+- package resource 门禁必须在仓库外、清空 `PYTHONPATH` 后安装真实 wheel；Python 3.10–3.14 均验证 package resources 与 Entari/preparation smoke，Python 3.12 另验证 sdist；
+- wheel/`RECORD` 检查 package resources 均存在且非空；bare-core smoke 断言 Playwright、Takumi、Pillow 与 Skia 均未安装；`[takumi]` 校验锁定版本并执行真实 native PNG，`[pillow,skia]` 验证独立 `RasterScene` 能力；
 - 修改文档、MkDocs/Zensical 配置、文档依赖、Make target 或 docs workflow：运行 `make docs-build`，该 target 执行 strict build；
-- 修改插件入口、metadata、config 或依赖：除单测外必须等待完整 `noneload` 矩阵；
+- 修改插件入口、metadata、config 或依赖：除单测外必须等待完整 Entari load 矩阵；
 - 修改公开行为：同步更新使用指南或 API 参考、回归测试和必要的迁移说明。
 
 Documentation contract 属于 pytest 门禁，而不只是站点构建：

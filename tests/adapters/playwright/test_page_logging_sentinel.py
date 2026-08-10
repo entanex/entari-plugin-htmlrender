@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+import logging
 from typing import TYPE_CHECKING
 
-from nonebot.log import logger
 import pytest
+
+from entari_plugin_htmlrender._logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -16,14 +18,27 @@ if TYPE_CHECKING:
 _SECRET = "sentinel-Sup3rSecret-秘密-value"
 
 
+class _ListHandler(logging.Handler):
+    def __init__(self, records: list[str]) -> None:
+        super().__init__(level=logging.DEBUG)
+        self._records = records
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._records.append(record.getMessage())
+
+
 @contextmanager
 def _captured_logs() -> Iterator[list[str]]:
     records: list[str] = []
-    handler_id = logger.add(records.append, level="DEBUG", format="{message}")
+    handler = _ListHandler(records)
+    previous_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
     try:
         yield records
     finally:
-        logger.remove(handler_id)
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
 
 
 @dataclass(frozen=True)
@@ -48,7 +63,7 @@ class _ResponseStub:
 
 
 def test_page_logging_handlers_never_emit_console_or_error_payload() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
         log_console_event,
         log_page_error_event,
         log_request_failed_event,
@@ -82,16 +97,16 @@ def test_page_logging_handlers_never_emit_console_or_error_payload() -> None:
 
 @pytest.mark.anyio
 async def test_resource_resolve_failure_log_is_payload_free() -> None:
-    from nonebot_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.resources import (  # noqa: PLC0415
         AnyioWorkerExecutor,
         CompositeResourceReader,
         ConfiguredLocalAccessPolicy,
         RemoteTransportExecutor,
     )
-    from nonebot_plugin_htmlrender.resources.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         ResourceStrategy,
     )
-    from nonebot_plugin_htmlrender.resources.service import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.service import (  # noqa: PLC0415
         ResourceService,
     )
 

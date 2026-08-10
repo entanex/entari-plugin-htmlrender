@@ -2,7 +2,7 @@
 
 from typing_extensions import assert_type
 
-from nonebot_plugin_htmlrender import ErrorCause, RenderingError
+from entari_plugin_htmlrender import ErrorCause, RenderingError
 
 
 def _probe(error: RenderingError) -> None:

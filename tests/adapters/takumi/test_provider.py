@@ -10,36 +10,37 @@ from anyio.lowlevel import checkpoint
 from pydantic import ValidationError
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.takumi import (
+from entari_plugin_htmlrender.adapters.takumi import (
     capabilities as capabilities_module,
 )
-from nonebot_plugin_htmlrender.adapters.takumi import provider as provider_module
-from nonebot_plugin_htmlrender.adapters.takumi import render as render_module
-from nonebot_plugin_htmlrender.adapters.takumi.config import TakumiConfig
-from nonebot_plugin_htmlrender.adapters.takumi.errors import (
+from entari_plugin_htmlrender.adapters.takumi import provider as provider_module
+from entari_plugin_htmlrender.adapters.takumi import render as render_module
+from entari_plugin_htmlrender.adapters.takumi.config import TakumiConfig
+from entari_plugin_htmlrender.adapters.takumi.errors import (
     TakumiRuntimeError,
     TakumiUnsupportedError,
 )
-from nonebot_plugin_htmlrender.adapters.takumi.provider import (
+from entari_plugin_htmlrender.adapters.takumi.provider import (
     PROVIDER,
     TakumiProvider,
 )
-from nonebot_plugin_htmlrender.capabilities import TAKUMI
-from nonebot_plugin_htmlrender.preparation import prepare_html
-from nonebot_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
-from nonebot_plugin_htmlrender.providers.sdk import (
+from entari_plugin_htmlrender.capabilities import TAKUMI
+from entari_plugin_htmlrender.preparation import parse_html
+from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
+from entari_plugin_htmlrender.providers.sdk import (
     ProviderAvailability,
     ProviderDependencies,
 )
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.rendering import (
+    OperationAdmissionGate,
     ProviderExecutionError,
     ProviderLifecycleError,
     RenderedImage,
     ResourcePolicy,
     UnsupportedRequirement,
 )
-from nonebot_plugin_htmlrender.rendering.observers import NoopCacheObserver
-from nonebot_plugin_htmlrender.resources.config import (
+from entari_plugin_htmlrender.rendering.observers import NoopCacheObserver
+from entari_plugin_htmlrender.resources.config import (
     ResourceResolveMode,
     ResourceStrategy,
 )
@@ -48,10 +49,10 @@ from tests.image_fixtures import encoded_image
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
-    from nonebot_plugin_htmlrender.resources.ports import ProviderResources
+    from entari_plugin_htmlrender.resources.ports import ProviderResources
     from tests.adapters.conftest import RecordingOperationObserver
 
-PREPARED = prepare_html("<p>prepared</p>")
+PREPARED = parse_html("<p>prepared</p>")
 OPTIONS = RasterOptions(width=320, height=240, device_pixel_ratio=2.0)
 
 
@@ -73,8 +74,11 @@ def _install_runtime_fakes(
     list[_FakeState],
     list[tuple[_FakeState, PreparedHtml, RasterOptions, ResourceResolveMode]],
 ]:
-    if render_result is None:
-        render_result = encoded_image("png", width=640, height=480)
+    effective_render_result = (
+        encoded_image("png", width=640, height=480)
+        if render_result is None
+        else render_result
+    )
     created: list[_FakeState] = []
     rendered: list[
         tuple[_FakeState, PreparedHtml, RasterOptions, ResourceResolveMode]
@@ -107,7 +111,7 @@ def _install_runtime_fakes(
         resolve_mode: ResourceResolveMode = ResourceResolveMode.AUTO,
     ) -> bytes:
         rendered.append((state, prepared, options, resolve_mode))
-        return render_result
+        return effective_render_result
 
     mocker.patch.object(
         render_module,
@@ -136,6 +140,7 @@ def _dependencies(
     resources = SimpleNamespace(strategy=strategy or ResourceStrategy())
     return ProviderDependencies(
         operation_observer=observer,
+        operation_admission=OperationAdmissionGate(),
         cache_observer=NoopCacheObserver(),
         resources=cast("ProviderResources", resources),
         asset_publisher=None,
@@ -153,7 +158,7 @@ def test_parse_settings_validates_via_pydantic() -> None:
 
 def test_availability_maps_backend_result(mocker: MockerFixture) -> None:
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.takumi.render.takumi_availability",
+        "entari_plugin_htmlrender.adapters.takumi.render.takumi_availability",
         return_value=ProviderAvailability(available=False, reason="missing"),
     )
 
@@ -205,10 +210,6 @@ def test_compose_rejects_foreign_settings(
             cast("TakumiConfig", object()),
             _dependencies(operation_observer),
         )
-
-
-def test_bootstrap_requirements_empty() -> None:
-    assert PROVIDER.bootstrap_requirements(TakumiConfig()) == ()
 
 
 async def test_executor_lazily_starts_and_reuses_runtime(

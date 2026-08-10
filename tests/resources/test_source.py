@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender.resources.models import (
+from entari_plugin_htmlrender.resources.models import (
     FileResourceRef,
     InlineResourceRef,
     PackageResourceRef,
@@ -13,7 +13,7 @@ from nonebot_plugin_htmlrender.resources.models import (
     ResourceContent,
     ResourceRevision,
 )
-from nonebot_plugin_htmlrender.resources.source import (
+from entari_plugin_htmlrender.resources.source import (
     FilesystemResourceSource,
     PackageResourceSource,
 )

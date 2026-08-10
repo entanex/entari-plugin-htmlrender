@@ -1,8 +1,7 @@
 """Characterization of exported telemetry metric names and label sets.
 
-Dashboards and alerting depend on these literals; the 0.8 rework must keep
-them byte-identical. Any change here is a breaking observability change and
-needs an explicit dashboard-migration decision first.
+Dashboards and alerting depend on these literals. The Entari namespace is the
+post-migration contract; later changes need an explicit dashboard migration.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from pathlib import Path
 import types
 from typing import TYPE_CHECKING
 
-from nonebot_plugin_htmlrender.adapters.observability import prometheus, sentry
+from entari_plugin_htmlrender.adapters.observability import prometheus, sentry
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -20,50 +19,50 @@ if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
 EXPECTED_PROMETHEUS_LABELS: dict[str, tuple[str, ...]] = {
-    "nonebot_htmlrender_operations_total": ("op", "backend", "status"),
-    "nonebot_htmlrender_duration_seconds": ("op", "backend", "status"),
-    "nonebot_htmlrender_filehost_upload_bytes": (),
-    "nonebot_htmlrender_filehost_dedup_hits": (),
-    "nonebot_htmlrender_filehost_active_url_mappings": (),
-    "nonebot_htmlrender_filehost_active_leases": (),
-    "nonebot_htmlrender_filehost_physical_cleanup_capable": (),
-    "nonebot_htmlrender_cache_events": ("cache", "event"),
-    "nonebot_htmlrender_cache_entries": ("cache",),
-    "nonebot_htmlrender_cache_resident_bytes": ("cache",),
+    "entari_htmlrender_operations_total": ("op", "backend", "status"),
+    "entari_htmlrender_duration_seconds": ("op", "backend", "status"),
+    "entari_htmlrender_filehost_upload_bytes": (),
+    "entari_htmlrender_filehost_dedup_hits": (),
+    "entari_htmlrender_filehost_active_url_mappings": (),
+    "entari_htmlrender_filehost_active_leases": (),
+    "entari_htmlrender_filehost_physical_cleanup_capable": (),
+    "entari_htmlrender_cache_events": ("cache", "event"),
+    "entari_htmlrender_cache_entries": ("cache",),
+    "entari_htmlrender_cache_resident_bytes": ("cache",),
 }
 
 EXPECTED_SENTRY_NAMES: dict[str, str] = {
-    "_SENTRY_METRIC_DURATION": "nonebot.htmlrender.duration",
-    "_SENTRY_METRIC_COUNT": "nonebot.htmlrender.count",
-    "_SENTRY_FILEHOST_UPLOAD_BYTES": "nonebot.htmlrender.filehost.upload_bytes",
-    "_SENTRY_FILEHOST_DEDUP_HITS": "nonebot.htmlrender.filehost.dedup_hits",
+    "_SENTRY_METRIC_DURATION": "entari.htmlrender.duration",
+    "_SENTRY_METRIC_COUNT": "entari.htmlrender.count",
+    "_SENTRY_FILEHOST_UPLOAD_BYTES": "entari.htmlrender.filehost.upload_bytes",
+    "_SENTRY_FILEHOST_DEDUP_HITS": "entari.htmlrender.filehost.dedup_hits",
     "_SENTRY_FILEHOST_ACTIVE_MAPPINGS": (
-        "nonebot.htmlrender.filehost.active_url_mappings"
+        "entari.htmlrender.filehost.active_url_mappings"
     ),
-    "_SENTRY_FILEHOST_ACTIVE_LEASES": "nonebot.htmlrender.filehost.active_leases",
+    "_SENTRY_FILEHOST_ACTIVE_LEASES": "entari.htmlrender.filehost.active_leases",
     "_SENTRY_FILEHOST_CLEANUP_CAPABLE": (
-        "nonebot.htmlrender.filehost.physical_cleanup_capable"
+        "entari.htmlrender.filehost.physical_cleanup_capable"
     ),
-    "_SENTRY_CACHE_EVENTS": "nonebot.htmlrender.cache.events",
-    "_SENTRY_CACHE_ENTRIES": "nonebot.htmlrender.cache.entries",
-    "_SENTRY_CACHE_RESIDENT_BYTES": "nonebot.htmlrender.cache.resident_bytes",
+    "_SENTRY_CACHE_EVENTS": "entari.htmlrender.cache.events",
+    "_SENTRY_CACHE_ENTRIES": "entari.htmlrender.cache.entries",
+    "_SENTRY_CACHE_RESIDENT_BYTES": "entari.htmlrender.cache.resident_bytes",
 }
 
 EXPECTED_PROMETHEUS_NAMES: dict[str, str] = {
-    "_PROM_COUNTER_NAME": "nonebot_htmlrender_operations_total",
-    "_PROM_HISTOGRAM_NAME": "nonebot_htmlrender_duration_seconds",
-    "_PROM_FILEHOST_UPLOAD_BYTES_NAME": "nonebot_htmlrender_filehost_upload_bytes",
-    "_PROM_FILEHOST_DEDUP_HITS_NAME": "nonebot_htmlrender_filehost_dedup_hits",
+    "_PROM_COUNTER_NAME": "entari_htmlrender_operations_total",
+    "_PROM_HISTOGRAM_NAME": "entari_htmlrender_duration_seconds",
+    "_PROM_FILEHOST_UPLOAD_BYTES_NAME": "entari_htmlrender_filehost_upload_bytes",
+    "_PROM_FILEHOST_DEDUP_HITS_NAME": "entari_htmlrender_filehost_dedup_hits",
     "_PROM_FILEHOST_ACTIVE_MAPPINGS_NAME": (
-        "nonebot_htmlrender_filehost_active_url_mappings"
+        "entari_htmlrender_filehost_active_url_mappings"
     ),
-    "_PROM_FILEHOST_ACTIVE_LEASES_NAME": ("nonebot_htmlrender_filehost_active_leases"),
+    "_PROM_FILEHOST_ACTIVE_LEASES_NAME": ("entari_htmlrender_filehost_active_leases"),
     "_PROM_FILEHOST_CLEANUP_CAPABLE_NAME": (
-        "nonebot_htmlrender_filehost_physical_cleanup_capable"
+        "entari_htmlrender_filehost_physical_cleanup_capable"
     ),
-    "_PROM_CACHE_EVENTS_NAME": "nonebot_htmlrender_cache_events",
-    "_PROM_CACHE_ENTRIES_NAME": "nonebot_htmlrender_cache_entries",
-    "_PROM_CACHE_RESIDENT_BYTES_NAME": "nonebot_htmlrender_cache_resident_bytes",
+    "_PROM_CACHE_EVENTS_NAME": "entari_htmlrender_cache_events",
+    "_PROM_CACHE_ENTRIES_NAME": "entari_htmlrender_cache_entries",
+    "_PROM_CACHE_RESIDENT_BYTES_NAME": "entari_htmlrender_cache_resident_bytes",
 }
 
 
@@ -168,14 +167,14 @@ def test_sentry_render_metrics_emit_expected_names_and_tags(
     assert metrics.calls == [
         (
             "increment",
-            "nonebot.htmlrender.count",
+            "entari.htmlrender.count",
             1,
             None,
             {"op": "render.render_html", "backend": "takumi", "status": "success"},
         ),
         (
             "distribution",
-            "nonebot.htmlrender.duration",
+            "entari.htmlrender.duration",
             1.25,
             "second",
             {"op": "render.render_html", "backend": "takumi", "status": "success"},
@@ -196,15 +195,15 @@ def test_sentry_cache_metrics_emit_expected_names_and_tags(
     assert metrics.calls == [
         (
             "increment",
-            "nonebot.htmlrender.cache.events",
+            "entari.htmlrender.cache.events",
             2,
             None,
             {"cache": "resource", "event": "hit"},
         ),
-        ("gauge", "nonebot.htmlrender.cache.entries", 5, None, {"cache": "resource"}),
+        ("gauge", "entari.htmlrender.cache.entries", 5, None, {"cache": "resource"}),
         (
             "gauge",
-            "nonebot.htmlrender.cache.resident_bytes",
+            "entari.htmlrender.cache.resident_bytes",
             4096,
             "byte",
             {"cache": "resource"},
@@ -230,28 +229,28 @@ def test_sentry_filehost_metrics_emit_expected_names_and_tags(
     assert metrics.calls == [
         (
             "increment",
-            "nonebot.htmlrender.filehost.upload_bytes",
+            "entari.htmlrender.filehost.upload_bytes",
             2048,
             "byte",
             filehost_tags,
         ),
         (
             "gauge",
-            "nonebot.htmlrender.filehost.active_url_mappings",
+            "entari.htmlrender.filehost.active_url_mappings",
             3,
             None,
             filehost_tags,
         ),
         (
             "gauge",
-            "nonebot.htmlrender.filehost.active_leases",
+            "entari.htmlrender.filehost.active_leases",
             1,
             None,
             filehost_tags,
         ),
         (
             "gauge",
-            "nonebot.htmlrender.filehost.physical_cleanup_capable",
+            "entari.htmlrender.filehost.physical_cleanup_capable",
             0,
             None,
             filehost_tags,

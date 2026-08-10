@@ -7,24 +7,24 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.playwright._support import (
+from entari_plugin_htmlrender.adapters.playwright._support import (
     process as process_utils,
 )
-from nonebot_plugin_htmlrender.adapters.playwright._support import (
+from entari_plugin_htmlrender.adapters.playwright._support import (
     signal as signal_module,
 )
-from nonebot_plugin_htmlrender.adapters.playwright._support.install import (
+from entari_plugin_htmlrender.adapters.playwright._support.install import (
     MirrorSource,
     check_mirror_connectivity,
     execute_install_command,
 )
-from nonebot_plugin_htmlrender.adapters.playwright._support.process import (
+from entari_plugin_htmlrender.adapters.playwright._support.process import (
     create_process,
     create_process_shell,
     open_process_supervisor,
     terminate_process,
 )
-from nonebot_plugin_htmlrender.adapters.playwright._support.signal import (
+from entari_plugin_htmlrender.adapters.playwright._support.signal import (
     HANDLED_SIGNALS,
     _handle_signal,
     _handlers,
@@ -69,15 +69,15 @@ def test_install_signal_handler_non_main_thread_is_noop(
     mocker: MockerFixture,
 ) -> None:
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.signal.threading.current_thread",
+        "entari_plugin_htmlrender.adapters.playwright._support.signal.threading.current_thread",
         return_value=object(),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.signal.threading.main_thread",
+        "entari_plugin_htmlrender.adapters.playwright._support.signal.threading.main_thread",
         return_value=object(),
     )
     signal_mock = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.signal.signal.signal"
+        "entari_plugin_htmlrender.adapters.playwright._support.signal.signal.signal"
     )
 
     install_signal_handler()
@@ -89,15 +89,15 @@ def test_install_signal_handler_fallback_to_signal_api(
 ) -> None:
     main = object()
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.signal.threading.current_thread",
+        "entari_plugin_htmlrender.adapters.playwright._support.signal.threading.current_thread",
         return_value=main,
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.signal.threading.main_thread",
+        "entari_plugin_htmlrender.adapters.playwright._support.signal.threading.main_thread",
         return_value=main,
     )
     signal_mock = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.signal.signal.signal"
+        "entari_plugin_htmlrender.adapters.playwright._support.signal.signal.signal"
     )
 
     install_signal_handler()
@@ -119,11 +119,11 @@ async def test_terminate_process_posix_with_lookup_fallback(
     )
     mocker.patch.object(process_utils, "WINDOWS", new=False)
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.process.os.getpgid",
+        "entari_plugin_htmlrender.adapters.playwright._support.process.os.getpgid",
         side_effect=ProcessLookupError,
     )
     killpg = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.process.os.killpg"
+        "entari_plugin_htmlrender.adapters.playwright._support.process.os.killpg"
     )
 
     process_handle: Any = process
@@ -147,10 +147,10 @@ async def test_terminate_process_windows_timeout_kills_process(
     )
     mocker.patch.object(process_utils, "WINDOWS", new=True)
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.process.os.kill"
+        "entari_plugin_htmlrender.adapters.playwright._support.process.os.kill"
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.process.signal.CTRL_BREAK_EVENT",
+        "entari_plugin_htmlrender.adapters.playwright._support.process.signal.CTRL_BREAK_EVENT",
         new=21,
         create=True,
     )
@@ -168,7 +168,7 @@ async def test_terminate_process_windows_timeout_kills_process(
             return False
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.process.anyio.fail_after",
+        "entari_plugin_htmlrender.adapters.playwright._support.process.anyio.fail_after",
         side_effect=lambda _seconds: _TimeoutNow(),
     )
 
@@ -190,7 +190,7 @@ async def test_check_mirror_connectivity_selects_best_and_handles_failures(
     ]
     timeline = iter([1.0, 1.3, 2.0, 2.1])
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.anyio.current_time",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.anyio.current_time",
         side_effect=lambda: next(timeline),
     )
 
@@ -200,7 +200,7 @@ async def test_check_mirror_connectivity_selects_best_and_handles_failures(
         return SimpleNamespace(aclose=mocker.AsyncMock())
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.anyio.connect_tcp",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.anyio.connect_tcp",
         side_effect=_connect_tcp,
     )
 
@@ -218,11 +218,11 @@ async def test_execute_install_command_result_paths(mocker: MockerFixture) -> No
         wait=mocker.AsyncMock(),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.create_process",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.create_process",
         new=mocker.AsyncMock(return_value=process),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.terminate_process",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.terminate_process",
         new=mocker.AsyncMock(),
     )
 
@@ -237,7 +237,7 @@ async def test_execute_install_command_result_paths(mocker: MockerFixture) -> No
         wait=mocker.AsyncMock(),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.create_process",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.create_process",
         new=mocker.AsyncMock(return_value=process2),
     )
     ok2, message2 = await execute_install_command(("echo", "x"), timeout_seconds=1)
@@ -245,7 +245,7 @@ async def test_execute_install_command_result_paths(mocker: MockerFixture) -> No
     assert "Exited with code 5" in message2
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.create_process",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.create_process",
         new=mocker.AsyncMock(side_effect=RuntimeError("boom")),
     )
     ok3, message3 = await execute_install_command(("echo", "x"), timeout_seconds=1)
@@ -262,11 +262,11 @@ async def test_execute_install_command_timeout_path(mocker: MockerFixture) -> No
         wait=mocker.AsyncMock(),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.create_process",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.create_process",
         new=mocker.AsyncMock(return_value=process),
     )
     terminate = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.terminate_process",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.terminate_process",
         new=mocker.AsyncMock(),
     )
 
@@ -283,7 +283,7 @@ async def test_execute_install_command_timeout_path(mocker: MockerFixture) -> No
             return False
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.install.anyio.fail_after",
+        "entari_plugin_htmlrender.adapters.playwright._support.install.anyio.fail_after",
         side_effect=lambda _seconds: _TimeoutNow(),
     )
 
@@ -296,7 +296,7 @@ async def test_execute_install_command_timeout_path(mocker: MockerFixture) -> No
 @pytest.mark.anyio
 async def test_create_process_and_shell_forward_to_anyio(mocker: MockerFixture) -> None:
     open_process = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._support.process.anyio.open_process",
+        "entari_plugin_htmlrender.adapters.playwright._support.process.anyio.open_process",
         new=mocker.AsyncMock(return_value=object()),
     )
     mocker.patch.object(process_utils, "WINDOWS", new=False)

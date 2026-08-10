@@ -1,8 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any
 
-import nonebot
 import pytest
 
 _TEST_PROFILE_ENV = "HTMLRENDER_TEST_PROFILE"
@@ -56,33 +54,8 @@ def _configure_playwright_test_env() -> None:
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_TEST_PLAYWRIGHT_BROWSERS_PATH)
 
 
-def _build_test_init_kwargs() -> dict[str, Any]:
-    provider_config: dict[str, Any] = {
-        "engine": "chromium",
-        "skip_browser_install": True,
-    }
-    if not _is_ci_test_profile():
-        provider_config["storage_path"] = str(_TEST_PLAYWRIGHT_BROWSERS_PATH)
-
-    return {
-        "superusers": {"10001"},
-        "command_start": {""},
-        "log_level": "DEBUG",
-        "render": {
-            "provider": "playwright",
-            "startup": "off",
-            "provider_config": provider_config,
-        },
-    }
-
-
 def pytest_configure(config: pytest.Config) -> None:
     _configure_playwright_test_env()
-    try:
-        nonebot.get_driver()
-    except Exception:
-        nonebot.init(**_build_test_init_kwargs())
-    nonebot.require("nonebot_plugin_htmlrender")
     del config
 
 

@@ -1,4 +1,4 @@
-"""Static contracts for the final typed provider and Application object graph."""
+"""Static contracts for the typed provider and host-neutral runtime graph."""
 
 from __future__ import annotations
 
@@ -6,13 +6,15 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SDK_PATH = ROOT / "nonebot_plugin_htmlrender" / "providers" / "sdk.py"
-APPLICATION_PATH = ROOT / "nonebot_plugin_htmlrender" / "application" / "app.py"
+PACKAGE_ROOT = ROOT / "src" / "entari_plugin_htmlrender"
+SDK_PATH = PACKAGE_ROOT / "providers" / "sdk.py"
+RUNTIME_PATH = PACKAGE_ROOT / "runtime" / "runtime.py"
 
 EXPECTED_PROVIDER_DEPENDENCIES = frozenset(
     {
         "asset_publisher",
         "cache_observer",
+        "operation_admission",
         "operation_observer",
         "resources",
     }
@@ -78,7 +80,6 @@ def test_engine_provider_is_generic_over_one_typed_settings_flow() -> None:
 
     typed_settings_methods = (
         "availability",
-        "bootstrap_requirements",
         "compose",
         "resource_strategy",
     )
@@ -96,6 +97,9 @@ def test_engine_provider_is_generic_over_one_typed_settings_flow() -> None:
     method_names = {
         node.name for node in provider.body if isinstance(node, ast.FunctionDef)
     }
+    assert "bootstrap_requirements" not in method_names, (
+        "Host plugin requirements do not belong in the provider SDK"
+    )
     assert "resource_configuration" not in method_names, (
         "The transitional resource_configuration hook must not return"
     )
@@ -118,22 +122,22 @@ def test_provider_dtos_carry_the_final_resource_dependencies_and_strategy() -> N
     )
 
 
-def test_application_exposes_preparation_and_resources_from_composition() -> None:
-    application = _class(_tree(APPLICATION_PATH), "Application")
-    initializer = _method(application, "__init__")
+def test_runtime_exposes_renderer_preparation_and_resources_from_composition() -> None:
+    runtime = _class(_tree(RUNTIME_PATH), "RenderRuntime")
+    initializer = _method(runtime, "__init__")
     parameters = {
         argument.arg
         for argument in (*initializer.args.args, *initializer.args.kwonlyargs)
     }
-    assert {"preparation", "resources"} <= parameters
+    assert {"renderer", "preparation", "resources"} <= parameters
 
     properties = {
         node.name
-        for node in application.body
+        for node in runtime.body
         if isinstance(node, ast.FunctionDef)
         and any(
             isinstance(decorator, ast.Name) and decorator.id == "property"
             for decorator in node.decorator_list
         )
     }
-    assert {"preparation", "resources"} <= properties
+    assert {"renderer", "preparation", "resources"} <= properties

@@ -6,22 +6,22 @@ from typing import TYPE_CHECKING, cast
 from exceptiongroup import BaseExceptionGroup
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.playwright.availability import (
+from entari_plugin_htmlrender.adapters.playwright.availability import (
     playwright_availability,
 )
-from nonebot_plugin_htmlrender.adapters.playwright.config import (
+from entari_plugin_htmlrender.adapters.playwright.config import (
     BrowserEngine,
     ChromiumChannel,
     PlaywrightConfig,
 )
-from nonebot_plugin_htmlrender.adapters.playwright.render import (
+from entari_plugin_htmlrender.adapters.playwright.render import (
     PlaywrightEngine,
     PlaywrightLease,
     PlaywrightMode,
     WsVersionRiskLevel,
 )
-from nonebot_plugin_htmlrender.providers.sdk import ProviderAvailability
-from nonebot_plugin_htmlrender.rendering.observers import NoopOperationObserver
+from entari_plugin_htmlrender.providers.sdk import ProviderAvailability
+from entari_plugin_htmlrender.rendering.observers import NoopOperationObserver
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -166,7 +166,7 @@ async def test_install_required_launch_honors_skip_setting(
     )
     playwright = cast("Playwright", SimpleNamespace(chromium=chromium))
     install = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.install_browser",
+        "entari_plugin_htmlrender.adapters.playwright.render.install_browser",
         new=mocker.AsyncMock(),
     )
 
@@ -194,7 +194,7 @@ async def test_install_required_launch_installs_once_and_retries_once(
     )
     playwright = cast("Playwright", SimpleNamespace(chromium=chromium))
     install = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.install_browser",
+        "entari_plugin_htmlrender.adapters.playwright.render.install_browser",
         new=mocker.AsyncMock(),
     )
 
@@ -217,7 +217,7 @@ async def test_configuration_launch_failure_never_installs(
     )
     playwright = cast("Playwright", SimpleNamespace(chromium=chromium))
     install = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.install_browser",
+        "entari_plugin_htmlrender.adapters.playwright.render.install_browser",
         new=mocker.AsyncMock(),
     )
 
@@ -252,7 +252,7 @@ async def test_ws_version_gate_warns_when_remote_version_is_unknown(
 ) -> None:
     engine = _engine(connect_ws={"endpoint": "ws://host/browser"})
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.pkg_version",
+        "entari_plugin_htmlrender.adapters.playwright.render.pkg_version",
         return_value="1.55.0",
     )
     mocker.patch.object(
@@ -261,7 +261,7 @@ async def test_ws_version_gate_warns_when_remote_version_is_unknown(
         new=mocker.AsyncMock(return_value=None),
     )
     warning = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.logger.warning"
+        "entari_plugin_htmlrender.adapters.playwright.render.logger.warning"
     )
 
     await engine._check_ws_version_gate()
@@ -292,8 +292,8 @@ def test_availability_remote_and_install_branches(
     reason: str | None,
 ) -> None:
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.availability.find_spec",
-        return_value=object(),
+        "entari_plugin_htmlrender.adapters.playwright.availability._playwright_is_installed",
+        return_value=True,
     )
 
     result = playwright_availability(PlaywrightConfig.model_validate(settings))
@@ -307,8 +307,8 @@ def test_availability_checks_explicit_executable(
     tmp_path: Path, mocker: MockerFixture
 ) -> None:
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.availability.find_spec",
-        return_value=object(),
+        "entari_plugin_htmlrender.adapters.playwright.availability._playwright_is_installed",
+        return_value=True,
     )
     executable = tmp_path / "chromium"
     missing = playwright_availability(PlaywrightConfig(executable_path=executable))
@@ -324,11 +324,11 @@ def test_availability_checks_injected_storage_path(
     tmp_path: Path,
 ) -> None:
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.availability.find_spec",
-        return_value=object(),
+        "entari_plugin_htmlrender.adapters.playwright.availability._playwright_is_installed",
+        return_value=True,
     )
     installed = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.install_state.has_installed_browser",
+        "entari_plugin_htmlrender.adapters.playwright.install_state.has_installed_browser",
         return_value=False,
     )
     storage_path = tmp_path / "playwright-test"
@@ -363,7 +363,7 @@ async def test_create_and_close_lease_owns_process_and_browser(
     starter = mocker.Mock()
     starter.start = mocker.AsyncMock(return_value=playwright)
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.async_playwright",
+        "entari_plugin_htmlrender.adapters.playwright.render.async_playwright",
         return_value=starter,
     )
     mocker.patch.object(
@@ -372,13 +372,13 @@ async def test_create_and_close_lease_owns_process_and_browser(
         new=mocker.AsyncMock(return_value=browser),
     )
     scope = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
+        "entari_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
     )
     reconcile = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
+        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
     )
     record = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
+        "entari_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
     )
 
     lease = await engine.create_lease()
@@ -402,7 +402,7 @@ async def test_create_lease_cleans_process_when_browser_creation_fails(
     starter = mocker.Mock()
     starter.start = mocker.AsyncMock(return_value=playwright)
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.async_playwright",
+        "entari_plugin_htmlrender.adapters.playwright.render.async_playwright",
         return_value=starter,
     )
     mocker.patch.object(
@@ -411,13 +411,13 @@ async def test_create_lease_cleans_process_when_browser_creation_fails(
         new=mocker.AsyncMock(side_effect=RuntimeError("launch failed")),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
+        "entari_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
+        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
+        "entari_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
     )
 
     with pytest.raises(RuntimeError, match="launch failed"):
@@ -463,7 +463,7 @@ async def test_create_lease_failure_aggregates_driver_stop_failure(
     starter = mocker.Mock()
     starter.start = mocker.AsyncMock(return_value=playwright)
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.async_playwright",
+        "entari_plugin_htmlrender.adapters.playwright.render.async_playwright",
         return_value=starter,
     )
     mocker.patch.object(
@@ -472,13 +472,13 @@ async def test_create_lease_failure_aggregates_driver_stop_failure(
         new=mocker.AsyncMock(side_effect=RuntimeError("launch failed")),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
+        "entari_plugin_htmlrender.adapters.playwright.spawn.browsers_path_scope"
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
+        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache"
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
+        "entari_plugin_htmlrender.adapters.playwright.render.record_playwright_runtime_state"
     )
 
     with pytest.raises(BaseExceptionGroup) as info:
@@ -493,11 +493,11 @@ async def test_create_lease_propagates_preparation_failure(
 ) -> None:
     engine = _engine()
     reconcile = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache",
+        "entari_plugin_htmlrender.adapters.playwright.render.reconcile_legacy_playwright_cache",
         side_effect=RuntimeError("cache reconciliation failed"),
     )
     starter = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright.render.async_playwright"
+        "entari_plugin_htmlrender.adapters.playwright.render.async_playwright"
     )
 
     with pytest.raises(RuntimeError, match="cache reconciliation failed"):
@@ -522,7 +522,7 @@ def test_lease_liveness_is_browser_connection(mocker: MockerFixture) -> None:
 
 
 def test_channel_candidates_cover_supported_chromium_channels() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.availability import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.availability import (  # noqa: PLC0415
         _channel_command_candidates,
     )
 

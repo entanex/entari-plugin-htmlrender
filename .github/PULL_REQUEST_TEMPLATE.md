@@ -33,4 +33,4 @@
 
 - [ ] PR 标题可作为符合 `type(scope): subject` 的 squash commit subject
 - [ ] 已处理阻塞 review，并在实质性更新后重新请求 review
-- [ ] 分支已更新到最新 `master`，所有适用 checks 通过
+- [ ] 分支已更新到最新 `main`，所有适用 checks 通过

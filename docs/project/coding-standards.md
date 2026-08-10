@@ -20,7 +20,7 @@ tags:
 
 ## 目录与文件组织
 
-- 目录按依赖层组织（`application` / `rendering` / `preparation` / `resources` / `adapters` / `bootstrap`），避免按“代码类型”堆目录；
+- 目录按依赖层组织（`runtime` / `rendering` / `preparation` / `resources` / `adapters` / `host`），避免按“代码类型”堆目录；
 - 文件尽量保持“单一概念”，避免一个文件同时承担多个无关职责；
 - 测试目录按插件实现分类维护，不把浏览器相关 case 统一堆放。
 
@@ -55,7 +55,7 @@ make test-ci
 - 避免模块级全局状态竞争，涉及共享状态需显式加锁；
 - 并发路径必须有测试覆盖（成功、失败、超时、取消）。
 
-## Application 与 Provider 规范
+## Runtime 与 Provider 规范
 
 - 跨引擎能力先进入 request/use-case/port；专属能力通过 typed Capability 暴露；
 - 核心层不依赖具体 Provider adapter；
@@ -76,7 +76,7 @@ make test-ci
 - 并发与生命周期测试必须覆盖“资源释放”路径；
 - bugfix 先提供能在修复前失败的回归测试；新 Provider 同时覆盖 SDK、通用 executor 与 typed Capability；
 - 不依赖测试执行顺序、共享进程全局状态或外部网络；确需外部服务的 case 放入明确的 smoke 层；
-- 插件入口、元数据或依赖变化必须通过 Python 3.10–3.14 的 `noneload` 加载矩阵。
+- 插件入口、元数据或依赖变化必须通过 Python 3.10–3.14 的 Entari 加载矩阵。
 
 ## 验证分层
 
@@ -85,7 +85,7 @@ make test-ci
 | 仓库级 hooks | 冲突、文件格式、元数据、拼写、源码与文档修复器 | `prek run --all-files` |
 | 静态质量 | Ruff format/check、`basedpyright`、`ty` | `make ruff-format-check ruff-check typecheck ty` |
 | 单元与集成 | 非浏览器 pytest；CI 额外采集 coverage | `make test-ci` / CI `Coverage` |
-| 插件加载 | 隔离安装、NoneBot import/load、元数据与配置 | CI `noneload` matrix |
+| 插件加载 | 隔离安装、Entari import/load、元数据与配置 | CI Entari load matrix |
 | 分发包 | wheel + sdist 可构建，metadata 可被 pinned `twine` 解析 | `make build-artifacts` |
 | 文档 | 链接、引用与配置通过 strict build | `make docs-build` |
 | 本地浏览器 | 需要 Chromium 的 Playwright 行为 | `make install-browser && make test-local` |

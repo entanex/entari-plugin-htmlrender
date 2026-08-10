@@ -15,7 +15,7 @@ tags:
 
 ## 正式版本目录
 
-- `Docs` workflow 在 `master` 的文档相关路径变化时只执行 strict build，作为发布前门禁；
+- `Docs` workflow 在 `main` 的文档相关路径变化时只执行 strict build，作为发布前门禁；
 - `Publish` 在 PyPI 文件 hash 与 GitHub Release 均确认后，从经过验证的 tag 部署正式文档；
 - 版本读取自 tag 内 `pyproject.toml` 的项目版本；
 - 每个版本部署为独立目录，例如 `/0.7.0/`、`/0.8.0/`；

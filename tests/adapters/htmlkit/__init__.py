@@ -1,1 +1,0 @@
-"""HTMLKit provider adapter tests."""

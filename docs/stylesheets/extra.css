@@ -528,7 +528,7 @@ body:has(.htmlrender-home) .md-footer {
   position: relative;
 }
 
-.htmlrender-nonebot__nav {
+.htmlrender-entari__nav {
   align-items: center;
   border-bottom: 1px solid rgba(255, 255, 255, .09);
   display: flex;
@@ -537,44 +537,44 @@ body:has(.htmlrender-home) .md-footer {
   padding: 0 .72rem;
 }
 
-.htmlrender-nonebot__brand {
+.htmlrender-entari__brand {
   align-items: center;
   display: flex;
   gap: .32rem;
 }
 
-.htmlrender-nonebot__brand i {
+.htmlrender-entari__brand i {
   border: 1px solid var(--htmlrender-home-accent);
   border-radius: 50%;
   height: .62rem;
   width: .62rem;
 }
 
-.htmlrender-nonebot__brand b {
+.htmlrender-entari__brand b {
   background: rgba(255, 255, 255, .72);
   border-radius: 999px;
   height: .18rem;
   width: 1.45rem;
 }
 
-.htmlrender-nonebot__links {
+.htmlrender-entari__links {
   align-items: center;
   display: flex;
   gap: .28rem;
 }
 
-.htmlrender-nonebot__links i {
+.htmlrender-entari__links i {
   background: rgba(255, 255, 255, .25);
   border-radius: 999px;
   height: .16rem;
   width: .68rem;
 }
 
-.htmlrender-nonebot__links i:nth-child(2) {
+.htmlrender-entari__links i:nth-child(2) {
   width: .46rem;
 }
 
-.htmlrender-nonebot__hero {
+.htmlrender-entari__hero {
   align-items: center;
   display: flex;
   flex-direction: column;
@@ -583,33 +583,33 @@ body:has(.htmlrender-home) .md-footer {
   padding: .45rem 1rem .65rem;
 }
 
-.htmlrender-nonebot__ring {
+.htmlrender-entari__ring {
   border: .12rem solid var(--htmlrender-home-accent);
   border-radius: 50%;
   height: 2.05rem;
   width: 2.05rem;
 }
 
-.htmlrender-nonebot__wordmark {
+.htmlrender-entari__wordmark {
   align-items: center;
   display: flex;
   gap: .2rem;
   margin-top: .42rem;
 }
 
-.htmlrender-nonebot__wordmark i {
+.htmlrender-entari__wordmark i {
   background: var(--htmlrender-home-accent);
   border-radius: 999px;
   height: .4rem;
   width: 1.8rem;
 }
 
-.htmlrender-nonebot__wordmark i:last-child {
+.htmlrender-entari__wordmark i:last-child {
   background: rgba(255, 255, 255, .82);
   width: 1.2rem;
 }
 
-.htmlrender-nonebot__tagline {
+.htmlrender-entari__tagline {
   background: rgba(255, 255, 255, .24);
   border-radius: 999px;
   height: .17rem;
@@ -617,15 +617,15 @@ body:has(.htmlrender-home) .md-footer {
   width: 4.2rem;
 }
 
-.htmlrender-nonebot__actions {
+.htmlrender-entari__actions {
   align-items: center;
   display: flex;
   gap: .34rem;
   margin-top: .48rem;
 }
 
-.htmlrender-nonebot__actions > span,
-.htmlrender-nonebot__actions code {
+.htmlrender-entari__actions > span,
+.htmlrender-entari__actions code {
   align-items: center;
   border-radius: .3rem;
   display: flex;
@@ -633,38 +633,38 @@ body:has(.htmlrender-home) .md-footer {
   justify-content: center;
 }
 
-.htmlrender-nonebot__actions > span {
+.htmlrender-entari__actions > span {
   background: var(--htmlrender-home-accent);
   width: 2.7rem;
 }
 
-.htmlrender-nonebot__actions code {
+.htmlrender-entari__actions code {
   background: rgba(255, 255, 255, .07);
   gap: .2rem;
   padding: 0 .55rem;
   width: 4.8rem;
 }
 
-.htmlrender-nonebot__actions i {
+.htmlrender-entari__actions i {
   background: rgba(255, 255, 255, .82);
   border-radius: 999px;
   height: .16rem;
 }
 
-.htmlrender-nonebot__actions > span i {
+.htmlrender-entari__actions > span i {
   width: 1.55rem;
 }
 
-.htmlrender-nonebot__actions code i {
+.htmlrender-entari__actions code i {
   background: rgba(255, 255, 255, .28);
   width: .72rem;
 }
 
-.htmlrender-nonebot__actions code i:nth-child(2) {
+.htmlrender-entari__actions code i:nth-child(2) {
   width: 1.12rem;
 }
 
-.htmlrender-nonebot__actions code i:last-child {
+.htmlrender-entari__actions code i:last-child {
   width: .52rem;
 }
 

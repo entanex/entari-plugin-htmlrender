@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from nonebot_plugin_htmlrender.adapters.observability import common
+from entari_plugin_htmlrender.adapters.observability import common
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
 
-def test_normalize_backend_does_not_depend_on_nonebot_config() -> None:
+def test_normalize_backend_is_host_independent() -> None:
     assert not hasattr(common, "get_config_value")
     assert common.normalize_backend(None) == "unknown"
     assert common.normalize_backend("playwright") == "playwright"
@@ -23,7 +23,7 @@ def test_metric_params_and_signature_failure(mocker: MockerFixture) -> None:
     assert params == {"name", "value"}
 
     signature = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.inspect.signature"
+        "entari_plugin_htmlrender.adapters.observability.common.inspect.signature"
     )
     signature.side_effect = ValueError("bad signature")
 
@@ -45,7 +45,7 @@ def test_call_metric_handles_value_amount_and_positional(
     positional_fn = mocker.Mock()
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.metric_params",
+        "entari_plugin_htmlrender.adapters.observability.common.metric_params",
         side_effect=[
             {"value", "unit", "tags"},
             {"amount", "attributes"},

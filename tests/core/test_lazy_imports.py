@@ -18,315 +18,211 @@ def _run_python(script: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_default_plugin_import_does_not_load_engines_or_filehost() -> None:
+def test_public_library_import_is_host_neutral_and_lazy() -> None:
     result = _run_python(
         """
         import importlib.abc
         import sys
 
-        import nonebot
-
-        nonebot.init(log_level="ERROR", render={"provider": None})
-
-        class _BlockFastAPI(importlib.abc.MetaPathFinder):
-            def find_spec(self, fullname, path=None, target=None):
-                del path, target
-                if fullname == "fastapi" or fullname.startswith("fastapi."):
-                    raise ModuleNotFoundError(fullname)
-                return None
-
-        sys.meta_path.insert(0, _BlockFastAPI())
-        nonebot.require("nonebot_plugin_htmlrender")
-
-        unexpected = {
+        blocked = (
             "PIL",
-            "nonebot_plugin_htmlkit",
-            "playwright.async_api",
+            "aiohttp",
+            "arclet.entari",
+            "playwright",
+            "prometheus_client",
+            "sentry_sdk",
             "skia",
             "takumi_py",
-            "nonebot_plugin_htmlrender.adapters.htmlkit.provider",
-            "nonebot_plugin_htmlrender.adapters.pillow.renderer",
-            "nonebot_plugin_htmlrender.adapters.playwright.render",
-            "nonebot_plugin_htmlrender.adapters.skia.renderer",
-            "nonebot_plugin_htmlrender.adapters.takumi.provider",
-        } & set(sys.modules)
-        if unexpected:
-            raise SystemExit(f"unexpected lazy modules loaded: {sorted(unexpected)}")
-        """
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_playwright_provider_off_startup_stays_lazy() -> None:
-    result = _run_python(
-        """
-        import importlib.abc
-        import sys
-
-        import nonebot
-
-        nonebot.init(
-            log_level="ERROR",
-            render={
-                "provider": "playwright",
-                "startup": "off",
-                "provider_config": {
-                    "resource_resolve_mode": "auto",
-                    "remote_local_resource_policy": "passthrough",
-                    "local_local_resource_policy": "file",
-                },
-            },
         )
 
-        class _BlockFastAPI(importlib.abc.MetaPathFinder):
+        class BlockOptionalModules(importlib.abc.MetaPathFinder):
             def find_spec(self, fullname, path=None, target=None):
                 del path, target
-                if fullname == "fastapi" or fullname.startswith("fastapi."):
+                if any(
+                    fullname == prefix or fullname.startswith(f"{prefix}.")
+                    for prefix in blocked
+                ):
                     raise ModuleNotFoundError(fullname)
                 return None
 
-        sys.meta_path.insert(0, _BlockFastAPI())
-        nonebot.require("nonebot_plugin_htmlrender")
+        sys.meta_path.insert(0, BlockOptionalModules())
+        import entari_plugin_htmlrender
 
         unexpected = {
-            "nonebot_plugin_htmlkit",
-            "playwright.async_api",
-            "nonebot_plugin_htmlrender.adapters.playwright.render",
-        } & set(sys.modules)
+            name
+            for name in sys.modules
+            if any(name == prefix or name.startswith(f"{prefix}.") for prefix in blocked)
+        }
         if unexpected:
-            raise SystemExit(f"unexpected lazy modules loaded: {sorted(unexpected)}")
+            raise SystemExit(f"unexpected host or optional modules: {sorted(unexpected)}")
         """
     )
 
     assert result.returncode == 0, result.stderr
 
 
-def test_htmlkit_provider_bootstraps_only_its_required_plugin() -> None:
+def test_core_packages_do_not_load_host_composition_or_adapters() -> None:
     result = _run_python(
         """
         import sys
 
-        import nonebot
+        import entari_plugin_htmlrender.graphics
+        import entari_plugin_htmlrender.preparation
+        import entari_plugin_htmlrender.rendering
+        import entari_plugin_htmlrender.resources
+        import entari_plugin_htmlrender.runtime
 
-        nonebot.init(
-            driver="~none",
-            log_level="ERROR",
-            render={"provider": "htmlkit", "startup": "off"},
+        forbidden_prefixes = (
+            "entari_plugin_htmlrender.adapters",
+            "entari_plugin_htmlrender.host.composition",
+            "entari_plugin_htmlrender.host._service",
+            "arclet.entari",
         )
-        nonebot.require("nonebot_plugin_htmlrender")
-
-        if "nonebot_plugin_htmlkit" not in sys.modules:
-            raise SystemExit("HTMLKit provider did not bootstrap its required plugin")
-
         unexpected = {
-            "PIL",
-            "playwright.async_api",
-            "skia",
-            "takumi_py",
-            "nonebot_plugin_htmlrender.adapters.pillow.renderer",
-            "nonebot_plugin_htmlrender.adapters.playwright.render",
-            "nonebot_plugin_htmlrender.adapters.skia.renderer",
-            "nonebot_plugin_htmlrender.adapters.takumi.provider",
-        } & set(sys.modules)
+            name
+            for name in sys.modules
+            if any(
+                name == prefix or name.startswith(f"{prefix}.")
+                for prefix in forbidden_prefixes
+            )
+        }
         if unexpected:
-            raise SystemExit(f"unexpected sibling backends loaded: {sorted(unexpected)}")
+            raise SystemExit(f"core import crossed a host boundary: {sorted(unexpected)}")
         """
     )
 
     assert result.returncode == 0, result.stderr
 
 
-def test_graphics_backend_composes_without_loading_html_engines() -> None:
+def test_first_party_provider_modules_do_not_load_native_engines() -> None:
     result = _run_python(
         """
         import sys
 
-        import nonebot
+        from entari_plugin_htmlrender.adapters.playwright import provider as playwright
+        from entari_plugin_htmlrender.adapters.takumi import provider as takumi
 
-        nonebot.init(
-            log_level="ERROR",
-            render={
-                "provider": None,
-                "graphics": {"backends": ["pillow"]},
-            },
-        )
-        nonebot.require("nonebot_plugin_htmlrender")
+        if playwright.PROVIDER.id != "playwright":
+            raise SystemExit("playwright provider id mismatch")
+        if takumi.PROVIDER.id != "takumi":
+            raise SystemExit("takumi provider id mismatch")
 
-        from nonebot_plugin_htmlrender import get_default_application
-
-        get_default_application()
-        if "nonebot_plugin_htmlrender.adapters.pillow.renderer" not in sys.modules:
-            raise SystemExit("configured Pillow capability was not composed")
-
-        unexpected = {
-            "nonebot_plugin_htmlkit",
+        forbidden = {
             "playwright.async_api",
             "takumi_py",
-            "nonebot_plugin_htmlrender.adapters.htmlkit.provider",
-            "nonebot_plugin_htmlrender.adapters.playwright.render",
-            "nonebot_plugin_htmlrender.adapters.takumi.provider",
-        } & set(sys.modules)
+            "entari_plugin_htmlrender.adapters.playwright.render",
+        }
+        unexpected = forbidden & set(sys.modules)
         if unexpected:
-            raise SystemExit(f"unexpected HTML engines loaded: {sorted(unexpected)}")
+            raise SystemExit(f"provider import loaded native engines: {sorted(unexpected)}")
         """
     )
 
     assert result.returncode == 0, result.stderr
 
 
-def test_missing_playwright_extra_keeps_preparation_available() -> None:
-    result = _run_python(
-        """
-        import importlib.abc
-        import sys
-
-        import anyio
-        import nonebot
-
-        class _BlockPlaywright(importlib.abc.MetaPathFinder):
-            def find_spec(self, fullname, path=None, target=None):
-                del path, target
-                if fullname == "playwright" or fullname.startswith("playwright."):
-                    raise ModuleNotFoundError(fullname)
-                return None
-
-        sys.meta_path.insert(0, _BlockPlaywright())
-        nonebot.init(
-            log_level="ERROR",
-            render={"provider": "playwright", "startup": "off"},
-        )
-        nonebot.require("nonebot_plugin_htmlrender")
-
-        from nonebot_plugin_htmlrender import get_default_application
-
-        application = get_default_application()
-
-        async def check_preparation():
-            prepared = await application.preparation.prepare_text("hello")
-            if "hello" not in prepared.html:
-                raise SystemExit("preparation did not produce text HTML")
-
-        anyio.run(check_preparation)
-        if "nonebot_plugin_htmlrender.adapters.playwright.render" in sys.modules:
-            raise SystemExit("availability imported the heavy Playwright backend")
-        """
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_filehost_policy_mounts_hosted_assets_before_startup() -> None:
+def test_selected_playwright_provider_build_stays_lazy() -> None:
     result = _run_python(
         """
         import sys
 
-        import nonebot
+        from entari_plugin_htmlrender.host.composition import compose_runtime
+        from entari_plugin_htmlrender.host.config import RenderSettings
 
-        nonebot.init(
-            driver="~fastapi",
-            log_level="ERROR",
-            render={
-                "provider": "playwright",
-                "startup": "off",
-                "provider_config": {
-                    "resource_resolve_mode": "auto",
-                    "remote_local_resource_policy": "filehost",
-                    "local_local_resource_policy": "filehost",
-                },
-                "resources": {
-                    "filehost": {
-                        "public_base_url": "http://assets.example/htmlrender/",
-                    },
-                },
-            },
+        settings = RenderSettings.model_validate(
+            {"provider": "playwright", "startup": "off"}
         )
-        nonebot.require("nonebot_plugin_htmlrender")
+        plan = compose_runtime(settings)
+        runtime = plan.build_runtime()
 
-        driver = nonebot.get_driver()
-        paths = [route.path for route in driver.server_app.routes]
-        if not any(path.startswith("/_htmlrender/assets/") for path in paths):
-            raise SystemExit("hosted asset mount was not installed at import")
-
+        if plan.provider is None or plan.provider.id != "playwright":
+            raise SystemExit("playwright provider was not selected")
+        if runtime is None:
+            raise SystemExit("render runtime was not built")
         unexpected = {
-            "playwright.async_api",
-            "nonebot_plugin_htmlrender.adapters.playwright.render",
-        } & set(sys.modules)
+            name
+            for name in sys.modules
+            if name == "playwright" or name.startswith("playwright.")
+        }
         if unexpected:
-            raise SystemExit(f"unexpected backend modules loaded: {sorted(unexpected)}")
+            raise SystemExit(
+                f"selected provider build loaded Playwright: {sorted(unexpected)}"
+            )
         """
     )
 
     assert result.returncode == 0, result.stderr
 
 
-def test_legacy_configuration_keys_fail_plugin_load() -> None:
-    result = _run_python(
-        """
-        import nonebot
-
-        nonebot.init(
-            log_level="ERROR",
-            render_backend="playwright",
-            render={"provider": None},
-        )
-        try:
-            nonebot.require("nonebot_plugin_htmlrender")
-        except RuntimeError:
-            raise SystemExit(0)
-        raise SystemExit("plugin load must fail on legacy render_backend key")
-        """
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_playwright_adapter_package_is_static_and_lazy() -> None:
+def test_observability_import_does_not_load_optional_sdks() -> None:
     result = _run_python(
         """
         import sys
 
-        import nonebot
+        import entari_plugin_htmlrender.adapters.observability
 
-        nonebot.init(log_level="ERROR", render={"provider": None})
-        nonebot.require("nonebot_plugin_htmlrender")
+        unexpected = {"prometheus_client", "sentry_sdk"} & set(sys.modules)
+        if unexpected:
+            raise SystemExit(f"observability import loaded optional SDKs: {sorted(unexpected)}")
+        """
+    )
 
-        import nonebot_plugin_htmlrender.adapters.playwright as playwright_pkg
+    assert result.returncode == 0, result.stderr
 
-        if "__getattr__" in playwright_pkg.__dict__:
+
+def test_playwright_package_and_lightweight_config_stay_lazy() -> None:
+    result = _run_python(
+        """
+        import sys
+
+        import entari_plugin_htmlrender.adapters.playwright as playwright_package
+        from entari_plugin_htmlrender.adapters.playwright.config import PlaywrightConfig
+
+        if "__getattr__" in playwright_package.__dict__:
             raise SystemExit("playwright package must not use module __getattr__")
+        PlaywrightConfig()
 
-        unexpected = {
-            "nonebot_plugin_htmlrender.adapters.playwright.render",
-        } & set(sys.modules)
+        forbidden = {
+            "playwright.async_api",
+            "entari_plugin_htmlrender.adapters.playwright._page",
+            "entari_plugin_htmlrender.adapters.playwright.operations",
+            "entari_plugin_htmlrender.adapters.playwright.render",
+        }
+        unexpected = forbidden & set(sys.modules)
         if unexpected:
-            raise SystemExit(f"unexpected lazy modules loaded: {sorted(unexpected)}")
+            raise SystemExit(f"lightweight config loaded backend: {sorted(unexpected)}")
         """
     )
 
     assert result.returncode == 0, result.stderr
 
 
-def test_playwright_package_submodule_import_does_not_load_backend_render() -> None:
+def test_playwright_install_state_does_not_import_entari() -> None:
     result = _run_python(
         """
+        import importlib.abc
         import sys
 
-        import nonebot
+        class BlockEntari(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                del path, target
+                if fullname == "arclet.entari" or fullname.startswith("arclet.entari."):
+                    raise ModuleNotFoundError(fullname)
+                return None
 
-        nonebot.init(log_level="ERROR", render={"provider": None})
-        nonebot.require("nonebot_plugin_htmlrender")
+        sys.meta_path.insert(0, BlockEntari())
+        from entari_plugin_htmlrender.adapters.playwright import install_state
+        from entari_plugin_htmlrender.adapters.playwright.config import PlaywrightConfig
 
-        from nonebot_plugin_htmlrender.adapters.playwright import install_state as runtime
-
-        if runtime.__name__ != "nonebot_plugin_htmlrender.adapters.playwright.install_state":
-            raise SystemExit("runtime submodule import resolved incorrectly")
-
+        config = PlaywrightConfig()
+        install_state.get_playwright_storage_path(config)
         unexpected = {
-            "nonebot_plugin_htmlrender.adapters.playwright.render",
-        } & set(sys.modules)
+            name
+            for name in sys.modules
+            if name == "arclet.entari" or name.startswith("arclet.entari.")
+        }
         if unexpected:
-            raise SystemExit(f"unexpected lazy modules loaded: {sorted(unexpected)}")
+            raise SystemExit(f"install state imported Entari: {sorted(unexpected)}")
         """
     )
 

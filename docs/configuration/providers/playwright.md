@@ -9,18 +9,19 @@ icon: lucide/monitor-cog
 ## 安装与最小配置
 
 ```bash
-uv add "nonebot-plugin-htmlrender[playwright]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[playwright]>=0.8.0,<0.9"
 ```
 
 ```yaml
-render:
-  provider: playwright
-  startup: probe
-  provider_config:
-    engine: chromium
-    connect_ws:
-      endpoint: ws://playwright:3000/
-    remote_local_resource_policy: memory
+plugins:
+  htmlrender:
+    provider: playwright
+    startup: probe
+    provider_config:
+      engine: chromium
+      connect_ws:
+        endpoint: ws://playwright:3000/
+      remote_local_resource_policy: memory
 ```
 
 ## 部署优先级 { #deployment-priority }
@@ -60,12 +61,13 @@ uv run playwright install --with-deps chromium
     ```
 
     ```yaml
-    render:
-      provider: playwright
-      startup: probe
-      provider_config:
-        storage_path: /var/lib/htmlrender/playwright-project
-        skip_browser_install: true
+    plugins:
+      htmlrender:
+        provider: playwright
+        startup: probe
+        provider_config:
+          storage_path: /var/lib/htmlrender/playwright-project
+          skip_browser_install: true
     ```
 
     安装用户必须能写入该目录，Bot 服务用户必须能读取并执行其中的文件。依赖更新后，即使目录仍然存在，也要从更新后的同一虚拟环境重新执行安装。
@@ -76,24 +78,24 @@ uv run playwright install --with-deps chromium
 
 推荐的 Docker/WS 远程模式下，Bot 进程仍需 `playwright` extra，但不需要本地浏览器二进制及其系统依赖；这些要求由远程服务承担。WS 服务与 client 必须精确锁定到同一 Playwright 版本。连接前虽有版本风险门禁，但它在相邻 minor、部分 patch 差异或无法探测远端版本时仍会继续，不能代替版本锁定；CDP 则完全不执行该版本比较。详细行为与服务端检查表见[远程 Playwright 部署](../remote-playwright.md#ws-version-gate-and-startup-probe)。
 
-下表所有字段均位于 `render.provider_config`：
+下表所有字段均位于 `provider_config`：
 
 | 完整路径 | 默认值 | 说明 |
 | --- | --- | --- |
-| `render.provider_config.engine` | `chromium` | `chromium`、`firefox`、`webkit` |
-| `render.provider_config.channel` | `null` | Chromium channel |
-| `render.provider_config.executable_path` | `null` | 自定义浏览器路径 |
-| `render.provider_config.launch_args` | `null` | 本地 launch 参数字符串 |
-| `render.provider_config.proxy_server` | `null` | 浏览器代理 |
-| `render.provider_config.proxy_bypass` | `null` | 代理绕过规则 |
-| `render.provider_config.connect_ws.endpoint` | `null` | Playwright WebSocket endpoint |
-| `render.provider_config.connect_cdp.endpoint` | `null` | Chromium CDP endpoint |
-| `render.provider_config.install_mirror` | `null` | 浏览器安装镜像 |
-| `render.provider_config.install_proxy` | `null` | 浏览器安装代理 |
-| `render.provider_config.skip_browser_install` | `false` | 缺少本地浏览器时禁止自动安装 |
-| `render.provider_config.cleanup_legacy_cache` | `false` | 是否清理旧浏览器缓存 |
-| `render.provider_config.close_on_exit` | `true` | composition 关闭时关闭本地浏览器 |
-| `render.provider_config.storage_path` | `null` | Playwright 浏览器存储目录；默认使用插件数据目录 |
+| `provider_config.engine` | `chromium` | `chromium`、`firefox`、`webkit` |
+| `provider_config.channel` | `null` | Chromium channel |
+| `provider_config.executable_path` | `null` | 自定义浏览器路径 |
+| `provider_config.launch_args` | `null` | 本地 launch 参数字符串 |
+| `provider_config.proxy_server` | `null` | 浏览器代理 |
+| `provider_config.proxy_bypass` | `null` | 代理绕过规则 |
+| `provider_config.connect_ws.endpoint` | `null` | Playwright WebSocket endpoint |
+| `provider_config.connect_cdp.endpoint` | `null` | Chromium CDP endpoint |
+| `provider_config.install_mirror` | `null` | 浏览器安装镜像 |
+| `provider_config.install_proxy` | `null` | 浏览器安装代理 |
+| `provider_config.skip_browser_install` | `false` | 缺少本地浏览器时禁止自动安装 |
+| `provider_config.cleanup_legacy_cache` | `false` | 是否清理旧浏览器缓存 |
+| `provider_config.close_on_exit` | `true` | composition 关闭时关闭本地浏览器 |
+| `provider_config.storage_path` | `null` | Playwright 浏览器存储目录；默认使用插件数据目录 |
 
 `channel` 只适用于 Chromium；CDP 只适用于 Chromium；WS 与 CDP endpoint互斥。空的 `executable_path` 会归一化为 `null`。
 
@@ -103,9 +105,9 @@ uv run playwright install --with-deps chromium
 
 | 完整路径 | 默认值 | 说明 |
 | --- | --- | --- |
-| `render.provider_config.resource_resolve_mode` | `auto` | `off`、`auto`、`strict` |
-| `render.provider_config.remote_local_resource_policy` | `memory` | `memory`、`passthrough`、`filehost`、`error` |
-| `render.provider_config.local_local_resource_policy` | `file` | `file`、`passthrough`、`filehost` |
+| `provider_config.resource_resolve_mode` | `auto` | `off`、`auto`、`strict` |
+| `provider_config.remote_local_resource_policy` | `memory` | `memory`、`passthrough`、`filehost`、`error` |
+| `provider_config.local_local_resource_policy` | `file` | `file`、`passthrough`、`filehost` |
 
 未传每次调用的 `resource_policy` 时，执行端严格采用`resource_resolve_mode`；显式 `ResourcePolicy` 会覆盖该默认值。`off` 调用不读取、物化或发布本地引用；若选中的 transport 是 `filehost`，composition 仍会准备publisher，使后续单次调用可以覆盖为 `auto` 或 `strict`。`auto` 容忍无法读取的引用，`strict` 则将其报告为资源错误。
 
@@ -115,45 +117,46 @@ uv run playwright install --with-deps chromium
 asset store 提供。可选 `filehost` extra 会安装 `py-machineid`，用于派生默认请求头守卫值：
 
 ```bash
-uv add "nonebot-plugin-htmlrender[playwright,filehost]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[playwright,filehost]>=0.8.0,<0.9"
 ```
 
-不安装该 extra 时 transport 仍可使用内置机器标识回退；对多副本或需要显式轮换的部署，直接配置 secret `render.resources.filehost.request_header_value`，不要依赖自动派生值。
+不安装该 extra 时 transport 仍可使用内置机器标识回退；对多副本或需要显式轮换的部署，直接配置 secret `resources.filehost.request_header_value`，不要依赖自动派生值。
 
 两种远程 transport 遵循同一浏览器响应契约：`memory` 的 Page route 会返回正确媒体类型、cache header 与 `Access-Control-Allow-Origin: *`；filehost 只为通过请求头守卫的资源请求添加该 CORS 响应头，未认证请求返回 403。
 
 !!! warning "filehost 代理必须保留双向 header"
 
-    反向代理必须向 Bot 透传 `render.resources.filehost.request_header_name` 对应的请求头，并向浏览器保留 `Access-Control-Allow-Origin` 响应头。通配 CORS 只允许浏览器读取资源，不代替 filehost 授权。
+    反向代理必须向 Bot 透传 `resources.filehost.request_header_name` 对应的请求头，并向浏览器保留 `Access-Control-Allow-Origin` 响应头。通配 CORS 只允许浏览器读取资源，不代替 filehost 授权。
 
-filehost 运行参数由核心 Resource Service 管理，位于 `render.resources.filehost`：
+filehost 运行参数由核心 Resource Service 管理，位于 `resources.filehost`：
 
 | 完整路径 | 默认值 |
 | --- | --- |
-| `render.resources.filehost.cache_ttl_seconds` | `300.0` |
-| `render.resources.filehost.prewarm_enabled` | `true` |
-| `render.resources.filehost.prewarm_paths` | `[]` |
-| `render.resources.filehost.prewarm_max_files` | `256` |
-| `render.resources.filehost.prewarm_extensions` | `[]` |
-| `render.resources.filehost.request_header_name` | `X-HTMLRender-Filehost-Request` |
-| `render.resources.filehost.request_header_value` | `null` |
-| `render.resources.filehost.request_header_salt` | 内置稳定值 |
+| `resources.filehost.cache_ttl_seconds` | `300.0` |
+| `resources.filehost.prewarm_enabled` | `true` |
+| `resources.filehost.prewarm_paths` | `[]` |
+| `resources.filehost.prewarm_max_files` | `256` |
+| `resources.filehost.prewarm_extensions` | `[]` |
+| `resources.filehost.request_header_name` | `X-HTMLRender-Filehost-Request` |
+| `resources.filehost.request_header_value` | `null` |
+| `resources.filehost.request_header_salt` | 内置稳定值 |
 
-路径授权不在 Provider 配置中；统一使用`render.resources.local_access.allow_any_path` 与`render.resources.local_access.allowed_paths`。
+路径授权不在 Provider 配置中；统一使用`resources.local_access.allow_any_path` 与`resources.local_access.allowed_paths`。
 
 ## typed Capability
 
-通用 `render_*` 不接受导航、header 或 User-Agent。页面控制通过`app.extensions.playwright` 获取：
+通用 `render_*` 不接受导航、header 或 User-Agent。页面控制通过显式 runtime 获取：
 
 ```python
-from nonebot_plugin_htmlrender import get_default_application
+from entari_plugin_htmlrender import RuntimeSource, resolve_runtime
 
-playwright = get_default_application().extensions.playwright
-async with playwright.page(
-    viewport={"width": 1280, "height": 800},
-    extra_http_headers={"X-Trace": "example"},
-) as page:
-    await page.goto("https://example.com")
+async def open_page(runtime: RuntimeSource) -> None:
+    playwright = resolve_runtime(runtime).extensions.playwright
+    async with playwright.page(
+        viewport={"width": 1280, "height": 800},
+        extra_http_headers={"X-Trace": "example"},
+    ) as page:
+        await page.goto("https://example.com")
 ```
 
 远程部署与安全边界见 [远程 Playwright](../remote-playwright.md)。

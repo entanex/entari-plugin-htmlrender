@@ -7,15 +7,15 @@ import anyio
 import jinja2
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.resources import (
+from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     ConfiguredLocalAccessPolicy,
 )
-from nonebot_plugin_htmlrender.adapters.templates import JinjaTemplateCompiler
-from nonebot_plugin_htmlrender.resources.errors import ResourceAccessDenied
-from nonebot_plugin_htmlrender.resources.observation import NoopCacheObserver
-from nonebot_plugin_htmlrender.resources.source import PackageResourceSource
-from nonebot_plugin_htmlrender.resources.templating import (
+from entari_plugin_htmlrender.adapters.templates import JinjaTemplateCompiler
+from entari_plugin_htmlrender.resources.errors import ResourceAccessDenied
+from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
+from entari_plugin_htmlrender.resources.source import PackageResourceSource
+from entari_plugin_htmlrender.resources.templating import (
     TemplateEnvironmentCacheStats,
 )
 
@@ -55,7 +55,7 @@ async def test_package_loader_renders_builtin_template() -> None:
         observer=NoopCacheObserver(),
     )
     source = PackageResourceSource(
-        "nonebot_plugin_htmlrender",
+        "entari_plugin_htmlrender",
         "templates/text",
     )
 

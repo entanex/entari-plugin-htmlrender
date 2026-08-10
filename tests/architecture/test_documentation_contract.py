@@ -14,10 +14,10 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = "nonebot_plugin_htmlrender"
-PACKAGE_ROOT = ROOT / PACKAGE
-SETTINGS_PATH = PACKAGE_ROOT / "bootstrap" / "settings.py"
-APPLICATION_EXTENSIONS_PATH = PACKAGE_ROOT / "application" / "extensions.py"
+PACKAGE = "entari_plugin_htmlrender"
+PACKAGE_ROOT = ROOT / "src" / PACKAGE
+SETTINGS_PATH = PACKAGE_ROOT / "host" / "config.py"
+RUNTIME_EXTENSIONS_PATH = PACKAGE_ROOT / "runtime" / "extensions.py"
 MERMAID_RUNTIME_PATH = (
     ROOT / "docs" / "assets" / "javascripts" / "mermaid-11.16.0.min.js"
 )
@@ -34,25 +34,28 @@ DOCUMENTATION_ROOTS: Mapping[str, Path] = {
 
 MIGRATION_CONTRACT_ALLOWLIST: Mapping[Path, str] = {
     Path("docs/guides/migration/index.md"): "migration index and removed-key lookup",
+    Path("docs/guides/migration/nonebot-to-entari.md"): (
+        "removed NoneBot host and configuration mapping"
+    ),
     Path("docs/guides/migration/v0.8.md"): "0.7 to 0.8 contract mapping",
     Path("docs/guides/migration/v0.7.2.md"): "historical 0.7.2 migration record",
 }
 
 EXPECTED_PUBLIC_EXPORTS = frozenset(
     {
-        "Application",
-        "ApplicationNotInitialized",
+        "RenderRuntime",
+        "RuntimeNotBound",
+        "RuntimeResolver",
+        "RuntimeSource",
         "ErrorCause",
         "RasterOptions",
         "RenderedHtml",
         "RenderedImage",
-        "Renderer",
+        "HtmlRenderer",
         "RenderingError",
         "ResourcePolicy",
         "ResourceResolution",
-        "get_default_application",
-        "get_default_renderer",
-        "prepare_html",
+        "parse_html",
         "prepare_markdown",
         "prepare_template",
         "prepare_text",
@@ -63,34 +66,50 @@ EXPECTED_PUBLIC_EXPORTS = frozenset(
         "render_template_html",
         "render_text",
         "resolve_template_vars",
-        "to_resource_url",
+        "resolve_resource_url",
+        "resolve_runtime",
+        "runtime_context",
     }
+)
+
+REMOVED_CONFIG_KEYS = (
+    "render_backend",
+    "render_startup_mode",
+    "render_playwright",
+    "render_takumi",
+    "render_storage_path",
+    "render_cache_path",
+    "render_config_path",
+    "render_resource_cache_max_entries",
+    "render_resource_cache_max_bytes",
+    "render_resource_cache_revalidate_seconds",
+    "render_template_environment_cache_max_entries",
 )
 
 EXPECTED_CONFIG_PATHS = frozenset(
     {
-        "render.observability.prometheus",
-        "render.observability.sentry",
-        "render.html.max_auto_height",
-        "render.html.max_concurrency",
-        "render.html.max_device_pixel_ratio",
-        "render.html.max_output_bytes",
-        "render.html.max_pixels",
-        "render.html.max_source_bytes",
-        "render.provider",
-        "render.provider_config",
-        "render.resources.cache.max_bytes",
-        "render.resources.cache.max_entries",
-        "render.resources.cache.max_resource_bytes",
-        "render.resources.cache.revalidate_seconds",
-        "render.resources.local_access.allow_any_path",
-        "render.resources.local_access.allowed_paths",
-        "render.resources.templates.environment_cache_max_entries",
-        "render.resources.templates.environment_compiled_cache_size",
-        "render.resources.traversal.max_concurrency",
-        "render.resources.traversal.max_depth",
-        "render.resources.traversal.max_nodes",
-        "render.startup",
+        "observability.prometheus",
+        "observability.sentry",
+        "html.max_auto_height",
+        "html.max_concurrency",
+        "html.max_device_pixel_ratio",
+        "html.max_output_bytes",
+        "html.max_pixels",
+        "html.max_source_bytes",
+        "provider",
+        "provider_config",
+        "resources.cache.max_bytes",
+        "resources.cache.max_entries",
+        "resources.cache.max_resource_bytes",
+        "resources.cache.revalidate_seconds",
+        "resources.local_access.allow_any_path",
+        "resources.local_access.allowed_paths",
+        "resources.templates.environment_cache_max_entries",
+        "resources.templates.environment_compiled_cache_size",
+        "resources.traversal.max_concurrency",
+        "resources.traversal.max_depth",
+        "resources.traversal.max_nodes",
+        "startup",
     }
 )
 
@@ -114,11 +133,17 @@ EXPECTED_ARCHITECTURE_TERMS = frozenset(
 
 _REMOVED_API_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
+        "removed NoneBot configuration wrapper",
+        re.compile(
+            r"`render\.(?:provider(?:_config)?|startup|html|graphics|resources|observability)\b"
+        ),
+    ),
+    (
         "removed first-party extension contract",
         re.compile(
             r"\b(?:"
             r"PLAYWRIGHT_CAPTURE|PLAYWRIGHT_PAGE|TAKUMI_RENDERER|"
-            r"HtmlkitApi|PlaywrightCapabilityAdapter|TakumiCapabilityAdapter|"
+            r"PlaywrightCapabilityAdapter|TakumiCapabilityAdapter|"
             r"TakumiApi|TakumiExtension"
             r")\b|\.extensions\.graphics\b|\.extension\(\)"
         ),
@@ -128,7 +153,7 @@ _REMOVED_API_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b(?:"
             r"BackendCapability|BackendExtension|BackendStatus|RenderBackend|"
-            r"RenderRuntime|RenderSession|RenderContext|"
+            r"RenderSession|RenderContext|"
             r"Supports[A-Za-z0-9_]*Backend"
             r")\b|`(?:Backend|Render)`"
         ),
@@ -166,7 +191,7 @@ _REMOVED_API_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "removed public module",
-        re.compile(r"\bnonebot_plugin_htmlrender\.(?:backend|config|render)(?:\b|\.)"),
+        re.compile(r"\bentari_plugin_htmlrender\.(?:backend|config|render)(?:\b|\.)"),
     ),
 )
 
@@ -317,7 +342,7 @@ def _stale_contract_occurrences() -> list[str]:
             "removed flat configuration key",
             re.compile(rf"\b{re.escape(key)}\b", re.IGNORECASE),
         )
-        for key in _literal_string_sequence(SETTINGS_PATH, "LEGACY_CONFIG_KEYS")
+        for key in REMOVED_CONFIG_KEYS
     )
     occurrences: list[str] = []
     for path in _current_contract_files():
@@ -467,15 +492,15 @@ def test_required_public_surface_is_exported_and_documented() -> None:
     )
 
 
-def _application_extension_properties() -> frozenset[str]:
+def _runtime_extension_properties() -> frozenset[str]:
     tree = ast.parse(
-        APPLICATION_EXTENSIONS_PATH.read_text("utf-8"),
-        filename=str(APPLICATION_EXTENSIONS_PATH),
+        RUNTIME_EXTENSIONS_PATH.read_text("utf-8"),
+        filename=str(RUNTIME_EXTENSIONS_PATH),
     )
     extension_class = next(
         node
         for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "ApplicationExtensions"
+        if isinstance(node, ast.ClassDef) and node.name == "RuntimeExtensions"
     )
     return frozenset(
         node.name
@@ -489,7 +514,7 @@ def _application_extension_properties() -> frozenset[str]:
 
 
 def test_first_party_extension_properties_are_documented() -> None:
-    properties = _application_extension_properties()
+    properties = _runtime_extension_properties()
     assert properties == {"playwright", "takumi", "pillow", "skia"}
     current_text = "\n".join(
         path.read_text("utf-8") for path in _current_contract_files()
@@ -500,7 +525,7 @@ def test_first_party_extension_properties_are_documented() -> None:
         if re.search(rf"\bextensions\.{re.escape(name)}\b", current_text) is None
     )
     assert not missing, (
-        "First-party Application.extensions properties are undocumented: "
+        "First-party RenderRuntime.extensions properties are undocumented: "
         + ", ".join(missing)
     )
 
@@ -544,7 +569,7 @@ def test_backend_runtime_dependency_boundaries_are_documented() -> None:
     ):
         assert f"`{dependency}`" in skia_text
     assert 'uv run python3 -c "import skia"' in skia_text
-    for engine in ("Playwright", "HTMLKit", "Takumi", "Pillow", "Skia"):
+    for engine in ("Playwright", "Takumi", "Pillow", "Skia"):
         assert re.search(rf"^\| {engine} \|", provider_matrix, flags=re.MULTILINE)
 
 
@@ -570,7 +595,7 @@ def test_cache_components_and_public_invalidation_boundaries_are_documented() ->
         "`takumi_compiled`",
     ):
         assert cache_name in cache_guide
-    assert "`app.resources.clear()` 只清理当前 Application" in cache_guide
+    assert "`runtime.resources.clear()` 只清理当前 RenderRuntime" in cache_guide
     assert "不会清理 Jinja Environment" in cache_guide
     assert "filter 的名称和 callable 身份" in cache_guide
     assert "无法通过单纯增加内存解决" in cache_guide
@@ -673,8 +698,8 @@ def _config_leaf_paths() -> frozenset[str]:
             else:
                 leaves.add(".".join(path))
 
-    assert "RenderPluginConfig" in models, "RenderPluginConfig must remain a BaseModel"
-    visit("RenderPluginConfig", ())
+    assert "RenderSettings" in models, "RenderSettings must remain a BaseModel"
+    visit("RenderSettings", ())
     return frozenset(leaves)
 
 
@@ -687,7 +712,7 @@ def test_unified_config_schema_and_documentation_stay_in_sync() -> None:
     )
     missing_docs = sorted(path for path in schema_paths if path not in config_text)
     assert not missing_schema, (
-        "Unified render configuration lost required paths: " + ", ".join(missing_schema)
+        "Unified plugin configuration lost required paths: " + ", ".join(missing_schema)
     )
     assert not missing_docs, (
         "Configuration fields must be documented with their full dotted paths: "

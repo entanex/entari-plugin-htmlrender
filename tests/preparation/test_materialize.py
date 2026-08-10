@@ -4,30 +4,30 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.resources import (
+from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
     build_resource_reader,
 )
-from nonebot_plugin_htmlrender.preparation import prepare_html
-from nonebot_plugin_htmlrender.preparation.materialize import (
+from entari_plugin_htmlrender.preparation import parse_html
+from entari_plugin_htmlrender.preparation.materialize import (
     AssetMaterializationError,
     materialize_local_assets,
 )
-from nonebot_plugin_htmlrender.rendering.errors import ResourceResolutionError
-from nonebot_plugin_htmlrender.resources.config import (
+from entari_plugin_htmlrender.rendering.errors import ResourceResolutionError
+from entari_plugin_htmlrender.resources.config import (
     ResourceCacheSettings,
     ResourceResolveMode,
     ResourceStrategy,
 )
-from nonebot_plugin_htmlrender.resources.observation import NoopCacheObserver
-from nonebot_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
+from entari_plugin_htmlrender.resources.service import ResourceService
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from nonebot_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
+    from entari_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
 
 
 async def test_materialize_recurses_through_stylesheets(
@@ -47,7 +47,7 @@ async def test_materialize_recurses_through_stylesheets(
         '@import "theme.css"; .hero { background: url(../image.png) }'
     )
     imported.write_text('@font-face { src: url("font.woff2") }')
-    prepared = prepare_html(
+    prepared = parse_html(
         '<link rel="stylesheet" href="styles/site.css"><img src="image.png">',
         base_url=document.as_uri(),
     )
@@ -63,7 +63,7 @@ async def test_materialize_recurses_through_stylesheets(
 async def test_materialize_strict_and_tolerant_modes(
     resources: ResourceService,
 ) -> None:
-    prepared = prepare_html('<img src="relative.png">')
+    prepared = parse_html('<img src="relative.png">')
     with pytest.raises(AssetMaterializationError, match="no filesystem base"):
         await materialize_local_assets(prepared, resources=resources)
     assert (
@@ -85,7 +85,7 @@ async def test_materialize_enforces_document_root(
     allowed.mkdir()
     outside = tmp_path / "secret.txt"
     outside.write_text("secret")
-    prepared = prepare_html(
+    prepared = parse_html(
         f'<base href="{tmp_path.as_uri()}/"><img src="secret.txt">',
         base_url=(allowed / "document.html").as_uri(),
     )

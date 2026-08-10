@@ -12,7 +12,7 @@ import anyio
 from anyio.to_thread import run_sync as run_sync_in_worker
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.takumi import (
+from entari_plugin_htmlrender.adapters.takumi import (
     FileCachePolicy,
     TakumiBackendError,
     TakumiConfig,
@@ -21,8 +21,8 @@ from nonebot_plugin_htmlrender.adapters.takumi import (
     TakumiInputError,
     TakumiRuntimeError,
 )
-from nonebot_plugin_htmlrender.adapters.takumi import runtime as takumi_runtime
-from nonebot_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
+from entari_plugin_htmlrender.adapters.takumi import runtime as takumi_runtime
+from entari_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
 from tests.adapters.takumi.helpers import resource_service
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from pytest import MonkeyPatch
     from pytest_mock import MockerFixture
 
-    from nonebot_plugin_htmlrender.adapters.takumi.types import NativeRenderer
+    from entari_plugin_htmlrender.adapters.takumi.types import NativeRenderer
 
 
 def _wait_until(condition: Callable[[], bool], *, timeout: float = 2) -> None:
@@ -672,7 +672,7 @@ async def test_create_runtime_state_releases_renderer_when_font_registration_fai
     mocker: MockerFixture,
 ) -> None:
     """Alloc-then-raise must not leak the native renderer handle."""
-    from nonebot_plugin_htmlrender.adapters.takumi.runtime import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.takumi.runtime import (  # noqa: PLC0415
         create_runtime_state,
     )
 

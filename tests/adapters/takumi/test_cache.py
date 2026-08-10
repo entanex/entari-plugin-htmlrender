@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.takumi.cache import (
+from entari_plugin_htmlrender.adapters.takumi.cache import (
     SyncWeightedSingleflightLRU,
 )
 

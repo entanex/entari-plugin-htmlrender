@@ -4,7 +4,7 @@ from typing import Any, Protocol, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.rendering import (
     CapabilityCatalog,
     CapabilityKey,
     CapabilityUnavailable,

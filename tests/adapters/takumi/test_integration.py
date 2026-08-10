@@ -4,12 +4,12 @@ import struct
 
 import pytest
 
-takumi_py = pytest.importorskip("takumi_py")
-
-from nonebot_plugin_htmlrender.adapters.takumi import TakumiConfig, TakumiRuntimeError
-from nonebot_plugin_htmlrender.adapters.takumi.api import TakumiAPIAdapter
-from nonebot_plugin_htmlrender.adapters.takumi.runtime import create_runtime_state
+from entari_plugin_htmlrender.adapters.takumi import TakumiConfig, TakumiRuntimeError
+from entari_plugin_htmlrender.adapters.takumi.api import TakumiAPIAdapter
+from entari_plugin_htmlrender.adapters.takumi.runtime import create_runtime_state
 from tests.adapters.takumi.helpers import resource_service
+
+takumi_py = pytest.importorskip("takumi_py")
 
 
 async def test_takumi_native_boundary_renders_extension_output() -> None:

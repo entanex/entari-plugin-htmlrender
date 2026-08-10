@@ -25,9 +25,9 @@ services:
       - -lc
       - |
         set -e
-        uv pip install --python /venv/bin/python --no-deps -e /app
-        REMOTE_RESOURCE_POLICY=memory /venv/bin/python tests/remote_smoke.py
-        REMOTE_RESOURCE_POLICY=filehost /venv/bin/python tests/remote_smoke.py
+        uv pip install --python /venv/bin/python3 --no-deps -e /app
+        REMOTE_RESOURCE_POLICY=memory /venv/bin/python3 tests/remote_smoke.py
+        REMOTE_RESOURCE_POLICY=filehost /venv/bin/python3 tests/remote_smoke.py
 
   playwright:
     image: ${PLAYWRIGHT_IMAGE:-htmlrender-playwright:local}

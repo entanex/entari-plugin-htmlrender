@@ -8,18 +8,19 @@ import anyio
 from anyio.lowlevel import checkpoint
 from playwright.async_api import Browser, Page, Playwright
 
-from nonebot_plugin_htmlrender.adapters._lease import ExecutionLeaseProvider
-from nonebot_plugin_htmlrender.adapters.playwright.capabilities import (
+from entari_plugin_htmlrender.adapters._lease import ExecutionLeaseProvider
+from entari_plugin_htmlrender.adapters.playwright.capabilities import (
     PlaywrightAccessAdapter,
 )
-from nonebot_plugin_htmlrender.adapters.playwright.render import (
+from entari_plugin_htmlrender.adapters.playwright.render import (
     PlaywrightLease,
     PlaywrightMode,
 )
-from nonebot_plugin_htmlrender.capabilities import (
+from entari_plugin_htmlrender.capabilities import (
     PLAYWRIGHT,
     PlaywrightAccess,
 )
+from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
 from tests.adapters.conftest import RecordingOperationObserver
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 
     from pytest_mock import MockerFixture
 
-    from nonebot_plugin_htmlrender.rendering.errors import RenderingError
+    from entari_plugin_htmlrender.rendering.errors import RenderingError
 
 
 @dataclass(slots=True)
@@ -115,7 +116,7 @@ async def test_page_context_holds_runtime_lease_until_page_closes(
             order.append("page-close")
 
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.playwright._page.PageContext.open",
+        "entari_plugin_htmlrender.adapters.playwright._page.PageContext.open",
         open_page_context,
     )
     async with anyio.create_task_group() as task_group, capability.page() as opened:
@@ -150,3 +151,62 @@ async def test_browser_context_yields_native_instance_and_tracks_lease() -> None
         {"render.backend": "playwright", "render.access": "native"},
         "success",
     ) in observer.operations
+
+
+async def test_browser_capability_close_waits_for_first_lease_create() -> None:
+    create_entered = anyio.Event()
+    finish_create = anyio.Event()
+    close_started = anyio.Event()
+    close_returned = anyio.Event()
+    errors: list[ProviderLifecycleError] = []
+    closed: list[PlaywrightLease] = []
+    lease = PlaywrightLease(
+        playwright=object.__new__(Playwright),
+        browser=object.__new__(Browser),
+        mode=PlaywrightMode.LOCAL,
+    )
+
+    async def create() -> PlaywrightLease:
+        create_entered.set()
+        await finish_create.wait()
+        return lease
+
+    async def close(created: PlaywrightLease) -> None:
+        closed.append(created)
+
+    leases = ExecutionLeaseProvider(
+        create=create,
+        is_alive=lambda _: True,
+        close=close,
+        observer=RecordingOperationObserver(),
+        translate=_translate,
+        observation_attributes={"render.backend": "playwright"},
+    )
+    capability = PlaywrightAccessAdapter(leases, RecordingOperationObserver())
+
+    async def acquire_browser() -> None:
+        try:
+            async with capability.browser():
+                raise AssertionError("A browser created after close was admitted")
+        except ProviderLifecycleError as error:
+            errors.append(error)
+
+    async def close_provider() -> None:
+        close_started.set()
+        await leases.aclose()
+        close_returned.set()
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(acquire_browser)
+        await create_entered.wait()
+        task_group.start_soon(close_provider)
+        await close_started.wait()
+        await checkpoint()
+
+        assert not close_returned.is_set()
+        assert closed == []
+        finish_create.set()
+        await close_returned.wait()
+        assert closed == [lease]
+
+    assert len(errors) == 1

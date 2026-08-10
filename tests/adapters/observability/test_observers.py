@@ -5,9 +5,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters import observability as telemetry
-from nonebot_plugin_htmlrender.providers.sdk import HTMLKIT_PROVIDER_ID
-from nonebot_plugin_htmlrender.rendering import ProviderExecutionError
+from entari_plugin_htmlrender.adapters import observability as telemetry
+from entari_plugin_htmlrender.rendering import ProviderExecutionError
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
@@ -41,7 +40,7 @@ async def test_track_render_without_span_uses_console_fallback(
         {"render.backend": "playwright", "k": "v"},
     )
     assert perf_counter.call_count == 2
-    assert logger.opt.return_value.debug.call_count == 2
+    assert logger.debug.call_count == 2
     record_sentry.assert_called_once_with("render.html", "playwright", "ok", 0.25)
     record_prom.assert_called_once_with("render.html", "playwright", "ok", 0.25, None)
 
@@ -272,7 +271,8 @@ def test_operation_observer_exports_only_to_its_selected_integrations(
 @pytest.mark.parametrize(
     ("operation", "backend"),
     [
-        ("htmlkit.rasterize_html", HTMLKIT_PROVIDER_ID),
+        ("playwright.rasterize_html", "playwright"),
+        ("takumi.rasterize_html", "takumi"),
         ("graphics.pillow.render_scene", "pillow"),
         ("graphics.skia.render_scene", "skia"),
     ],

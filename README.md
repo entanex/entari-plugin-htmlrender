@@ -1,101 +1,83 @@
-<div align="center">
+# entari-plugin-htmlrender
 
-<img src="docs/assets/nonebot_plugin.svg" alt="nonebot-plugin-htmlrender" width="180" />
+Entari 的 provider-neutral HTML、Markdown、模板与栅格场景渲染库。
 
-# nonebot-plugin-htmlrender
-
-> 面向 NoneBot 的可插拔 HTML 渲染库
-
-[![PyPI](https://img.shields.io/pypi/v/nonebot-plugin-htmlrender.svg)](https://pypi.org/project/nonebot-plugin-htmlrender/)
-[![Python](https://img.shields.io/pypi/pyversions/nonebot-plugin-htmlrender.svg)](https://pypi.org/project/nonebot-plugin-htmlrender/)
-[![License](https://img.shields.io/github/license/kexue-z/nonebot-plugin-htmlrender.svg)](./LICENSE)
-[![Docs](https://img.shields.io/badge/docs-guides%20%26%20reference-EA5252)](docs/index.md)
-
-</div>
-
-## 特性
-
-- 统一的 `render_html`、`render_text`、`render_markdown`、`render_template` API
-- `Application` / `Renderer` 组合边界与可发现的渲染 Provider
-- Playwright 浏览器、Takumi 原生与实验性 HTMLKit Provider
-- 与引擎无关的 Preparation、资源服务和 `PreparedHtml`
-- `RenderedImage` / `RenderedHtml` 类型化产物
-- Playwright、Takumi、Pillow 与 Skia 通过 `app.extensions` 的静态属性直接补全；Playwright/Takumi 还可租借保留上游类型的原生对象
-- 有界资源缓存、严格本地路径策略和可选观测集成
+它把宿主生命周期、渲染用例和引擎 adapter 分开：Entari 拥有一个`HtmlRenderService`，服务解析出 `RenderRuntime`；业务代码通过 caller-first API显式传入 `runtime=`，不会读取进程级默认对象。
 
 ## 安装
 
-本体默认不安装任何位图渲染后端，只提供 Preparation 与模板到 HTML。按需选择一个 HTML 后端（Provider）：
+Python 版本要求保持为 `>=3.10,<4.0`。按实际能力选择 extra：
 
 ```bash
-uv add "nonebot-plugin-htmlrender[playwright]>=0.8.0,<0.9"
-# 或
-uv add "nonebot-plugin-htmlrender[takumi]>=0.8.0,<0.9"
-# 或（实验性、asyncio-only）
-uv add "nonebot-plugin-htmlrender[htmlkit]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[playwright]>=0.8.0,<0.9"
+# 或：takumi / pillow / skia / filehost / sentry / prometheus
 ```
 
-Pillow/Skia 是独立的 `RasterScene` Capability，不属于 HTML 后端。按需增加`pillow`、`skia`、`sentry`、`prometheus`；内置 filehost transport 可选增加`filehost` extra，以使用 `py-machineid` 派生默认请求头守卫值。`all` 会安装全部可选能力。
-
-```bash
-uv add "nonebot-plugin-htmlrender[playwright,filehost,prometheus]>=0.8.0,<0.9"
-```
-
-## 快速开始
+Entari 配置中的插件短名为 `htmlrender`，字段直接对应 `RenderSettings`：
 
 ```yaml
-render:
-  provider: playwright
-  startup: warmup
-  resources:
-    local_access:
-      allowed_paths: [templates]
+plugins:
+  htmlrender:
+    provider: playwright
+    startup: probe
+    provider_config:
+      engine: chromium
 ```
+
+`provider` 可为 `playwright`、`takumi`、第三方 Provider ID 或 `null`；Pillow 与Skia 是独立 Graphics capability，通过 `graphics.backends` 启用。
+
+## 常用 API
+
+在 Entari handler 中让 DI 注入 `HtmlRenderService`，然后显式传给渲染函数：
 
 ```python
-from nonebot import require
+from entari_plugin_htmlrender import (
+    RenderedImage,
+    parse_html,
+    render_markdown,
+    resolve_resource_url,
+)
+from entari_plugin_htmlrender.host import HtmlRenderService
 
-require("nonebot_plugin_htmlrender")
 
-from nonebot_plugin_htmlrender import render_markdown, render_template
-
-
-async def demo() -> tuple[bytes, bytes]:
-    markdown = await render_markdown("# Hello\n\n**NoneBot**", width=720)
-    card = await render_template(
-        "templates",
-        "card.html",
-        variables={"name": "nonebot"},
-        width=480,
+async def build_card(service: HtmlRenderService) -> tuple[RenderedImage, str]:
+    prepared = parse_html("<main>Hello</main>")
+    image = await render_markdown("# Hello, Entari", width=720, runtime=service)
+    resource = await resolve_resource_url(
+        b"inline asset",
+        runtime=service,
     )
-    return bytes(markdown), bytes(card)
+    assert prepared.html
+    return image, resource.value
 ```
 
-`render_*` 返回类型化产物；交给消息适配器时显式使用`bytes(artifact)`，需要 MIME 类型时读取 `artifact.media_type`。
+`HtmlRenderService` 结构化实现 `RuntimeResolver`。在框架无关的函数中，也可以直接接收 `RuntimeSource`：
 
-## 文档
+```python
+from entari_plugin_htmlrender import RuntimeSource, render_html, resolve_runtime
 
-- [快速开始](docs/start/quickstart.md)
-- [选择渲染后端](docs/start/choosing-provider.md)
-- [参考手册](docs/reference/index.md)
-- [配置](docs/configuration/index.md)
-- [远程 Playwright](docs/configuration/remote-playwright.md)
-- [v0.8 迁移指南](docs/guides/migration/v0.8.md)
-- [架构](docs/extensions/architecture.md)
-- [Provider 开发](docs/extensions/provider-development.md)
 
-## 开发
-
-```bash
-make prepare
-make check
-make docs-build
-make test-local
-make build-artifacts
+async def render_badge(runtime: RuntimeSource) -> bytes:
+    active = resolve_runtime(runtime)
+    image = await render_html("<b>ready</b>", runtime=active)
+    return bytes(image)
 ```
 
-远程浏览器联调使用 `make remote-smoke-build`；常规变更可复用镜像执行`make remote-smoke`。
+需要 typed request 或能力发现时，使用 `RenderRuntime.renderer` 上的`HtmlRenderer`；需要原生 Playwright、Takumi 或 Graphics 操作时，从`RenderRuntime.extensions` 租用相应 capability。
 
-## 许可
+## 生命周期
 
-项目使用 MIT License。启用 Takumi、HTMLKit 或其他第三方 Provider 前，请同时检查其依赖与分发许可；HTMLKit rc5 的 native core 为 LGPL-3.0-or-later。
+插件加载时通过 Entari `add_service` 注册 `HtmlRenderService`。Launart 的`preparing` 阶段启动显式 filehost 并按 `startup` 策略启动/探测 Provider，`blocking` 阶段等待退出信号，`cleanup` 阶段停止接收新操作、等待在途操作完成并关闭 runtime 与 filehost。插件热卸载同样进入 cleanup；关闭操作幂等，失败可重试。
+
+## 文档与示例
+
+- [完整文档](https://kexue-z.github.io/entari-plugin-htmlrender/)
+- [`examples/template_render`](examples/template_render)：Entari DI 与模板渲染
+- [`examples/remote_browser`](examples/remote_browser)：远程 Playwright
+- [`examples/takumi_capability`](examples/takumi_capability)：Takumi typed capability
+- [`examples/graphics_render`](examples/graphics_render)：Pillow/Skia `RasterScene`
+- [`examples/echo-provider`](examples/echo-provider)：第三方 Provider entry point
+
+## License
+
+项目使用 MIT License。启用第三方 Provider 或 native backend 前，请同时检查其依赖与分发许可。

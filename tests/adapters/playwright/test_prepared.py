@@ -6,24 +6,24 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.playwright.prepared import (
+from entari_plugin_htmlrender.adapters.playwright.prepared import (
     build_browser_load_plan,
     install_browser_asset_routes,
     materialize_prepared_html,
 )
-from nonebot_plugin_htmlrender.adapters.resources.reader import (
+from entari_plugin_htmlrender.adapters.resources.reader import (
     AnyioWorkerExecutor,
     CompositeResourceReader,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
 )
-from nonebot_plugin_htmlrender.preparation import (
+from entari_plugin_htmlrender.preparation import (
     PreparedAsset,
     PreparedStylesheet,
-    prepare_html,
+    parse_html,
 )
-from nonebot_plugin_htmlrender.resources.config import ResourceStrategy
-from nonebot_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.resources.service import ResourceService
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,7 +63,7 @@ def _write_recursive_stylesheets(root: Path) -> tuple[Path, Path, Path, Path]:
 
 
 def test_materialize_prepared_html_preserves_styles_and_routes_assets() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         """<!doctype html><html><head>
         <style media="screen">.base { background: url(memory:background) }</style>
         </head><body><img src="memory:avatar"></body></html>""",
@@ -86,7 +86,7 @@ def test_materialize_prepared_html_preserves_styles_and_routes_assets() -> None:
 
 
 def test_browser_load_plan_rewrites_only_real_tokens() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         """<html><head><style>@import "memory:second";
         /* url(memory:first) */</style></head><body>
         <!-- <img src="memory:first"> -->
@@ -112,7 +112,7 @@ def test_browser_load_plan_rewrites_only_real_tokens() -> None:
 
 
 def test_browser_load_plan_deduplicates_routes_by_content() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="memory:first"><img src="memory:second">',
         assets=(
             PreparedAsset("memory:first", b"same", "image/png"),
@@ -127,7 +127,7 @@ def test_browser_load_plan_deduplicates_routes_by_content() -> None:
 
 
 def test_browser_load_plan_keeps_navigation_and_resource_base_separate() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="avatar.png">',
         base_url="https://assets.example/base/",
     )
@@ -143,7 +143,7 @@ def test_browser_load_plan_keeps_navigation_and_resource_base_separate() -> None
 
 
 def test_browser_load_plan_uses_http_document_as_relative_resource_fallback() -> None:
-    prepared = prepare_html('<img src="avatar.png">')
+    prepared = parse_html('<img src="avatar.png">')
 
     plan = build_browser_load_plan(
         prepared,
@@ -157,7 +157,7 @@ def test_browser_load_plan_uses_http_document_as_relative_resource_fallback() ->
 
 
 def test_external_stylesheet_references_use_their_own_http_base() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         "<main>ok</main>",
         base_url="https://document.example/card/",
         stylesheets=(
@@ -179,7 +179,7 @@ def test_external_stylesheet_references_use_their_own_http_base() -> None:
 
 
 def test_browser_load_plan_ignores_fake_head_and_base_tokens() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         """<!doctype html><!-- <head><base href="https://fake.example/"> -->
         <script>const fake = '<head><base href="https://fake.example/">';</script>
         <html><body>ok</body></html>""",
@@ -196,7 +196,7 @@ def test_browser_load_plan_ignores_fake_head_and_base_tokens() -> None:
 
 
 def test_browser_load_plan_uses_real_document_base_for_asset_matching() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         '<html><head><base href="https://cdn.example/card/"></head>'
         '<body><img src="avatar.png"></body></html>',
         base_url="https://document.example/",
@@ -217,7 +217,7 @@ def test_browser_load_plan_uses_real_document_base_for_asset_matching() -> None:
 
 
 def test_browser_load_plan_canonicalizes_real_relative_document_base() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         """<html><head>
         <!-- <base href="comment-assets/"> -->
         <style id="before">.before { color: red }</style>
@@ -242,7 +242,7 @@ def test_browser_load_plan_canonicalizes_real_relative_document_base() -> None:
 
 
 def test_browser_load_plan_rejects_content_type_conflicts() -> None:
-    prepared = prepare_html(
+    prepared = parse_html(
         '<img src="memory:image">',
         assets=(
             PreparedAsset("memory:image", b"same", "image/png"),
@@ -258,12 +258,12 @@ def test_browser_load_plan_rejects_content_type_conflicts() -> None:
 async def test_browser_load_plan_rewrites_recursive_stylesheet_routes(
     tmp_path: Path,
 ) -> None:
-    from nonebot_plugin_htmlrender.preparation.materialize import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.preparation.materialize import (  # noqa: PLC0415
         materialize_local_assets,
     )
 
     document, site, theme, font = _write_recursive_stylesheets(tmp_path)
-    prepared = prepare_html(
+    prepared = parse_html(
         '<link rel="stylesheet" href="styles/site.css">',
         base_url=document.as_uri(),
     )
@@ -289,7 +289,7 @@ async def test_install_browser_asset_routes_fulfils_with_cors(
 ) -> None:
     asset = PreparedAsset("memory:avatar", b"avatar", "image/png")
     plan = build_browser_load_plan(
-        prepare_html('<img src="memory:avatar">', assets=(asset,))
+        parse_html('<img src="memory:avatar">', assets=(asset,))
     )
     page = mocker.AsyncMock()
 
@@ -319,7 +319,7 @@ async def test_install_browser_asset_routes_fulfils_with_cors(
 
 
 def test_materialize_prepared_html_preserves_plain_document() -> None:
-    prepared = prepare_html("<main>unchanged</main>")
+    prepared = parse_html("<main>unchanged</main>")
     assert materialize_prepared_html(prepared) == prepared.html
 
 
@@ -337,6 +337,6 @@ def test_materialize_prepared_html_preserves_plain_document() -> None:
 def test_materialize_prepared_html_rejects_invalid_assets(
     assets: tuple[PreparedAsset, ...],
 ) -> None:
-    prepared = prepare_html("<main></main>", assets=assets)
+    prepared = parse_html("<main></main>", assets=assets)
     with pytest.raises(ValueError):
         materialize_prepared_html(prepared)

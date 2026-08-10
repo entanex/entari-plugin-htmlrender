@@ -4,8 +4,9 @@ import ast
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CONTRACT_PATH = PROJECT_ROOT / "nonebot_plugin_htmlrender/capabilities/takumi.py"
-ADAPTER_PATH = PROJECT_ROOT / "nonebot_plugin_htmlrender/adapters/takumi/api.py"
+PACKAGE_ROOT = PROJECT_ROOT / "src" / "entari_plugin_htmlrender"
+CONTRACT_PATH = PACKAGE_ROOT / "capabilities" / "takumi.py"
+ADAPTER_PATH = PACKAGE_ROOT / "adapters" / "takumi" / "api.py"
 DOCUMENTATION_PATH = PROJECT_ROOT / "docs/reference/capabilities.md"
 
 EXPECTED_METHOD_GROUPS: dict[str, frozenset[str]] = {

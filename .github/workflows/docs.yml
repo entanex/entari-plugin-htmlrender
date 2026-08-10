@@ -3,7 +3,7 @@ name: Docs
 on:
   push:
     branches:
-      - master
+      - main
   workflow_dispatch:
     inputs:
       debug_enabled:
@@ -43,7 +43,7 @@ jobs:
       - name: Show runner context
         run: |
           echo "Runner: $RUNNER_NAME ($RUNNER_OS/$RUNNER_ARCH)"
-          python --version
+          python3 --version
           uv --version
 
       - name: Sync docs dependencies

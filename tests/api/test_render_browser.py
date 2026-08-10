@@ -4,16 +4,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nonebot_plugin_htmlrender import api
-from nonebot_plugin_htmlrender.api._default import (
-    get_default_application,
-    set_default_application,
-)
+from entari_plugin_htmlrender import api
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from nonebot_plugin_htmlrender.application import Application
+    from entari_plugin_htmlrender.runtime import RenderRuntime
 
 pytestmark = pytest.mark.requires_browser
 
@@ -21,19 +17,17 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 @pytest.fixture
-async def started_application() -> AsyncIterator[Application]:
-    application = get_default_application()
-    await application.startup()
-    yield application
-    await application.aclose()
-    # Drop the closed instance so later tests rebuild from the factory.
-    set_default_application(None)
+async def started_runtime() -> AsyncIterator[RenderRuntime]:
+    runtime = api.resolve_runtime()
+    await runtime.startup()
+    yield runtime
+    await runtime.aclose()
 
 
 async def test_render_text_produces_png(
-    started_application: Application,
+    started_runtime: RenderRuntime,
 ) -> None:
-    assert started_application is api.get_default_application()
+    assert started_runtime is api.resolve_runtime()
 
     artifact = await api.render_text("hello end-to-end")
 
@@ -42,9 +36,9 @@ async def test_render_text_produces_png(
 
 
 async def test_render_html_and_markdown_produce_images(
-    started_application: Application,
+    started_runtime: RenderRuntime,
 ) -> None:
-    assert started_application is api.get_default_application()
+    assert started_runtime is api.resolve_runtime()
 
     html_artifact = await api.render_html("<h1>e2e</h1>")
     markdown_artifact = await api.render_markdown("# e2e")

@@ -5,18 +5,18 @@ from typing import TYPE_CHECKING
 import anyio
 import pytest
 
-from nonebot_plugin_htmlrender.preparation import RasterOptions, prepare_html
-from nonebot_plugin_htmlrender.rendering.budget import (
+from entari_plugin_htmlrender.preparation import RasterOptions, parse_html
+from entari_plugin_htmlrender.rendering.budget import (
     BudgetedPreparedHtmlExecutor,
     HtmlRenderBudget,
 )
-from nonebot_plugin_htmlrender.rendering.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.rendering.errors import InvalidRenderRequest
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
-    from nonebot_plugin_htmlrender.preparation.models import PreparedHtml
-    from nonebot_plugin_htmlrender.rendering.artifacts import RenderedImage
-    from nonebot_plugin_htmlrender.rendering.requests import ResourcePolicy
+    from entari_plugin_htmlrender.preparation.models import PreparedHtml
+    from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
+    from entari_plugin_htmlrender.rendering.requests import ResourcePolicy
 
 
 class _Executor:
@@ -61,7 +61,7 @@ async def test_html_budget_rejects_oversized_source_before_provider() -> None:
 
     with pytest.raises(InvalidRenderRequest, match="source bytes"):
         await executor.execute(
-            prepare_html("<p>large</p>"),
+            parse_html("<p>large</p>"),
             RasterOptions(width=1, height=1, device_pixel_ratio=1),
         )
 
@@ -74,7 +74,7 @@ async def test_html_budget_rejects_explicit_physical_pixels_before_provider() ->
 
     with pytest.raises(InvalidRenderRequest, match="16 physical pixels"):
         await executor.execute(
-            prepare_html(""),
+            parse_html(""),
             RasterOptions(width=2, height=2, device_pixel_ratio=2),
         )
 
@@ -87,7 +87,7 @@ async def test_html_budget_rejects_device_pixel_ratio_before_provider() -> None:
 
     with pytest.raises(InvalidRenderRequest, match="device_pixel_ratio"):
         await executor.execute(
-            prepare_html(""),
+            parse_html(""),
             RasterOptions(width=1, height=None, device_pixel_ratio=3),
         )
 
@@ -104,7 +104,7 @@ async def test_html_budget_validates_content_driven_output() -> None:
 
     with pytest.raises(InvalidRenderRequest, match="20 physical pixels"):
         await executor.execute(
-            prepare_html(""),
+            parse_html(""),
             RasterOptions(width=4, height=None, device_pixel_ratio=1),
         )
 
@@ -121,7 +121,7 @@ async def test_html_budget_validates_content_driven_height() -> None:
 
     with pytest.raises(InvalidRenderRequest, match="height 5"):
         await executor.execute(
-            prepare_html(""),
+            parse_html(""),
             RasterOptions(width=2, height=None, device_pixel_ratio=1),
         )
 
@@ -136,7 +136,7 @@ async def test_html_budget_validates_encoded_output_size() -> None:
 
     with pytest.raises(InvalidRenderRequest, match="Rendered image contains"):
         await executor.execute(
-            prepare_html(""),
+            parse_html(""),
             RasterOptions(width=1, height=1, device_pixel_ratio=1),
         )
 
@@ -147,7 +147,7 @@ async def test_html_budget_concurrency_is_shared_across_callers() -> None:
 
     async def render() -> None:
         await executor.execute(
-            prepare_html(""),
+            parse_html(""),
             RasterOptions(width=1, height=1, device_pixel_ratio=1),
         )
 

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from nonebot_plugin_htmlrender.resources.headers import (
+from entari_plugin_htmlrender.resources.headers import (
     RequestHeaderConflict,
     combine_request_capabilities,
     merge_request_headers,
+    validate_request_header_name,
+    validate_request_header_value,
 )
 
 
@@ -32,3 +34,15 @@ def test_capability_combination_dedupes_and_rejects_conflicts() -> None:
 
     with pytest.raises(RequestHeaderConflict):
         combine_request_capabilities({"X-Guard": "token"}, {"x-guard": "other"})
+
+
+@pytest.mark.parametrize("value", ["", "bad header", "bad:header", "ümlaut"])
+def test_request_header_name_must_be_an_http_token(value: str) -> None:
+    with pytest.raises(ValueError, match="HTTP token"):
+        validate_request_header_name(value)
+
+
+@pytest.mark.parametrize("value", ["bad\rvalue", "bad\nvalue", "bad\x00", "bad\x7f"])
+def test_request_header_value_rejects_control_characters(value: str) -> None:
+    with pytest.raises(ValueError, match="control characters"):
+        validate_request_header_value(value)

@@ -2,10 +2,10 @@ import pytest
 
 
 def test_playwright_config_uses_safe_remote_resource_defaults() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.resources.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         RemoteLocalResourcePolicy,
         ResourceResolveMode,
     )
@@ -17,10 +17,10 @@ def test_playwright_config_uses_safe_remote_resource_defaults() -> None:
 
 
 def test_playwright_config_preserves_explicit_v071_resource_policy() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.resources.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         RemoteLocalResourcePolicy,
         ResourceResolveMode,
     )
@@ -37,7 +37,7 @@ def test_playwright_config_preserves_explicit_v071_resource_policy() -> None:
 
 
 def test_playwright_config_normalizes_empty_executable_path() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
 
@@ -47,7 +47,7 @@ def test_playwright_config_normalizes_empty_executable_path() -> None:
 
 
 def test_playwright_config_rejects_channel_for_non_chromium() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         BrowserEngine,
         ChromiumChannel,
         PlaywrightConfig,
@@ -61,7 +61,7 @@ def test_playwright_config_rejects_channel_for_non_chromium() -> None:
 
 
 def test_playwright_config_rejects_multiple_remote_modes() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
         RemoteCDPConfig,
         RemoteWSConfig,
@@ -69,7 +69,7 @@ def test_playwright_config_rejects_multiple_remote_modes() -> None:
 
     with pytest.raises(
         ValueError,
-        match=r"render\.provider_config\.connect_ws\.endpoint",
+        match=r"provider_config\.connect_ws\.endpoint",
     ):
         PlaywrightConfig(
             connect_ws=RemoteWSConfig(endpoint="ws://localhost:3000/ws"),
@@ -78,13 +78,13 @@ def test_playwright_config_rejects_multiple_remote_modes() -> None:
 
 
 def test_playwright_config_rejects_non_chromium_cdp() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         BrowserEngine,
         PlaywrightConfig,
         RemoteCDPConfig,
     )
 
-    with pytest.raises(ValueError, match=r"render\.provider_config\.engine"):
+    with pytest.raises(ValueError, match=r"provider_config\.engine"):
         PlaywrightConfig(
             engine=BrowserEngine.WEBKIT,
             connect_cdp=RemoteCDPConfig(endpoint="http://localhost:9222"),
@@ -92,10 +92,10 @@ def test_playwright_config_rejects_non_chromium_cdp() -> None:
 
 
 def test_playwright_config_accepts_resource_resolution_options() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
-    from nonebot_plugin_htmlrender.resources.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.resources.config import (  # noqa: PLC0415
         LocalLocalResourcePolicy,
         RemoteLocalResourcePolicy,
         ResourceResolveMode,
@@ -113,7 +113,7 @@ def test_playwright_config_accepts_resource_resolution_options() -> None:
 
 
 def test_playwright_config_rejects_moved_filehost_options() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
 
@@ -122,7 +122,7 @@ def test_playwright_config_rejects_moved_filehost_options() -> None:
 
 
 def test_playwright_config_rejects_invalid_engine_and_channel() -> None:
-    from nonebot_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.adapters.playwright.config import (  # noqa: PLC0415
         PlaywrightConfig,
     )
 

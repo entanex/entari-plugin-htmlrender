@@ -2,32 +2,29 @@ from __future__ import annotations
 
 from hashlib import sha256
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 import anyio
 from anyio import wait_all_tasks_blocked
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from nonebot.drivers import ASGIMixin
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.resources import (
+from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     ConfiguredLocalAccessPolicy,
     FilehostAssetPublisher,
     HostedAssetCapacityError,
+    HostedAssetHttpServer,
     HostedAssetStore,
-    install_hosted_asset_store,
 )
-from nonebot_plugin_htmlrender.adapters.resources import publisher as publisher_module
-from nonebot_plugin_htmlrender.rendering.errors import ProviderLifecycleError
-from nonebot_plugin_htmlrender.resources.config import AssetPublisherSettings
-from nonebot_plugin_htmlrender.resources.errors import (
+from entari_plugin_htmlrender.adapters.resources import publisher as publisher_module
+from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
+from entari_plugin_htmlrender.resources.config import AssetPublisherSettings
+from entari_plugin_htmlrender.resources.errors import (
     ResourceAccessDenied,
     ResourceResolutionError,
     ResourceSizeExceeded,
 )
-from nonebot_plugin_htmlrender.resources.observation import NoopCacheObserver
+from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,6 +43,8 @@ def _publisher(
     header_value: str = "test-header-value",
     observer: RecordingCacheObserver | FailingCacheObserver | None = None,
     max_resource_bytes: int = 64 * 1024 * 1024,
+    store: HostedAssetStore | None = None,
+    public_base_url: str | None = None,
 ) -> FilehostAssetPublisher:
     return FilehostAssetPublisher(
         settings=AssetPublisherSettings(
@@ -53,6 +52,7 @@ def _publisher(
             request_header_name="X-Test-Filehost",
             request_header_value=header_value,
             max_resource_bytes=max_resource_bytes,
+            public_base_url=public_base_url,
         ),
         observer=observer or NoopCacheObserver(),
         worker=AnyioWorkerExecutor(),
@@ -60,7 +60,18 @@ def _publisher(
             allowed_roots=(),
             allow_any=True,
         ),
+        store=store or _unused_store(),
     )
+
+
+class _UnusedHostedAssetStore:
+    def open_namespace(self, **kwargs: object) -> None:
+        del kwargs
+        raise AssertionError("This unit test unexpectedly used the hosted store")
+
+
+def _unused_store() -> HostedAssetStore:
+    return cast("HostedAssetStore", _UnusedHostedAssetStore())
 
 
 @pytest.mark.anyio
@@ -163,6 +174,7 @@ async def test_filesystem_publish_uses_injected_local_access_policy(
             allowed_roots=(tmp_path / "allowed",),
             allow_any=False,
         ),
+        store=_unused_store(),
     )
 
     with pytest.raises(ResourceAccessDenied, match="outside allowed roots"):
@@ -482,6 +494,7 @@ async def test_request_header_can_be_derived_from_injected_settings(
             allowed_roots=(),
             allow_any=True,
         ),
+        store=_unused_store(),
     )
     mocker.patch.object(
         publisher, "_upload", new=mocker.AsyncMock(return_value="https://a/x")
@@ -518,6 +531,7 @@ async def test_startup_prewarms_only_configured_asset_extensions(
             allowed_roots=(root,),
             allow_any=False,
         ),
+        store=_unused_store(),
     )
     upload = mocker.patch.object(
         publisher,
@@ -564,6 +578,7 @@ async def test_startup_failure_rolls_back_partial_prewarm_state(
             allowed_roots=(root,),
             allow_any=False,
         ),
+        store=_unused_store(),
     )
 
     async def fake_upload(
@@ -595,77 +610,59 @@ async def test_startup_failure_rolls_back_partial_prewarm_state(
     assert published.url == "https://assets.example/after-rollback"
 
 
-class FakeASGIDriver(ASGIMixin):
-    def __init__(self, app: FastAPI) -> None:
-        self._app = app
+@pytest.mark.anyio
+async def test_hosted_http_server_enforces_guards_404_and_lifecycle() -> None:
+    from aiohttp import ClientSession  # noqa: PLC0415
 
-    @property
-    def type(self) -> str:
-        return "test"
-
-    @property
-    def server_app(self) -> FastAPI:
-        return self._app
-
-    @property
-    def asgi(self) -> FastAPI:
-        return self._app
-
-    def setup_http_server(self, setup: Any) -> None:
-        del setup
-
-    def setup_websocket_server(self, setup: Any) -> None:
-        del setup
-
-
-def test_hosted_store_serves_only_guarded_known_assets(
-    mocker: MockerFixture,
-) -> None:
-    app = FastAPI()
-
-    @app.get("/filehost/ping")
-    async def ping() -> dict[str, bool]:
-        return {"ok": True}
-
-    mocker.patch("nonebot.get_driver", return_value=FakeASGIDriver(app))
-    settings = AssetPublisherSettings(
-        request_header_name="X-Test-Filehost",
-        request_header_value="guard-token",
-        public_base_url="http://public.example/assets",
-    )
-
-    store = install_hosted_asset_store(settings)
-    assert store is not None
-    assert install_hosted_asset_store(settings) is store
-
+    store = HostedAssetStore(max_entries=8, max_bytes=1024)
     namespace = store.open_namespace(
         headers={"X-Test-Filehost": "guard-token"},
         public_base_url="http://public.example/assets/",
     )
-    url = anyio.run(namespace.put, "abc.css", b"body{}")
-    ns_id = namespace.url_for("x").rsplit("/", 2)[-2]
-    assert url == f"http://public.example/assets/{ns_id}/abc.css"
+    namespace_id = namespace.url_for("x").rsplit("/", 2)[-2]
 
-    with TestClient(app) as client:
-        # Other plugins' routes stay untouched: no guard header required.
-        assert client.get("/filehost/ping").status_code == 200
+    server = HostedAssetHttpServer(store, bind_host="127.0.0.1", bind_port=0)
+    assert server.store is store
+    await server.startup()
+    published_url = await namespace.put("abc.css", b"body{}")
+    assert published_url == (f"http://public.example/assets/{namespace_id}/abc.css")
+    runner = server._runner
+    assert runner is not None
+    await server.startup()
+    assert server._runner is runner
+    host, port = runner.addresses[0][:2]
+    asset_url = f"http://{host}:{port}/_htmlrender/assets/{namespace_id}/abc.css"
+    missing_url = f"http://{host}:{port}/_htmlrender/assets/{namespace_id}/missing.css"
 
-        rejected = client.get(f"/_htmlrender/assets/{ns_id}/abc.css")
-        assert rejected.status_code == 403
+    try:
+        async with ClientSession() as client:
+            async with client.get(asset_url) as rejected:
+                assert rejected.status == 403
 
-        response = client.get(
-            f"/_htmlrender/assets/{ns_id}/abc.css",
-            headers={"X-Test-Filehost": "guard-token"},
-        )
-        assert response.status_code == 200
-        assert response.content == b"body{}"
-        assert response.headers["access-control-allow-origin"] == "*"
+            async with client.get(
+                asset_url,
+                headers={"X-Test-Filehost": "guard-token"},
+            ) as response:
+                assert response.status == 200
+                assert await response.read() == b"body{}"
+                assert response.headers["Access-Control-Allow-Origin"] == "*"
+                assert response.headers["Cache-Control"] == (
+                    "public, max-age=31536000, immutable"
+                )
 
-        missing = client.get(
-            f"/_htmlrender/assets/{ns_id}/missing.css",
-            headers={"X-Test-Filehost": "guard-token"},
-        )
-        assert missing.status_code == 404
+            async with client.get(
+                missing_url,
+                headers={"X-Test-Filehost": "guard-token"},
+            ) as missing:
+                assert missing.status == 404
+    finally:
+        await server.aclose()
+
+    await server.aclose()
+    with pytest.raises(ProviderLifecycleError, match="closed"):
+        await server.startup()
+    with pytest.raises(ProviderLifecycleError, match="closed"):
+        await namespace.put("after-close", b"value")
 
 
 @pytest.mark.anyio
@@ -673,6 +670,7 @@ async def test_hosted_store_capacity_evicts_lease_free_and_rejects_when_pinned()
     None
 ):
     store = HostedAssetStore(max_entries=2, max_bytes=1024)
+    await store.startup()
     namespace = store.open_namespace(
         headers={},
         public_base_url="http://public.example/a/",
@@ -700,12 +698,15 @@ async def test_hosted_store_capacity_evicts_lease_free_and_rejects_when_pinned()
 @pytest.mark.anyio
 async def test_publisher_and_store_share_lease_and_residency_state() -> None:
     store = HostedAssetStore(max_entries=8, max_bytes=1024)
-    publisher = _publisher()
-    publisher._namespace = store.open_namespace(
-        headers={"X-Test-Filehost": "test-header-value"},
+    await store.startup()
+    publisher = _publisher(
+        store=store,
         public_base_url="http://public.example/assets/",
     )
-    namespace_id = publisher._namespace.url_for("x").rsplit("/", 2)[-2]
+    await publisher.startup()
+    namespace = publisher._namespace
+    assert namespace is not None
+    namespace_id = namespace.url_for("x").rsplit("/", 2)[-2]
     lease = publisher.create_lease()
 
     published = await publisher.publish(b"asset", lease_id=lease, suffix=".css")

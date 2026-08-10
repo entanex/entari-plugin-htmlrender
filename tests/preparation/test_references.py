@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from nonebot_plugin_htmlrender.preparation.references import (
+from entari_plugin_htmlrender.preparation.references import (
     css_at_rules,
     css_resource_references,
     inspect_html_references,

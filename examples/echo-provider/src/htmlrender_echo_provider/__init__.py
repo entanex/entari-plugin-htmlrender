@@ -1,11 +1,7 @@
 """Minimal render engine demonstrating the htmlrender provider SDK.
 
-Configure it with::
-
-    render:
-      provider: echo
-      provider_config:
-        color: "#ff0000"
+Configure it under the Entari ``htmlrender`` plugin key with
+``provider: echo`` and ``provider_config.color``.
 
 Every render command returns a fixed 1x1 PNG in the configured color;
 useful for validating entry-point discovery, settings parsing, lifecycle,
@@ -19,16 +15,15 @@ import struct
 from typing import TYPE_CHECKING, final
 import zlib
 
-from nonebot_plugin_htmlrender.providers import (
+from entari_plugin_htmlrender.providers import (
     EngineBindings,
     EngineId,
     EngineProvider,
-    PluginRequirement,
     ProviderAvailability,
     ProviderDependencies,
     ResourceStrategy,
 )
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.rendering import (
     ProviderExecutionError,
     RenderedImage,
     UnsupportedRenderOption,
@@ -37,13 +32,13 @@ from nonebot_plugin_htmlrender.rendering import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from nonebot_plugin_htmlrender.preparation import PreparedHtml, RasterOptions
-    from nonebot_plugin_htmlrender.rendering import ResourcePolicy
+    from entari_plugin_htmlrender.preparation import PreparedHtml, RasterOptions
+    from entari_plugin_htmlrender.rendering import ResourcePolicy
 
 
 @dataclass(frozen=True)
 class EchoSettings:
-    """Settings parsed from ``render.provider_config``."""
+    """Settings parsed from ``provider_config``."""
 
     color: str = "#000000"
 
@@ -136,13 +131,6 @@ class EchoProvider:
     def availability(self, settings: EchoSettings) -> ProviderAvailability:
         del settings
         return ProviderAvailability(available=True)
-
-    def bootstrap_requirements(
-        self,
-        settings: EchoSettings,
-    ) -> tuple[PluginRequirement, ...]:
-        del settings
-        return ()
 
     def resource_strategy(self, settings: EchoSettings) -> ResourceStrategy:
         del settings

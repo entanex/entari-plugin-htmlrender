@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from nonebot_plugin_htmlrender.adapters.playwright import install_state
-from nonebot_plugin_htmlrender.adapters.playwright.config import (
+from entari_plugin_htmlrender.adapters.playwright import install_state
+from entari_plugin_htmlrender.adapters.playwright.config import (
     BrowserEngine,
     PlaywrightConfig,
 )
@@ -22,11 +22,26 @@ def test_runtime_storage_and_legacy_path_helpers(mocker: MockerFixture) -> None:
     assert isinstance(storage, Path)
     assert storage == Path("~/pw-cache").expanduser()
 
-    default_storage = install_state.get_playwright_storage_path(PlaywrightConfig())
-    assert isinstance(default_storage, Path)
-
     mocker.patch.object(install_state.platform, "system", return_value="Other")
     assert install_state.get_legacy_playwright_cache_path() is None
+
+
+def test_default_storage_and_runtime_state_paths_are_host_neutral(
+    mocker: MockerFixture,
+    tmp_path: Path,
+) -> None:
+    mocker.patch.object(install_state.platform, "system", return_value="Darwin")
+    mocker.patch.object(install_state.Path, "home", return_value=tmp_path)
+    config = PlaywrightConfig()
+
+    storage_path = install_state.get_playwright_storage_path(config)
+
+    assert storage_path == (
+        tmp_path / "Library" / "Caches" / "entari-plugin-htmlrender" / "playwright"
+    )
+    assert install_state._runtime_state_path(config) == (
+        storage_path.parent / "playwright-runtime.json"
+    )
 
 
 def test_has_installed_browser_candidates(

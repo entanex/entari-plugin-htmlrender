@@ -6,9 +6,9 @@ from typing import get_type_hints
 
 import pytest
 
-from nonebot_plugin_htmlrender.preparation import PreparedHtml, RasterOptions
-from nonebot_plugin_htmlrender.raster import RasterImageFormat
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.preparation import PreparedHtml, RasterOptions
+from entari_plugin_htmlrender.raster import RasterImageFormat
+from entari_plugin_htmlrender.rendering import (
     InvalidRenderRequest,
     PreparedHtmlExecutor,
     RenderedHtml,
@@ -18,11 +18,11 @@ from nonebot_plugin_htmlrender.rendering import (
     RenderTemplateRequest,
     ResourcePolicy,
 )
-from nonebot_plugin_htmlrender.rendering.requests import (
+from entari_plugin_htmlrender.rendering.requests import (
     POLICY_RESOLVE_MODES,
     resolve_mode_for_policy,
 )
-from nonebot_plugin_htmlrender.resources.config import ResourceResolveMode
+from entari_plugin_htmlrender.resources.config import ResourceResolveMode
 from tests.image_fixtures import encoded_image
 
 

@@ -6,13 +6,13 @@ import anyio
 from anyio import wait_all_tasks_blocked
 import pytest
 
-from nonebot_plugin_htmlrender.errors import InvalidRenderRequest
-from nonebot_plugin_htmlrender.graphics.errors import RasterBackendExecutionError
-from nonebot_plugin_htmlrender.graphics.execution import (
+from entari_plugin_htmlrender.errors import InvalidRenderRequest
+from entari_plugin_htmlrender.graphics.errors import RasterBackendExecutionError
+from entari_plugin_htmlrender.graphics.execution import (
     RasterWorkBudget,
     run_raster_backend,
 )
-from nonebot_plugin_htmlrender.graphics.models import (
+from entari_plugin_htmlrender.graphics.models import (
     FillRect,
     PixelRect,
     RasterEncodeOptions,
@@ -20,14 +20,14 @@ from nonebot_plugin_htmlrender.graphics.models import (
     RenderRasterSceneRequest,
     RGBAColor,
 )
-from nonebot_plugin_htmlrender.rendering.admission import OperationAdmissionGate
+from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
 from tests.adapters.conftest import RecordingOperationObserver
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from nonebot_plugin_htmlrender.rendering import RenderedImage
+    from entari_plugin_htmlrender.rendering import RenderedImage
 
 T = TypeVar("T")
 P = ParamSpec("P")

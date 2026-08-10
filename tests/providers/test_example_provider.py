@@ -5,19 +5,22 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from nonebot_plugin_htmlrender.bootstrap.composition import prepare_runtime
-from nonebot_plugin_htmlrender.bootstrap.settings import RenderSettings
-from nonebot_plugin_htmlrender.preparation import RasterOptions
-from nonebot_plugin_htmlrender.providers.sdk import EngineProvider
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.host.composition import compose_runtime
+from entari_plugin_htmlrender.host.config import RenderSettings
+from entari_plugin_htmlrender.preparation import RasterOptions
+from entari_plugin_htmlrender.providers.sdk import EngineProvider
+from entari_plugin_htmlrender.rendering import (
     RenderHtmlRequest,
     UnsupportedRenderOption,
 )
-from nonebot_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.resources.config import ResourceStrategy
+
+if TYPE_CHECKING:
+    from entari_plugin_htmlrender.runtime import RenderRuntime
 
 _EXAMPLE_MODULE = (
     Path(__file__).resolve().parents[2]
@@ -59,52 +62,59 @@ async def test_echo_provider_composes_and_renders() -> None:
         }
     )
 
-    runtime = prepare_runtime(settings, explicit_providers=[provider])
-    application = runtime.build_application()
-    await application.startup()
+    composition = compose_runtime(settings, explicit_providers=[provider])
+    runtime = composition.build_runtime()
+    await runtime.startup()
     try:
-        artifact = await application.renderer.render_html(
+        artifact = await runtime.renderer.render_html(
             RenderHtmlRequest(html="<p>echo</p>")
         )
     finally:
-        await application.aclose()
+        await runtime.aclose()
 
     payload = bytes(artifact)
     assert payload[: len(_PNG_MAGIC)] == _PNG_MAGIC
     assert artifact.format == "png"
     assert (artifact.width, artifact.height) == (1, 1)
-    assert application.resources.strategy == ResourceStrategy()
+    assert runtime.resources.strategy == ResourceStrategy()
 
 
 async def test_echo_provider_satisfies_lifecycle_conformance() -> None:
     # The installable harness ships with the production package so provider
     # authors can run it from a wheel; the example consumes it the same way.
-    from nonebot_plugin_htmlrender.providers.testing import (  # noqa: PLC0415
+    from entari_plugin_htmlrender.providers.testing import (  # noqa: PLC0415
         run_provider_lifecycle_conformance,
     )
 
     provider = _load_example_provider()
     settings = RenderSettings.model_validate({"provider": "echo"})
-    await run_provider_lifecycle_conformance(provider, settings)
+
+    def compose(selected: EngineProvider[Any]) -> RenderRuntime:
+        return compose_runtime(
+            settings,
+            explicit_providers=[selected],
+        ).build_runtime()
+
+    await run_provider_lifecycle_conformance(provider, compose)
 
 
 async def test_echo_provider_rejects_unsupported_encoded_format() -> None:
     provider = _load_example_provider()
-    runtime = prepare_runtime(
+    composition = compose_runtime(
         RenderSettings.model_validate({"provider": "echo"}),
         explicit_providers=[provider],
     )
-    application = runtime.build_application()
+    runtime = composition.build_runtime()
     try:
         with pytest.raises(UnsupportedRenderOption, match="PNG only"):
-            await application.renderer.render_html(
+            await runtime.renderer.render_html(
                 RenderHtmlRequest(
                     html="<p>echo</p>",
                     raster=RasterOptions(format="jpeg"),
                 )
             )
     finally:
-        await application.aclose()
+        await runtime.aclose()
 
 
 def test_echo_provider_rejects_unknown_settings_keys() -> None:

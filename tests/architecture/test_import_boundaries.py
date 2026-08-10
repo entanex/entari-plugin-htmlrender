@@ -1,9 +1,8 @@
-"""Target-state architecture guardrails for the 0.8 layering.
+"""Host-neutral architecture guardrails for the 0.8 layering.
 
-The scan is deliberately independent from importing the package: importing the
-top-level plugin executes the NoneBot composition root, while these checks must
-also work in a bare test process.  Both ordinary imports and literal lazy
-imports participate in the same dependency rules.
+The scan does not import the package, so it also protects installations that
+only use the core library. Both ordinary imports and literal lazy imports
+participate in the same dependency rules.
 """
 
 from __future__ import annotations
@@ -13,8 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import re
 
-PACKAGE = "nonebot_plugin_htmlrender"
-PACKAGE_ROOT = Path(__file__).resolve().parents[2] / PACKAGE
+PACKAGE = "entari_plugin_htmlrender"
+PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / PACKAGE
 
 
 @dataclass(frozen=True)
@@ -40,7 +39,7 @@ CORE_SCOPES = (
     "graphics",
     "raster",
     "rendering",
-    "application",
+    "runtime",
     "preparation",
     "resources",
 )
@@ -48,10 +47,8 @@ CORE_SCOPES = (
 CORE_BANNED = (
     _absolute("adapters"),
     _absolute("api"),
-    _absolute("bootstrap"),
-    _absolute("telemetry"),
-    _absolute("utils.telemetry"),
-    "nonebot",
+    _absolute("host"),
+    "arclet.entari",
     "opentelemetry",
     "prometheus_client",
     "sentry_sdk",
@@ -67,14 +64,13 @@ RULES: tuple[LayerRule, ...] = (
         name="core packages must not depend on hosts or adapters",
         scopes=CORE_SCOPES,
         banned=CORE_BANNED,
-        allowed=("nonebot.log",),
     ),
     LayerRule(
         name="resources must not import higher layers",
         scopes=("resources",),
         banned=(
             _absolute("preparation"),
-            _absolute("application"),
+            _absolute("runtime"),
             _absolute("rendering"),
             _absolute("api"),
             _absolute("providers"),
@@ -84,7 +80,7 @@ RULES: tuple[LayerRule, ...] = (
         name="preparation must not import higher layers",
         scopes=("preparation",),
         banned=(
-            _absolute("application"),
+            _absolute("runtime"),
             _absolute("rendering"),
             _absolute("api"),
             _absolute("providers"),
@@ -99,7 +95,7 @@ RULES: tuple[LayerRule, ...] = (
         name="graphics contracts must not import HTML or provider layers",
         scopes=("graphics",),
         banned=(
-            _absolute("application"),
+            _absolute("runtime"),
             _absolute("preparation"),
             _absolute("providers"),
         ),
@@ -113,16 +109,6 @@ RULES: tuple[LayerRule, ...] = (
         name="playwright must not import takumi",
         scopes=("adapters.playwright",),
         banned=(_absolute("adapters.takumi"),),
-    ),
-    LayerRule(
-        name="htmlkit must not import other renderer adapters",
-        scopes=("adapters.htmlkit",),
-        banned=(
-            _absolute("adapters.pillow"),
-            _absolute("adapters.playwright"),
-            _absolute("adapters.skia"),
-            _absolute("adapters.takumi"),
-        ),
     ),
     LayerRule(
         name="pillow must not import skia",
@@ -336,18 +322,13 @@ def test_layer_rules_hold_for_static_and_literal_lazy_imports() -> None:
     assert not violations, "Forbidden dependency edges:\n  " + "\n  ".join(violations)
 
 
-def test_runtime_logging_uses_nonebot_log() -> None:
+def test_source_tree_has_zero_nonebot_imports() -> None:
     violations = [
         f"{edge.module}:{edge.lineno} {edge.kind} {edge.target}"
         for edge in _collect_edges()
-        if _matches(edge.target, "logging")
-        or _matches(edge.target, "loguru")
-        or edge.target == "nonebot.logger"
+        if _matches(edge.target, "nonebot")
     ]
-    assert not violations, (
-        "Runtime logging must import `logger` from `nonebot.log`:\n  "
-        + "\n  ".join(violations)
-    )
+    assert not violations, "NoneBot imports remain:\n  " + "\n  ".join(violations)
 
 
 def _python_sources(path: Path) -> tuple[Path, ...]:
@@ -395,21 +376,21 @@ def test_literal_lazy_import_collector_handles_supported_loader_forms() -> None:
 from importlib import import_module as load
 import importlib as imports
 
-load("nonebot_plugin_htmlrender.adapters.resources")
-imports.import_module("nonebot")
+load("entari_plugin_htmlrender.adapters.resources")
+imports.import_module("arclet.entari")
 __import__("sentry_sdk")
 """
     )
 
     edges = _literal_lazy_imports(
         tree,
-        module="nonebot_plugin_htmlrender.resources.synthetic",
+        module="entari_plugin_htmlrender.resources.synthetic",
         is_package=False,
     )
 
     assert {(edge.target, edge.kind) for edge in edges} == {
-        ("nonebot", "literal lazy import"),
-        ("nonebot_plugin_htmlrender.adapters.resources", "literal lazy import"),
+        ("arclet.entari", "literal lazy import"),
+        ("entari_plugin_htmlrender.adapters.resources", "literal lazy import"),
         ("sentry_sdk", "literal lazy import"),
     }
 
@@ -421,7 +402,7 @@ from typing import TYPE_CHECKING
 import typing
 
 if TYPE_CHECKING:
-    from nonebot_plugin_htmlrender.adapters.takumi.api import TakumiAPIAdapter
+    from entari_plugin_htmlrender.adapters.takumi.api import TakumiAPIAdapter
 
 if typing.TYPE_CHECKING:
     import sentry_sdk

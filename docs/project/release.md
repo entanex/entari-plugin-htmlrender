@@ -32,30 +32,29 @@ make build-artifacts
 
 该 target 内部执行 `uv build --no-sources`、pinned `twine==6.2.0 check` 和仓库外隔离安装 smoke。`--no-sources` 很重要：发布构建不得因本地 workspace source 覆盖而得到一个无法从锁定依赖重现的产物。
 
-涉及 package resources 或 native extra 的版本还必须在仓库外、清空 `PYTHONPATH`后安装真实产物。0.8 的门禁要求 Python 3.10–3.14 验证 wheel，Python 3.12 至少验证一次 sdist；检查全部 package resources 非空且登记在 `RECORD`，验证 bare core不安装任何 backend，执行 NoneBot load、Preparation 与 typed artifact smoke，并在`[htmlkit]`、`[takumi]` 和 `[pillow,skia]` 的独立环境中确认锁定依赖和真实 native
-PNG 渲染。
+涉及 package resources 或 native extra 的版本还必须在仓库外、清空 `PYTHONPATH` 后安装真实产物。0.8 的门禁要求 Python 3.10–3.14 验证 wheel，Python 3.12 至少验证一次 sdist；检查全部 package resources 非空且登记在 `RECORD`，验证 bare core 不安装任何 backend，执行 Entari load、Preparation 与 typed artifact smoke，并在 `[takumi]`、`[playwright,filehost]` 和 `[pillow,skia]` 的独立环境中确认锁定依赖与真实渲染。
 
 ## 并行开发与 release cut
 
 多条 `feat/*`、`fix/*` 可以同时工作，但版本号只在显式的 release PR 中变化：
 
-1. 功能和修复分支从 `master` 创建，各自完成实现、测试与文档；普通功能 PR 不提前修改项目版本；
-1. 准备发版时，只把已经可发布的变更合入 `master`，未完成分支继续保持开放或放在 feature flag 后；
-1. 从选定的 `master` 快照创建短生命周期 `release/v<version>`，集中完成 `uv version <version>`、锁文件、迁移说明和 release notes；
+1. 功能和修复分支从 `main` 创建，各自完成实现、测试与文档；普通功能 PR 不提前修改项目版本；
+1. 准备发版时，只把已经可发布的变更合入 `main`，未完成分支继续保持开放或放在 feature flag 后；
+1. 从选定的 `main` 快照创建短生命周期 `release/v<version>`，集中完成 `uv version <version>`、锁文件、迁移说明和 release notes；
 1. release PR 使用与普通 PR 相同的 review、preview 和 required checks，最终 squash merge；不要在 PR 合并前手工创建 tag；
-1. 合并后的四条 master workflow 按精确 source SHA 保留运行。后续 PR 即使很快合并，也不会取消或混入本次版本门禁；
-1. Auto Tag 只给版本变化的 trusted master SHA 打 tag，因此版本边界由该提交确定，而不是由发布 workflow 启动时仍在移动的 `master` 决定。
+1. 合并后的四条 main workflow 按精确 source SHA 保留运行。后续 PR 即使很快合并，也不会取消或混入本次版本门禁；
+1. Auto Tag 只给版本变化的 trusted main SHA 打 tag，因此版本边界由该提交确定，而不是由发布 workflow 启动时仍在移动的 `main` 决定。
 
-当前自动发布只授权 `master` 历史。若未来需要同时维护 `0.8` 与 `0.9` 两条已分叉的稳定线，应先设计受保护的 maintenance branch、回合并规则和 tag 授权，再扩展 ancestry gate；不要临时从维护分支打 tag 后绕过校验。
+当前自动发布只授权 `main` 历史。若未来需要同时维护 `0.8` 与 `0.9` 两条已分叉的稳定线，应先设计受保护的 maintenance branch、回合并规则和 tag 授权，再扩展 ancestry gate；不要临时从维护分支打 tag 后绕过校验。
 
 ## 自动发布主链路
 
 ```mermaid
 flowchart LR
-    A["版本 PR squash merge"] --> B["同一 master SHA 的<br/>CI + Coverage + Docs + Prek"]
+    A["版本 PR squash merge"] --> B["同一 main SHA 的<br/>CI + Coverage + Docs + Prek"]
     B --> R["workflow_run 汇合门禁<br/>四条全部 completed/success"]
     R --> P["比较 first parent/current version<br/>PEP 440 + package preflight"]
-    P --> C["创建 v&lt;version&gt; tag<br/>指向 trusted master SHA"]
+    P --> C["创建 v&lt;version&gt; tag<br/>指向 trusted main SHA"]
     C --> D["Publish: resolve + verify"]
     D --> E["Build + twine check"]
     E --> F["PyPI trusted publishing"]
@@ -66,19 +65,19 @@ flowchart LR
 
 ### Auto Tag on Version Change
 
-`Auto Tag on Version Change` 监听 `CI`、`Coverage`、`Docs`、`Prek` 的 `workflow_run: completed` 事件。每个完成事件都只在受信任的 `master` push 上参与汇合，因此版本 PR 可以来自 fork，不需要让 fork PR workflow 持有写权限。
+`Auto Tag on Version Change` 监听 `CI`、`Coverage`、`Docs`、`Prek` 的 `workflow_run: completed` 事件。每个完成事件都只在受信任的 `main` push 上参与汇合，因此版本 PR 可以来自 fork，不需要让 fork PR workflow 持有写权限。
 
-1. 以 `workflow_run.head_sha` 为唯一 source SHA，通过 Actions API 查询同一 SHA、`master`、`push` 事件的四条 required workflow；任一缺失、未完成、失败或取消时正常结束且不创建 tag；required workflows 不会用后续 master push 取消旧 source SHA；
-1. 四条全部成功后检出该精确 SHA，并确认它位于 `origin/master`；同一 SHA 的多个完成事件按 concurrency key 串行化；
+1. 以 `workflow_run.head_sha` 为唯一 source SHA，通过 Actions API 查询同一 SHA、`main`、`push` 事件的四条 required workflow；任一缺失、未完成、失败或取消时正常结束且不创建 tag；required workflows 不会用后续 main push 取消旧 source SHA；
+1. 四条全部成功后检出该精确 SHA，并确认它位于 `origin/main`；同一 SHA 的多个完成事件按 concurrency key 串行化；
 1. 从 source SHA 第一父提交的 `pyproject.toml` 读取旧版本，再与当前项目版本比较；版本相同则正常结束；
 1. 只有版本实际变化时才用 pinned `packaging` 验证 PEP 440：新旧版本必须使用 canonical spelling，新版本必须严格递增，且不能带 PyPI 不接受的 local segment；
 1. 在 tag 产生前检查锁文件，构建唯一 wheel/sdist 并执行 pinned Twine 校验；package preflight 失败不会占用版本号；
-1. preflight 成功后解析 `v<version>` 并查询远程 tag；tag 不存在时创建带注解 tag，使其准确指向本次 trusted master SHA；已指向同一 SHA 时复用，指向其他 commit 时失败；
+1. preflight 成功后解析 `v<version>` 并查询远程 tag；tag 不存在时创建带注解 tag，使其准确指向本次 trusted main SHA；已指向同一 SHA 时复用，指向其他 commit 时失败；
 1. 以该 tag ref 显式 dispatch `Publish`；dispatch 前按 source SHA 查询既有 run，避免多个完成事件重复发布。
 
-普通 PR、只修改依赖配置的 PR 或未改变 `project.version` 的 master commit 都不会创建 tag。版本更新必须位于最终 squash/merge commit，确保第一父提交与 gated source 的版本差异可审计。
+普通 PR、只修改依赖配置的 PR 或未改变 `project.version` 的 main commit 都不会创建 tag。版本更新必须位于最终 squash/merge commit，确保第一父提交与 gated source 的版本差异可审计。
 
-如果 Auto Tag 的构建 preflight 因 workflow 基础设施缺陷失败且尚未创建 tag，先通过 PR 修复基础设施，并等待修复后当前 `master` SHA 的 CI、Coverage、Docs、Prek 全部成功。随后从默认分支手动运行 `Auto Tag on Version Change`，输入该完整 `source_sha`。恢复入口只接受当前 `master` tip、重新汇合该精确 SHA 的四条门禁、要求目标 tag 尚不存在，并再次执行完整 package preflight；它不能用于已有 tag 的发布恢复，也不能选择历史 commit。已有 tag 应直接按下文重跑 `Publish`。
+如果 Auto Tag 的构建 preflight 因 workflow 基础设施缺陷失败且尚未创建 tag，先通过 PR 修复基础设施，并等待修复后当前 `main` SHA 的 CI、Coverage、Docs、Prek 全部成功。随后从默认分支手动运行 `Auto Tag on Version Change`，输入该完整 `source_sha`。恢复入口只接受当前 `main` tip、重新汇合该精确 SHA 的四条门禁、要求目标 tag 尚不存在，并再次执行完整 package preflight；它不能用于已有 tag 的发布恢复，也不能选择历史 commit。已有 tag 应直接按下文重跑 `Publish`。
 
 由 `GITHUB_TOKEN` push 产生的事件不会再次触发普通 downstream workflow；显式 `workflow_dispatch` 是发布契约的一部分，也使同一 tag 的恢复可重复执行。
 
@@ -88,7 +87,7 @@ flowchart LR
 
 - tag 名符合 `v<version>`；
 - tag 确实存在，checkout 的 `HEAD` 与 tag 指向同一 commit；
-- 该 commit 位于 `origin/master` 历史中；
+- 该 commit 位于 `origin/main` 历史中；
 - tag 去掉前缀 `v` 后与 `pyproject.toml` 的项目版本完全一致；
 - `uv build --no-sources` 与 `twine check` 成功。
 
@@ -108,7 +107,7 @@ TestPyPI 用于安装行为或包元数据的人工验收，不是 PR 必需 che
 
 ## 文档是独立发布链路
 
-`Docs` 覆盖每个 `master` push，使正常 release cut 和 pre-tag recovery 选择的任意当前 `master` SHA 都具备可汇合的精确 SHA 门禁。它执行严格构建，但不写正式 Pages 版本。
+`Docs` 覆盖每个 `main` push，使正常 release cut 和 pre-tag recovery 选择的任意当前 `main` SHA 都具备可汇合的精确 SHA 门禁。它执行严格构建，但不写正式 Pages 版本。
 
 `Publish versioned documentation` 位于不可逆软件发布之后：它重新检出经过验证的 tag、再次 strict build，并在 PyPI hash 回读与 GitHub Release 均成功后才通过 `mike` 创建 `/<version>/` 和更新 `latest`。
 
@@ -127,7 +126,7 @@ TestPyPI 用于安装行为或包元数据的人工验收，不是 PR 必需 che
 
 | 状态                                         | 恢复方式                                                                                                                                      |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auto Tag package preflight 失败，尚未创建 tag | 基础设施缺陷先通过 PR 修复；四条 required workflow 在修复后的当前 `master` SHA 全部成功后，以该完整 SHA 手动运行 `Auto Tag on Version Change`；产物或 metadata 缺陷则提升版本并走新的版本 PR |
+| Auto Tag package preflight 失败，尚未创建 tag | 基础设施缺陷先通过 PR 修复；四条 required workflow 在修复后的当前 `main` SHA 全部成功后，以该完整 SHA 手动运行 `Auto Tag on Version Change`；产物或 metadata 缺陷则提升版本并走新的版本 PR |
 | tag/source/version 不变量校验失败            | 停止发布并核对 tag 来源；代码或版本确有错误时发起新的版本 PR。除非维护者确认 tag 从未对外发布且明确承担历史变更风险，否则不要移动或重建原 tag |
 | build / `twine check` 失败，尚未上传 PyPI    | 基础设施瞬时故障可对同一 tag 重跑；产物或 metadata 确有错误时提升版本并走新的版本 PR                                                          |
 | 校验和构建成功，PyPI 因临时故障失败          | 对同一已验证 tag 重新运行 `Publish`                                                                                                           |
@@ -144,8 +143,8 @@ TestPyPI 用于安装行为或包元数据的人工验收，不是 PR 必需 che
 ## 发布后核对
 
 - PyPI 页面显示目标版本，wheel 与 sdist 均存在；
-- 从 PyPI 安装的包能被 NoneBot 加载；
+- 从 PyPI 安装的包能保持普通 import 无宿主副作用，并能被 Entari loader 加载；
 - GitHub Release 指向正确 tag，附件与 PyPI 产物一致；
 - 版本 URL 与 `latest` 可访问，页面内容来自同一个 release tag；
-- `master`、tag、包元数据与文档展示的版本一致；
+- `main`、tag、包元数据与文档展示的版本一致；
 - 对任何失败保留 workflow run、artifact 和恢复操作记录。

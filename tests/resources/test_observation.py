@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from nonebot_plugin_htmlrender.resources.observation import (
+from entari_plugin_htmlrender.resources.observation import (
     NoopCacheObserver,
     record_cache_observation,
 )

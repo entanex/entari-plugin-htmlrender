@@ -1,99 +1,58 @@
 ---
 title: 渲染 API
-description: 通用渲染函数、request、类型化产物与执行错误
-icon: lucide/code-xml
+description: caller-first 便利函数、HtmlRenderer、typed request、artifact 与错误
 ---
 
 # 渲染 API
 
-## 通用渲染函数
+## Caller-first 函数
 
-所有函数返回类型化产物，只接受跨 Provider 可移植的参数。
+所有便利函数都把主要输入放在首位，并以 kw-only `runtime=` 接收`RuntimeSource`：
 
-| 函数 | 对应 request | 返回 |
-| --- | --- | --- |
-| `render_html` | `RenderHtmlRequest` | `RenderedImage` |
-| `render_text` | `RenderTextRequest` | `RenderedImage` |
-| `render_markdown` | `RenderMarkdownRequest` | `RenderedImage` |
-| `render_template` | `RenderTemplateRequest` | `RenderedImage` |
-| `render_template_html` | `RenderTemplateHtmlRequest` | `RenderedHtml` |
-| `rasterize_html` | `RasterizeHtmlRequest` | `RenderedImage` |
+| 函数 | 返回值 |
+| --- | --- |
+| `render_html(html, ...)` | `RenderedImage` |
+| `render_text(text, ...)` | `RenderedImage` |
+| `render_markdown(markdown, ...)` | `RenderedImage` |
+| `render_template(path, name, variables, ...)` | `RenderedImage` |
+| `render_template_html(path, name, variables, ...)` | `RenderedHtml` |
+| `rasterize_html(prepared, options, ...)` | `RenderedImage` |
 
 ```python
-from nonebot_plugin_htmlrender import ResourcePolicy, render_html
+from entari_plugin_htmlrender import RuntimeSource, render_markdown
 
-image = await render_html(
-    "<main>Hello</main>",
-    width=800,
-    height=480,
-    device_pixel_ratio=2,
-    image_format="png",
-    resource_policy=ResourcePolicy.STRICT,
-    timeout_seconds=15,
-)
-payload = bytes(image)
-content_type = image.media_type
+async def render_readme(runtime: RuntimeSource, source: str) -> bytes:
+    image = await render_markdown(source, width=720, runtime=runtime)
+    return bytes(image)
 ```
 
-`RasterOptions.format` 与 `RenderedImage.format` 使用公共 `RasterImageFormat`（`"png" | "jpeg"`）。`quality` 只能与 JPEG 一起使用。`timeout_seconds` 必须是有限正数，并覆盖完整操作。
+## Typed request 与 HtmlRenderer
 
-## Request 与 Renderer
+需要复用 request 或先探测命令时，从 runtime 取得 `HtmlRenderer`：
 
 ```python
-from nonebot_plugin_htmlrender import (
+from entari_plugin_htmlrender import (
     RasterOptions,
     RenderHtmlRequest,
-    get_default_application,
+    RuntimeSource,
+    resolve_runtime,
 )
+from entari_plugin_htmlrender.rendering import RenderCommand
 
-request = RenderHtmlRequest(
-    html="<h1>Hello</h1>",
-    raster=RasterOptions(width=640, format="png"),
-    timeout_seconds=10,
-)
-artifact = await get_default_application().renderer.render_html(request)
+async def render_request(runtime: RuntimeSource) -> bytes:
+    renderer = resolve_runtime(runtime).renderer
+    if not renderer.supports(RenderCommand.HTML):
+        raise RuntimeError("HTML command is unavailable")
+    image = await renderer.render_html(RenderHtmlRequest("<h1>Hello</h1>", RasterOptions(width=640)))
+    return bytes(image)
 ```
 
-`Renderer.supported_commands` 是已绑定通用用例的名称集合；`Renderer.supports("render_html")` 可用于功能探测。只需要 facade 时可调用`get_default_renderer()`，它不会建立第二个 composition。
+`supported_commands` 是 `frozenset[RenderCommand]`；字符串不是合法探测参数。
 
-## 类型化产物
+## Artifact 与错误
 
-`RenderedImage` 提供 `data`、`format`、`width`、`height`、`media_type` 和`bytes(artifact)`。格式与尺寸来自后端实际编码数据；尺寸是最终图片的物理像素，不是请求中的 CSS viewport。`RenderedHtml` 提供 `content` 与 `str(artifact)`。
+`RenderedImage` 保存编码字节、format、width 与 height；`bytes(image)` 显式取得payload。`RenderedHtml` 保存规范 HTML 字符串。
 
-## 稳定执行错误
+公共错误均继承 `RenderingError`。常用边界包括 `InvalidRenderRequest`、`UnsupportedRenderOption`、`UnsupportedRequirement`、`CapabilityUnavailable`、`ProviderUnavailable`、`ProviderExecutionError`、`ProviderLifecycleError`、`ResourceResolutionError` 与`RuntimeNotBound`。业务分支应匹配稳定错误类型，不要解析底层异常文本。
 
-| 错误 | 含义 |
-| --- | --- |
-| `InvalidRenderRequest` | request 在执行前已确定无效 |
-| `PreparationError` | 模板编译或中立内容准备失败 |
-| `CapabilityUnavailable` | composition 未绑定请求的通用或专属能力 |
-| `UnsupportedRenderOption` | Provider 无法准确表示通用 raster 选项 |
-| `UnsupportedRequirement` | 文档需求超出 Provider 能力 |
-| `ResourceResolutionError` | 资源读取、授权或物化失败 |
-| `ProviderExecutionError` | Provider 执行失败 |
-| `RasterBackendExecutionError` | Graphics backend draw 或 encode 失败 |
-
-这些错误都继承 `RenderingError`。native 异常在通用 Renderer/Provider、资源、生命周期、受管理的 Takumi API 和 Graphics adapter 边界收束；raw Playwright
-`Page`/`Browser` 或 `takumi.renderer()` 内的调用仍保留对应引擎异常。
-
-稳定错误不会把 native 异常对象或未经限制的 `str(error)` 保存为公共状态。每个`RenderingError` 提供以下可补全字段：
-
-- `message: str`：归一化并限制长度的稳定摘要；
-- `message_truncated: bool`：摘要是否发生裁剪；
-- `causes: tuple[ErrorCause, ...]`：底层异常链及 `ExceptionGroup` 摘要与叶子的有限快照，每项包含 `exception_type`、`message` 与 `truncated`；
-- `causes_truncated: bool`：是否还有未收入快照的底层异常。
-
-```python
-from nonebot.log import logger
-
-from nonebot_plugin_htmlrender import RenderingError, render_html
-
-try:
-    image = await render_html("<main>Hello</main>")
-except RenderingError as error:
-    logger.warning("{}: {}", type(error).__name__, error.message)
-    for cause in error.causes:
-        logger.debug("{}: {}", cause.exception_type, cause.message)
-```
-
-`str(error)` 适合面向人的日志，内容为稳定摘要及有限的 `Caused by ...` 信息；程序分支应读取上述字段，而不是解析该字符串。原始异常仍通过 Python 的 `__cause__` 链交给日志和错误追踪系统。原因快照只做 ANSI/空白归一化与长度、数量限制，不负责业务数据脱敏；输出给用户或外部日志前仍应按应用策略过滤。
+完整 request 类型包括 `RenderTextRequest`、`RenderMarkdownRequest`、`RenderTemplateRequest`、`RenderTemplateHtmlRequest` 与 `RasterizeHtmlRequest`；图片格式使用 `RasterImageFormat`。`PreparationError` 表示内容准备失败，`ErrorCause`是经过裁剪的底层原因快照。

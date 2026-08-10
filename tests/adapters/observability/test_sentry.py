@@ -5,26 +5,26 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.observability import sentry
+from entari_plugin_htmlrender.adapters.observability import sentry
 
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
 
 def _reset_sentry_state() -> None:
-    sentry._plugin_loader._checked = False
-    sentry._plugin_loader._loaded = None
+    sentry._module_loader._checked = False
+    sentry._module_loader._loaded = None
 
 
-def test_sentry_exporter_does_not_read_nonebot_global_config() -> None:
+def test_sentry_exporter_does_not_read_host_global_config() -> None:
     assert not hasattr(sentry, "get_config_value")
 
 
 def test_load_sentry_returns_cached_state() -> None:
     _reset_sentry_state()
     cached_sdk = types.ModuleType("sentry_sdk_cached")
-    sentry._plugin_loader._checked = True
-    sentry._plugin_loader._loaded = cached_sdk
+    sentry._module_loader._checked = True
+    sentry._module_loader._loaded = cached_sdk
     assert sentry.load_sentry() is cached_sdk
     _reset_sentry_state()
 
@@ -32,43 +32,40 @@ def test_load_sentry_returns_cached_state() -> None:
 def test_load_sentry_handles_missing_plugin(mocker: MockerFixture) -> None:
     _reset_sentry_state()
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
+        "entari_plugin_htmlrender.adapters.observability.common.find_spec",
         return_value=None,
     )
     assert sentry.load_sentry() is None
 
     _reset_sentry_state()
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
+        "entari_plugin_htmlrender.adapters.observability.common.find_spec",
         return_value=object(),
     )
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.require",
+        "entari_plugin_htmlrender.adapters.observability.common.import_module",
         side_effect=RuntimeError("missing"),
     )
     assert sentry.load_sentry() is None
     _reset_sentry_state()
 
 
-def test_load_sentry_requires_plugin_and_reads_sdk_module(
+def test_load_sentry_imports_sdk_module_directly(
     mocker: MockerFixture,
 ) -> None:
     _reset_sentry_state()
     fake_sdk = types.SimpleNamespace(name="fake")
     mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.find_spec",
+        "entari_plugin_htmlrender.adapters.observability.common.find_spec",
         return_value=object(),
     )
-    require = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.require"
+    import_module = mocker.patch(
+        "entari_plugin_htmlrender.adapters.observability.common.import_module",
+        return_value=fake_sdk,
     )
-    sys_modules = mocker.patch(
-        "nonebot_plugin_htmlrender.adapters.observability.common.sys.modules"
-    )
-    sys_modules.get.return_value = fake_sdk
 
     assert sentry.load_sentry() is fake_sdk
-    require.assert_called_once_with("nonebot_plugin_sentry")
+    import_module.assert_called_once_with("sentry_sdk")
     _reset_sentry_state()
 
 
@@ -136,7 +133,7 @@ def test_record_metrics_uses_real_sentry_2_count_api(
         sentry.record_metrics("render.html", "takumi", "ok", 0.125)
 
     counter = next(metric for metric in captured if metric["type"] == "counter")
-    assert counter["name"] == "nonebot.htmlrender.count"
+    assert counter["name"] == "entari.htmlrender.count"
     assert counter["value"] == 1.0
     assert counter["attributes"] == {
         "op": "render.html",
@@ -174,7 +171,7 @@ def test_record_filehost_cache_metrics_uses_count_and_gauge(
     assert call_metric.call_count == 4
     assert call_metric.call_args_list[0].args[:3] == (
         metrics.count,
-        "nonebot.htmlrender.filehost.upload_bytes",
+        "entari.htmlrender.filehost.upload_bytes",
         512,
     )
     assert [call.args[2] for call in call_metric.call_args_list[1:]] == [4, 2, 0]
@@ -204,11 +201,11 @@ def test_record_cache_metrics_uses_bounded_cache_and_event_tags(
         "event": "miss",
     }
     assert call_metric.call_args_list[1].args[1:3] == (
-        "nonebot.htmlrender.cache.entries",
+        "entari.htmlrender.cache.entries",
         4,
     )
     assert call_metric.call_args_list[2].args[1:3] == (
-        "nonebot.htmlrender.cache.resident_bytes",
+        "entari.htmlrender.cache.resident_bytes",
         1024,
     )
 

@@ -8,7 +8,7 @@ import anyio
 from anyio import wait_all_tasks_blocked
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.resources import (
+from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     CachingResourceReader,
     CompositeResourceReader,
@@ -16,15 +16,15 @@ from nonebot_plugin_htmlrender.adapters.resources import (
     RemoteTransportExecutor,
     build_resource_reader,
 )
-from nonebot_plugin_htmlrender.adapters.resources import reader as reader_module
-from nonebot_plugin_htmlrender.rendering.errors import (
+from entari_plugin_htmlrender.adapters.resources import reader as reader_module
+from entari_plugin_htmlrender.rendering.errors import (
     ResourceAccessDenied,
     ResourceNotFound,
     ResourceResolutionError,
     ResourceSizeExceeded,
 )
-from nonebot_plugin_htmlrender.resources.config import ResourceCacheSettings
-from nonebot_plugin_htmlrender.resources.models import (
+from entari_plugin_htmlrender.resources.config import ResourceCacheSettings
+from entari_plugin_htmlrender.resources.models import (
     FileResourceRef,
     InlineResourceRef,
     NotModified,
@@ -34,14 +34,14 @@ from nonebot_plugin_htmlrender.resources.models import (
     ResourceRef,
     ResourceRevision,
 )
-from nonebot_plugin_htmlrender.resources.observation import NoopCacheObserver
+from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from pytest_mock import MockerFixture
 
-    from nonebot_plugin_htmlrender.resources.ports import ResourceReader
+    from entari_plugin_htmlrender.resources.ports import ResourceReader
     from tests.resources.conftest import (
         FailingCacheObserver,
         RecordingCacheObserver,
@@ -226,7 +226,7 @@ async def test_composite_reader_supports_all_reference_kinds(
     file_content = await reader.read(FileResourceRef(path))
     package_content = await reader.read(
         PackageResourceRef(
-            "nonebot_plugin_htmlrender",
+            "entari_plugin_htmlrender",
             "templates/text/text.html",
         )
     )
@@ -252,7 +252,7 @@ async def test_composite_reader_supports_all_reference_kinds(
     assert package_content.media_type == "text/html"
     assert package_content.revision == await reader.revision(
         PackageResourceRef(
-            "nonebot_plugin_htmlrender",
+            "entari_plugin_htmlrender",
             "templates/text/text.html",
         )
     )

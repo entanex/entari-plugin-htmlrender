@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from exceptiongroup import ExceptionGroup
 
-from nonebot_plugin_htmlrender.rendering import (
-    ApplicationNotInitialized,
+from entari_plugin_htmlrender.rendering import (
     CapabilityUnavailable,
     ErrorCause,
     InvalidRenderRequest,
@@ -19,6 +18,7 @@ from nonebot_plugin_htmlrender.rendering import (
     ResourceNotFound,
     ResourceResolutionError,
     ResourceSizeExceeded,
+    RuntimeNotBound,
     UnsupportedRenderOption,
     UnsupportedRequirement,
 )
@@ -26,7 +26,7 @@ from nonebot_plugin_htmlrender.rendering import (
 
 def test_error_taxonomy_roots_at_rendering_error() -> None:
     for error_type in (
-        ApplicationNotInitialized,
+        RuntimeNotBound,
         InvalidRenderRequest,
         PreparationError,
         CapabilityUnavailable,

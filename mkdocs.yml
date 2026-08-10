@@ -1,13 +1,13 @@
-site_name: nonebot-plugin-htmlrender Documentation
+site_name: entari-plugin-htmlrender Documentation
 site_url:
-  !ENV [DOCS_SITE_URL, "https://kexue-z.github.io/nonebot-plugin-htmlrender/"]
+  !ENV [DOCS_SITE_URL, "https://kexue-z.github.io/entari-plugin-htmlrender/"]
 site_description: >-
-  nonebot-plugin-htmlrender 文档
+  entari-plugin-htmlrender 文档
 
 # Repository
-repo_name: kexue-z/nonebot-plugin-htmlrender
-repo_url: https://github.com/kexue-z/nonebot-plugin-htmlrender
-edit_uri: https://github.com/kexue-z/nonebot-plugin-htmlrender/docs/edit/master/docs/
+repo_name: kexue-z/entari-plugin-htmlrender
+repo_url: https://github.com/kexue-z/entari-plugin-htmlrender
+edit_uri: https://github.com/kexue-z/entari-plugin-htmlrender/docs/edit/main/docs/
 
 # Copyright
 copyright: "&copy; 2026 kexue-z"
@@ -53,7 +53,7 @@ theme:
         icon: lucide/moon-star
         name: Switch to system preference
   favicon: assets/logo.png
-  logo: assets/nonebot_plugin.svg
+  logo: assets/entari_plugin.svg
   icon:
     tag:
       default: lucide/hash
@@ -71,7 +71,7 @@ plugins:
 
 # Additional configuration
 extra:
-  homepage: https://github.com/kexue-z/nonebot-plugin-htmlrender
+  homepage: https://github.com/kexue-z/entari-plugin-htmlrender
   scope: !ENV [DOCS_SCOPE, "/"]
   version:
     provider: !ENV [DOCS_VERSION_PROVIDER, "mike"]
@@ -84,9 +84,9 @@ extra:
     deprecated: Deprecated
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/kexue-z/nonebot-plugin-htmlrender
+      link: https://github.com/kexue-z/entari-plugin-htmlrender
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/nonebot-plugin-htmlrender/
+      link: https://pypi.org/project/entari-plugin-htmlrender/
   tags:
     default: default
 
@@ -174,6 +174,7 @@ nav:
           - 常见问题: configuration/faq.md
       - 升级与迁移:
           - 迁移索引: guides/migration/index.md
+          - 从旧框架迁移到 Entari: guides/migration/nonebot-to-entari.md
           - v0.8 迁移指南: guides/migration/v0.8.md
           - v0.7.2 迁移说明: guides/migration/v0.7.2.md
   - 参考:
@@ -191,7 +192,6 @@ nav:
               - HTML 后端:
                   - HTML 后端总览: configuration/providers/index.md
                   - Playwright: configuration/providers/playwright.md
-                  - HTMLKit: configuration/providers/htmlkit.md
                   - Takumi: configuration/providers/takumi.md
               - Graphics 后端:
                   - Graphics 总览: configuration/graphics/index.md
@@ -200,7 +200,7 @@ nav:
       - API 参考:
           - 渲染 API: reference/rendering.md
           - Preparation 与资源 API: reference/preparation.md
-          - Application API: reference/application.md
+          - Runtime API: reference/runtime.md
           - Capability 参考: reference/capabilities.md
   - 原理与扩展:
       - 概览: extensions/index.md

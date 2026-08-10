@@ -2,32 +2,34 @@ from __future__ import annotations
 
 import sys
 import types
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, final, get_type_hints
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.resources import (
+from entari_plugin_htmlrender.adapters.resources import (
     AnyioWorkerExecutor,
     CompositeResourceReader,
     ConfiguredLocalAccessPolicy,
     RemoteTransportExecutor,
 )
-from nonebot_plugin_htmlrender.providers import discovery
-from nonebot_plugin_htmlrender.providers.sdk import (
+from entari_plugin_htmlrender.providers import discovery
+from entari_plugin_htmlrender.providers.sdk import (
+    RESERVED_PROVIDER_IDS,
     EngineBindings,
     EngineId,
-    PluginRequirement,
+    EngineProvider,
     ProviderAvailability,
     ProviderDependencies,
 )
-from nonebot_plugin_htmlrender.rendering import (
+from entari_plugin_htmlrender.rendering import (
     NoopOperationObserver,
+    OperationAdmissionGate,
     ProviderNotFound,
     ProviderUnavailable,
 )
-from nonebot_plugin_htmlrender.rendering.observers import NoopCacheObserver
-from nonebot_plugin_htmlrender.resources.config import ResourceStrategy
-from nonebot_plugin_htmlrender.resources.service import ResourceService
+from entari_plugin_htmlrender.rendering.observers import NoopCacheObserver
+from entari_plugin_htmlrender.resources.config import ResourceStrategy
+from entari_plugin_htmlrender.resources.service import ResourceService
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -45,13 +47,6 @@ class FakeProvider:
     def availability(self, settings: object) -> ProviderAvailability:
         del settings
         return ProviderAvailability(available=True)
-
-    def bootstrap_requirements(
-        self,
-        settings: object,
-    ) -> tuple[PluginRequirement, ...]:
-        del settings
-        return ()
 
     def resource_strategy(self, settings: object) -> ResourceStrategy:
         del settings
@@ -82,11 +77,24 @@ def test_explicit_override_wins_even_for_reserved_ids() -> None:
     assert resolved is override
 
 
+def test_only_first_party_provider_ids_are_reserved() -> None:
+    assert {"playwright", "takumi"} == RESERVED_PROVIDER_IDS
+
+
 def test_duplicate_explicit_ids_rejected() -> None:
     with pytest.raises(ProviderUnavailable, match="Duplicate explicit provider"):
         discovery.resolve_provider(
             "anything",
             explicit=[FakeProvider("dup"), FakeProvider("dup")],
+        )
+
+
+@pytest.mark.parametrize("provider_id", ["", " ", "Upper", "bad/id", "-bad"])
+def test_invalid_explicit_provider_ids_rejected(provider_id: str) -> None:
+    with pytest.raises(ProviderUnavailable, match="invalid provider id"):
+        discovery.resolve_provider(
+            "anything",
+            explicit=[FakeProvider(provider_id)],
         )
 
 
@@ -211,12 +219,35 @@ def test_provider_dependencies_shape() -> None:
     )
     dependencies = ProviderDependencies(
         operation_observer=NoopOperationObserver(),
+        operation_admission=OperationAdmissionGate(),
         cache_observer=NoopCacheObserver(),
         resources=resources,
         asset_publisher=None,
     )
 
     assert dependencies.operation_observer is not None
+    assert dependencies.operation_admission is not None
     assert dependencies.cache_observer is not None
     assert dependencies.resources is resources
     assert dependencies.asset_publisher is None
+
+
+def test_provider_sdk_annotations_are_runtime_resolvable() -> None:
+    assert set(get_type_hints(ProviderDependencies)) == {
+        "asset_publisher",
+        "cache_observer",
+        "operation_admission",
+        "operation_observer",
+        "resources",
+    }
+    assert set(get_type_hints(EngineBindings)) == {
+        "lifecycle",
+        "prepared_html_executor",
+        "provider_capabilities",
+    }
+    assert set(get_type_hints(EngineProvider.parse_settings)) == {"raw", "return"}
+    assert set(get_type_hints(EngineProvider.compose)) == {
+        "settings",
+        "dependencies",
+        "return",
+    }

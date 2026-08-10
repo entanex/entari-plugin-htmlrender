@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from nonebot_plugin_htmlrender.adapters.takumi import (
+from entari_plugin_htmlrender.adapters.takumi import (
     TakumiAPIAdapter,
     TakumiConfig,
 )
-from nonebot_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
-from nonebot_plugin_htmlrender.capabilities import (
+from entari_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
+from entari_plugin_htmlrender.capabilities import (
     TAKUMI,
     TakumiAccess,
 )
@@ -20,7 +20,7 @@ from tests.adapters.takumi.helpers import resource_service
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
-    from nonebot_plugin_htmlrender.adapters.takumi.types import NativeRenderer
+    from entari_plugin_htmlrender.adapters.takumi.types import NativeRenderer
     from tests.adapters.conftest import RecordingOperationObserver
 
 

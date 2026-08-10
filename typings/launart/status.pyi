@@ -1,0 +1,49 @@
+from typing import Literal, TypeAlias
+
+ManagerStage: TypeAlias = Literal["preparing", "blocking", "cleaning", "finished"]
+ServiceStage: TypeAlias = Literal[
+    "waiting-for-prepare",
+    "preparing",
+    "prepared",
+    "blocking",
+    "blocking-completed",
+    "waiting-for-cleanup",
+    "cleanup",
+    "finished",
+]
+Phase: TypeAlias = Literal["preparing", "blocking", "cleanup"]
+
+class ManagerStatus:
+    stage: ManagerStage | None
+    exiting: bool
+
+    @property
+    def preparing(self) -> bool: ...
+    @property
+    def blocking(self) -> bool: ...
+    @property
+    def cleaning(self) -> bool: ...
+    async def wait_for_update(
+        self,
+        *,
+        current: str | None = None,
+        stage: ManagerStage | None = None,
+    ) -> object: ...
+    async def wait_for_preparing(self) -> None: ...
+    async def wait_for_blocking(self) -> None: ...
+    async def wait_for_cleaning(self, *, current: str | None = None) -> None: ...
+    async def wait_for_finished(self, *, current: str | None = None) -> None: ...
+    async def wait_for_sigexit(self) -> None: ...
+
+class ServiceStatus:
+    stage: ServiceStage | None
+
+    @property
+    def prepared(self) -> bool: ...
+    @property
+    def blocking(self) -> bool: ...
+    @property
+    def finished(self) -> bool: ...
+    def unset(self) -> None: ...
+    async def wait_for(self, stage: ServiceStage | None = None) -> None: ...
+    async def wait_for_update(self) -> object: ...

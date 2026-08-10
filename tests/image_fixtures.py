@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from nonebot_plugin_htmlrender.rendering import RenderedImage
+from entari_plugin_htmlrender.rendering import RenderedImage
 
 if TYPE_CHECKING:
-    from nonebot_plugin_htmlrender.raster import RasterImageFormat
+    from entari_plugin_htmlrender.raster import RasterImageFormat
 
 
 @cache

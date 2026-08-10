@@ -15,20 +15,20 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-from nonebot_plugin_htmlrender.adapters.resources.remote import (
+from entari_plugin_htmlrender.adapters.resources.remote import (
     ConfiguredRemoteAccessPolicy,
     RemoteTransportExecutor,
     read_remote,
 )
-from nonebot_plugin_htmlrender.rendering.errors import ProviderLifecycleError
-from nonebot_plugin_htmlrender.resources.config import RemoteAccessSettings
-from nonebot_plugin_htmlrender.resources.errors import (
+from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
+from entari_plugin_htmlrender.resources.config import RemoteAccessSettings
+from entari_plugin_htmlrender.resources.errors import (
     ResourceAccessDenied,
     ResourceNotFound,
     ResourceResolutionError,
     ResourceSizeExceeded,
 )
-from nonebot_plugin_htmlrender.resources.models import (
+from entari_plugin_htmlrender.resources.models import (
     NotModified,
     RemoteResourceRef,
     ResourceRevision,

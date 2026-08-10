@@ -10,7 +10,7 @@ VERIFY_DISTRIBUTION ?= python3 scripts/verify_distribution.py
 DOCKER_COMPOSE ?= docker compose
 
 # Paths
-PYTHON_PATHS := nonebot_plugin_htmlrender tests examples
+PYTHON_PATHS := src/entari_plugin_htmlrender tests examples
 RUFF_CHECK_PATHS := $(PYTHON_PATHS) pyproject.toml
 TEST_PLAYWRIGHT_BROWSERS_PATH ?= $(CURDIR)/.artifacts/playwright-browsers
 REMOTE_COMPOSE_FILE ?= $(CURDIR)/tests/infra/docker-compose.remote-test.yaml
@@ -151,7 +151,7 @@ basedpyright: ensure-uv ## Run basedpyright type checking.
 
 type-completeness: ensure-uv ## Verify the installed package's public type surface.
 	@echo "==> Verifying package type completeness"
-	$(UV_RUN) basedpyright --verifytypes nonebot_plugin_htmlrender --ignoreexternal
+	$(UV_RUN) basedpyright --verifytypes entari_plugin_htmlrender --ignoreexternal
 
 ty: ensure-uv ## Run ty type checking.
 	@echo "==> Running ty"

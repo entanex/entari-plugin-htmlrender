@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import get_type_hints
 
-from nonebot_plugin_htmlrender.graphics import (
+from entari_plugin_htmlrender.graphics import (
     PILLOW_RASTER_SCENE_RENDERER,
     SKIA_RASTER_SCENE_RENDERER,
     RasterSceneRenderer,
     RenderRasterSceneRequest,
 )
-from nonebot_plugin_htmlrender.rendering import CapabilityCatalog, RenderedImage
+from entari_plugin_htmlrender.rendering import CapabilityCatalog, RenderedImage
 
 
 class _Renderer:
