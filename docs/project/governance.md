@@ -41,7 +41,7 @@ tags:
 
 ## `Protect main` Ruleset
 
-导入 [`.github/rulesets/protect-main.json`](https://github.com/kexue-z/entari-plugin-htmlrender/blob/main/.github/rulesets/protect-main.json)，目标选择默认分支，并保持 `Active`：
+导入 [`.github/rulesets/protect-main.json`](https://github.com/entanex/entari-plugin-htmlrender/blob/main/.github/rulesets/protect-main.json)，目标选择默认分支，并保持 `Active`：
 
 - 禁止删除和 non-fast-forward push；
 - 要求线性历史，合并方式只允许 squash；
@@ -64,7 +64,7 @@ Ruleset 不配置日常 bypass。管理员仍能编辑 Ruleset，但这应被视
 
 ## `Protect release tags` Ruleset
 
-导入 [`.github/rulesets/protect-release-tags.json`](https://github.com/kexue-z/entari-plugin-htmlrender/blob/main/.github/rulesets/protect-release-tags.json)，匹配 `refs/tags/v*`：
+导入 [`.github/rulesets/protect-release-tags.json`](https://github.com/entanex/entari-plugin-htmlrender/blob/main/.github/rulesets/protect-release-tags.json)，匹配 `refs/tags/v*`：
 
 - 禁止删除；
 - 禁止 non-fast-forward 更新；
@@ -100,9 +100,9 @@ required check context 必须先由 GitHub Actions 实际产生。错误的启�
 1. 通过 API 复核远端实际规则，而不是只相信设置页面：
 
 ```bash
-gh api repos/kexue-z/entari-plugin-htmlrender/rulesets
-gh api repos/kexue-z/entari-plugin-htmlrender/rules/branches/main
-gh api repos/kexue-z/entari-plugin-htmlrender/environments
+gh api repos/entanex/entari-plugin-htmlrender/rulesets
+gh api repos/entanex/entari-plugin-htmlrender/rules/branches/main
+gh api repos/entanex/entari-plugin-htmlrender/environments
 ```
 
 不要用真实 release tag 测试删除或移动保护。tag Ruleset 可用一个不匹配 `v*` 的临时 tag验证普通 Git 行为，但 `v*` 的不可变规则应通过 Ruleset API 和一次正常自动发布观察确认。

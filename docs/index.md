@@ -1,6 +1,6 @@
 ---
 title: entari-plugin-htmlrender
-description: 面向 Entari 的可插拔图片渲染基础设施
+description: 从首次渲染到扩展开发与项目维护的统一文档入口
 icon: lucide/image
 hide:
   - navigation
@@ -112,3 +112,16 @@ hide:
 </section>
 
 </div>
+
+## 按任务进入
+
+| 现在要做什么 | 从这里开始 |
+| --- | --- |
+| 安装插件并完成第一张图片 | [开始使用](start/index.md) |
+| 渲染 HTML、Markdown、文本、模板或图形场景 | [使用指南](guides/index.md) |
+| 配置 Provider、资源策略并部署到生产环境 | [配置与部署](configuration/index.md) |
+| 核对类型、方法、返回值与失败语义 | [API 参考](reference/index.md) |
+| 实现第三方 Provider 或理解资源管线 | [扩展开发](extensions/index.md) |
+| 贡献代码、维护 CI 或发布版本 | [维护者指南](project/index.md) |
+
+首次使用时依次阅读“开始使用”和“使用指南”；其余章节按任务查阅，不需要线性通读。

@@ -44,4 +44,4 @@ Protocol，仍需通过真实 probe 验证目标服务能力。
 
 远程浏览器无法直接读取宿主本地路径。优先使用内存/data URL；资源较大或浏览器与宿主分离时配置显式 filehost。若选中 filehost strategy，必须安装 `filehost` extra并提供外部可达的 `resources.filehost.public_base_url`。
 
-`startup: probe` 在 Launart preparing 阶段建立连接并执行最小探测。业务 handler不应再次手工 startup；需要原生页面时从 `resolve_runtime(service).extensions.playwright`进入 `page()` 上下文。
+`startup: probe` 在 Launart preparing 阶段建立连接并执行最小探测。业务 handler不应再次手工 startup；需要原生页面时通过`service.capabilities.playwright.lease_page()` 建立显式租约。

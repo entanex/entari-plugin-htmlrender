@@ -16,4 +16,4 @@ description: 跨 Provider 一致实施的 HTML 输入与并发限制
 | `html.max_auto_height` | `16384` |
 | `html.max_concurrency` | `2` |
 
-预算适用于 `render_html`、`render_text`、`render_markdown`、`render_template` 与`rasterize_html`。切换 Playwright、Takumi 或第三方 Provider 不改变拒绝语义；超过限制会以稳定的 `InvalidRenderRequest` 或相应 rendering error 失败，不静默截断。
+预算适用于 `HtmlRenderer.rasterize_html/text/markdown/template/prepared`。切换Playwright、Takumi 或第三方 Provider 不改变拒绝语义：输入或 raster option 无效时抛出 `InvalidRenderInputError`；Provider 输出超过字节、像素或自动高度限制时抛出`RenderOutputLimitError`。所有路径都拒绝而不静默截断。

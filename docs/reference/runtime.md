@@ -1,38 +1,77 @@
 ---
-title: Runtime API
-description: RenderRuntime、HtmlRenderer、RuntimeResolver 与 Entari 服务生命周期
+title: Runtime 与 Entari Service
+description: caller services、advanced composition 与生命周期所有权
 ---
 
-# Runtime API
+# Runtime 与 Entari Service
 
-`RenderRuntime` 是一次 composition 的 host-neutral 聚合根，暴露：
+## 普通调用路径
+
+Entari handler 通过 DI 接收 concrete `HtmlRenderService`。service 直接提供五个稳定入口：
 
 | 属性 | 语义 |
 | --- | --- |
-| `renderer: HtmlRenderer` | 执行跨 Provider 的 typed render request |
-| `preparation` | 受 admission gate 保护的 preparation facade |
-| `resources` | 受 admission gate 保护的资源 facade |
-| `extensions` | Playwright、Takumi、Pillow、Skia 与第三方 typed capability |
-
-## 显式解析
-
-`RuntimeSource` 是 `RenderRuntime | RuntimeResolver`。`HtmlRenderService` 实现`RuntimeResolver`，因此 caller-first API 可直接接收它：
+| `renderer: HtmlRenderer` | HTML、文本、Markdown、模板或 `PreparedHtml` 到图像 |
+| `templates: TemplateRenderer` | `TemplateRef` 到 `RenderedHtml` |
+| `resources: ResourceAccess` | 显式 locator fetch 与 scoped publish |
+| `graphics: GraphicsRenderer` | `RasterScene` 到图像，与 HTML Provider 独立 |
+| `capabilities: RuntimeCapabilities` | Playwright、Takumi 与第三方的 typed capability |
 
 ```python
-from entari_plugin_htmlrender import RuntimeSource, render_html, resolve_runtime
+from entari_plugin_htmlrender import RasterOptions, RenderedImage
+from entari_plugin_htmlrender.entari import HtmlRenderService
 
-async def render_status(runtime: RuntimeSource) -> bytes:
-    active = resolve_runtime(runtime)
-    image = await render_html("<b>ready</b>", runtime=active)
-    return bytes(image)
+async def render_status(service: HtmlRenderService) -> RenderedImage:
+    return await service.renderer.rasterize_html(
+        "<strong>ready</strong>",
+        raster=RasterOptions(width=640, device_pixel_ratio=1),
+    )
 ```
 
-显式 source 总是优先。省略 `runtime=` 时只读取当前 task 通过`runtime_context(source)` 绑定的 source；若两者都不存在则抛出`RuntimeNotBound`。库不提供进程全局默认 runtime、setter 或 factory。
+框架无关函数应直接接收它真正需要的 `HtmlRenderer` / `TemplateRenderer` /
+`ResourceAccess` / `GraphicsRenderer` contract；依赖解析只发生在 Entari DI 边界。
 
-## 生命周期
+## Advanced composition
 
-- `startup()` 幂等且并发安全；已关闭或正在关闭的 runtime 拒绝重新启动。
+`RenderRuntime` 是创建宿主管理的一次 composition aggregate。普通业务代码不需要它；框架适配器或独立 embedding 才显式构建并持有它：
+
+```python
+from entari_plugin_htmlrender.composition import build_runtime_plan
+from entari_plugin_htmlrender.config import HtmlRenderConfig
+
+config = HtmlRenderConfig.model_validate({"provider": "playwright", "startup": "off"})
+plan = build_runtime_plan(config)
+runtime = plan.build_runtime()
+server = plan.hosted_asset_server
+
+try:
+    if server is not None:
+        await server.startup()
+    await runtime.startup()
+    image = await runtime.renderer.rasterize_html("<b>ready</b>")
+finally:
+    try:
+        await runtime.aclose()
+    finally:
+        if server is not None:
+            await server.aclose()
+```
+
+构建 plan/runtime 不执行外部 I/O。`RuntimePlan` 是 one-shot ownership value，`build_runtime()` 恰好调用一次；第二次调用抛出 `InvalidRenderInputError(operation="runtime.build", field="plan")`，需要另一个 runtime 时应重建 plan。Provider-owned parsed config 在 plan → availability →compose 期间保持同一 identity。若 resource strategy 需要 filehost，计划持有的 server与生成的唯一 runtime 同寿命：创建方先启动 `hosted_asset_server`，关闭时先排空runtime，再关闭 server。
+
+测试或 embedding 若要绕过 entry-point discovery，可传配置所选的单个 Provider：
+
+```python
+plan = build_runtime_plan(config, provider_override=provider)
+```
+
+该参数不是候选列表；override 的 ID 必须与 `config.provider` 一致。
+
+## Runtime 生命周期
+
+- 初始状态为 `RuntimeState.OPEN`；`startup()` 幂等且并发安全。startup policy `off`只跳过 eager startup，首个已获准 Provider operation 可以 lazy acquire。
 - `probe()` 先确保 startup 完成，再执行 Provider 的最小探测。
-- `aclose()` 停止接收新操作，等待已获准操作完成，再关闭 Provider；成功关闭后幂等，失败保持可重试，但一旦开始关闭就不能再次渲染或启动。
+- `aclose()` 先切到 `CLOSING`，永久停止新操作，等待已接纳操作完成，再关闭Provider/resources；成功后进入 `CLOSED`。
+- 排空或关闭被取消/失败时保持 `CLOSING`，后续 `aclose()` 可重试；runtime 不会重新开放。
 
-Entari 中不要手工驱动 service 持有 runtime 的生命周期。`HtmlRenderService` 由`add_service` 注册，并在 Launart `preparing` / `blocking` / `cleanup` 阶段管理它；热卸载同样进入 cleanup。
+Entari 中不要手工驱动 service 内部 runtime。`HtmlRenderService` 没有公共`startup()` / `probe()` / `aclose()`；Launart stages 与插件热卸载拥有其生命周期。

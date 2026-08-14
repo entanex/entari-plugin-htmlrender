@@ -86,11 +86,11 @@ Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，�
 - wheel/`RECORD` 检查 package resources 均存在且非空；bare-core smoke 断言 Playwright、Takumi、Pillow 与 Skia 均未安装；`[takumi]` 校验锁定版本并执行真实 native PNG，`[pillow,skia]` 验证独立 `RasterScene` 能力；
 - 修改文档、MkDocs/Zensical 配置、文档依赖、Make target 或 docs workflow：运行 `make docs-build`，该 target 执行 strict build；
 - 修改插件入口、metadata、config 或依赖：除单测外必须等待完整 Entari load 矩阵；
-- 修改公开行为：同步更新使用指南或 API 参考、回归测试和必要的迁移说明。
+- 修改公开行为：同步更新使用指南或 API 参考、回归测试和必要的兼容性说明。
 
 Documentation contract 属于 pytest 门禁，而不只是站点构建：
 
-- 非 migration README/docs/examples 禁止已删除的 0.7/alpha 契约；
+- README/docs/examples 禁止未发布或已删除的契约；
 - 当前公共顶层导出必须有文档覆盖；
 - `render` schema 的全部 leaf 使用完整 dotted path；
 - 所有 Python fence 与 examples Python 文件必须可解析；
@@ -104,7 +104,7 @@ base URL。Markdown 使用哨兵像素证明相对图片确实加载；filehost 
 
 ## warning 与排除策略
 
-- 主路径与 examples 只测试当前公开 API；旧契约只允许出现在显式 migration 对照中；
+- 主路径与 examples 只测试当前公开 API；
 - `ty` / basedpyright 必须零错误，包级 type completeness 必须为 100%；不得用ignore 掩盖已删除接口或公共签名中的 unknown；
 - `requires_browser` 只用于确实需要浏览器进程的 case，不得用它把普通回归测试移出 PR 快速层；
 - coverage 排除必须对应不可执行或平台专用代码，并在配置中留下可审查的理由。

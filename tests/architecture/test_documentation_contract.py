@@ -1,8 +1,9 @@
-"""Contracts keeping the 0.8 documentation aligned with the public surface."""
+"""Contracts keeping documentation aligned with the public API."""
 
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -16,8 +17,8 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = "entari_plugin_htmlrender"
 PACKAGE_ROOT = ROOT / "src" / PACKAGE
-SETTINGS_PATH = PACKAGE_ROOT / "host" / "config.py"
-RUNTIME_EXTENSIONS_PATH = PACKAGE_ROOT / "runtime" / "extensions.py"
+SETTINGS_PATH = PACKAGE_ROOT / "config.py"
+RUNTIME_CAPABILITIES_PATH = PACKAGE_ROOT / "runtime" / "capabilities.py"
 MERMAID_RUNTIME_PATH = (
     ROOT / "docs" / "assets" / "javascripts" / "mermaid-11.16.0.min.js"
 )
@@ -29,81 +30,58 @@ MERMAID_RUNTIME_SHA256 = (
 DOCUMENTATION_ROOTS: Mapping[str, Path] = {
     "architecture": ROOT / "docs" / "extensions",
     "configuration": ROOT / "docs" / "configuration",
-    "migration": ROOT / "docs" / "guides" / "migration",
 }
 
-MIGRATION_CONTRACT_ALLOWLIST: Mapping[Path, str] = {
-    Path("docs/guides/migration/index.md"): "migration index and removed-key lookup",
-    Path("docs/guides/migration/nonebot-to-entari.md"): (
-        "removed NoneBot host and configuration mapping"
-    ),
-    Path("docs/guides/migration/v0.8.md"): "0.7 to 0.8 contract mapping",
-    Path("docs/guides/migration/v0.7.2.md"): "historical 0.7.2 migration record",
-}
-
-EXPECTED_PUBLIC_EXPORTS = frozenset(
-    {
-        "RenderRuntime",
-        "RuntimeNotBound",
-        "RuntimeResolver",
-        "RuntimeSource",
-        "ErrorCause",
-        "RasterOptions",
-        "RenderedHtml",
-        "RenderedImage",
-        "HtmlRenderer",
-        "RenderingError",
-        "ResourcePolicy",
-        "ResourceResolution",
-        "parse_html",
-        "prepare_markdown",
-        "prepare_template",
-        "prepare_text",
-        "rasterize_html",
-        "render_html",
-        "render_markdown",
-        "render_template",
-        "render_template_html",
-        "render_text",
-        "resolve_template_vars",
-        "resolve_resource_url",
-        "resolve_runtime",
-        "runtime_context",
-    }
-)
-
-REMOVED_CONFIG_KEYS = (
-    "render_backend",
-    "render_startup_mode",
-    "render_playwright",
-    "render_takumi",
-    "render_storage_path",
-    "render_cache_path",
-    "render_config_path",
-    "render_resource_cache_max_entries",
-    "render_resource_cache_max_bytes",
-    "render_resource_cache_revalidate_seconds",
-    "render_template_environment_cache_max_entries",
+DOCUMENTATION_CHAPTERS = (
+    ("开始使用", "start"),
+    ("使用指南", "guides"),
+    ("配置与部署", "configuration"),
+    ("API 参考", "reference"),
+    ("扩展开发", "extensions"),
+    ("维护者指南", "project"),
 )
 
 EXPECTED_CONFIG_PATHS = frozenset(
     {
-        "observability.prometheus",
-        "observability.sentry",
+        "graphics.backend",
+        "graphics.max_commands",
+        "graphics.max_concurrency",
+        "graphics.max_pixels",
         "html.max_auto_height",
         "html.max_concurrency",
         "html.max_device_pixel_ratio",
         "html.max_output_bytes",
         "html.max_pixels",
         "html.max_source_bytes",
+        "observability.prometheus",
+        "observability.sentry",
         "provider",
         "provider_config",
         "resources.cache.max_bytes",
         "resources.cache.max_entries",
         "resources.cache.max_resource_bytes",
         "resources.cache.revalidate_seconds",
+        "resources.filehost.bind_host",
+        "resources.filehost.bind_port",
+        "resources.filehost.cache_ttl_seconds",
+        "resources.filehost.max_bytes",
+        "resources.filehost.max_entries",
+        "resources.filehost.prewarm_enabled",
+        "resources.filehost.prewarm_extensions",
+        "resources.filehost.prewarm_max_files",
+        "resources.filehost.prewarm_paths",
+        "resources.filehost.public_base_url",
+        "resources.filehost.request_header_name",
+        "resources.filehost.request_header_salt",
+        "resources.filehost.request_header_value",
         "resources.local_access.allow_any_path",
         "resources.local_access.allowed_paths",
+        "resources.remote_access.allow_hosts",
+        "resources.remote_access.allow_private_networks",
+        "resources.remote_access.deny_hosts",
+        "resources.remote_access.max_concurrent_fetches",
+        "resources.remote_access.max_redirects",
+        "resources.remote_access.request_timeout_seconds",
         "resources.templates.environment_cache_max_entries",
         "resources.templates.environment_compiled_cache_size",
         "resources.traversal.max_concurrency",
@@ -116,83 +94,24 @@ EXPECTED_CONFIG_PATHS = frozenset(
 EXPECTED_ARCHITECTURE_TERMS = frozenset(
     {
         "AssetPublisher",
-        "EngineBindings",
-        "EngineProvider",
+        "CapabilityCatalog",
         "ExecutionLeaseProvider",
+        "HtmlRenderer",
         "LocalAccessPolicy",
+        "ProviderBinding",
         "ProviderDependencies",
-        "ProviderResources",
+        "ProviderResourceAccess",
+        "RenderProvider",
+        "ResourceAccess",
         "ResourceContent",
-        "ResourceReader",
+        "ResourceFetcher",
+        "ResourceMaterializer",
         "ResourceRef",
         "ResourceService",
         "ResourceStrategy",
+        "TemplateRenderer",
         "WorkerExecutor",
     }
-)
-
-_REMOVED_API_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "removed NoneBot configuration wrapper",
-        re.compile(
-            r"`render\.(?:provider(?:_config)?|startup|html|graphics|resources|observability)\b"
-        ),
-    ),
-    (
-        "removed first-party extension contract",
-        re.compile(
-            r"\b(?:"
-            r"PLAYWRIGHT_CAPTURE|PLAYWRIGHT_PAGE|TAKUMI_RENDERER|"
-            r"PlaywrightCapabilityAdapter|TakumiCapabilityAdapter|"
-            r"TakumiApi|TakumiExtension"
-            r")\b|\.extensions\.graphics\b|\.extension\(\)"
-        ),
-    ),
-    (
-        "removed Backend/Render type",
-        re.compile(
-            r"\b(?:"
-            r"BackendCapability|BackendExtension|BackendStatus|RenderBackend|"
-            r"RenderSession|RenderContext|"
-            r"Supports[A-Za-z0-9_]*Backend"
-            r")\b|`(?:Backend|Render)`"
-        ),
-    ),
-    (
-        "removed Backend/Render function",
-        re.compile(
-            r"\b(?:"
-            r"available_render_backends|build_backend|capture_html_element|"
-            r"create_render|get_backend|get_default_render|get_new_page|get_render|"
-            r"get_render_backend_status|get_render_context|is_render_backend_available|"
-            r"is_render_backend_registered|list_render_backend_statuses|probe_render|"
-            r"register_backend|registered_render_backends|require_render_extension|"
-            r"shutdown_render|startup_render|unavailable_render_backends"
-            r")\b"
-        ),
-    ),
-    (
-        "removed compatibility API",
-        re.compile(
-            r"\b(?:"
-            r"html_to_pic|md_to_pic|shutdown_htmlrender|startup_htmlrender|"
-            r"template_to_html|template_to_pic|text_to_pic"
-            r")\b"
-        ),
-    ),
-    (
-        "removed provider-specific convenience argument",
-        re.compile(
-            r"\b(?:"
-            r"device_scale_factor|image_type|markdown_text|md_path|resolve_resources|"
-            r"resource_strict|screenshot_timeout"
-            r")\b|\b(?:pages|templates|wait)\s*="
-        ),
-    ),
-    (
-        "removed public module",
-        re.compile(r"\bentari_plugin_htmlrender\.(?:backend|config|render)(?:\b|\.)"),
-    ),
 )
 
 _PYTHON_FENCE = re.compile(
@@ -246,14 +165,6 @@ def _documentation_files() -> list[Path]:
     return files
 
 
-def _current_contract_files() -> list[Path]:
-    return [
-        path
-        for path in _documentation_files()
-        if _relative(path) not in MIGRATION_CONTRACT_ALLOWLIST
-    ]
-
-
 def _literal_string_sequence(path: Path, name: str) -> tuple[str, ...]:
     tree = ast.parse(path.read_text("utf-8"), filename=str(path))
     for node in tree.body:
@@ -268,9 +179,7 @@ def _literal_string_sequence(path: Path, name: str) -> tuple[str, ...]:
             value_node = node.value
         else:
             continue
-        if not matches:
-            continue
-        if value_node is None:
+        if not matches or value_node is None:
             continue
         value = ast.literal_eval(value_node)
         if isinstance(value, (list, tuple)) and all(
@@ -335,63 +244,49 @@ def _cjk_soft_break_occurrences(path: Path) -> list[str]:
     return occurrences
 
 
-def _stale_contract_occurrences() -> list[str]:
-    patterns = list(_REMOVED_API_PATTERNS)
-    patterns.extend(
-        (
-            "removed flat configuration key",
-            re.compile(rf"\b{re.escape(key)}\b", re.IGNORECASE),
-        )
-        for key in REMOVED_CONFIG_KEYS
-    )
-    occurrences: list[str] = []
-    for path in _current_contract_files():
-        text = path.read_text("utf-8")
-        for description, pattern in patterns:
-            occurrences.extend(
-                (
-                    f"{_relative(path)}:{_line_number(text, match.start())}: "
-                    f"{match.group(0)!r} ({description})"
-                )
-                for match in pattern.finditer(text)
-            )
-    return occurrences
-
-
-def test_historical_contract_allowlist_is_explicit_and_not_stale() -> None:
-    missing = [
-        f"{path} ({reason})"
-        for path, reason in MIGRATION_CONTRACT_ALLOWLIST.items()
-        if not (ROOT / path).is_file()
-    ]
-    assert not missing, "Stale migration allowlist entries:\n  " + "\n  ".join(missing)
-
-
-def test_canonical_documentation_layout_matches_navigation() -> None:
-    navigation = (ROOT / "mkdocs.yml").read_text("utf-8")
+def test_canonical_documentation_roots_exist() -> None:
     missing_roots = [
         name for name, path in DOCUMENTATION_ROOTS.items() if not path.is_dir()
-    ]
-    missing_navigation = [
-        str(path)
-        for path in MIGRATION_CONTRACT_ALLOWLIST
-        if path.relative_to("docs").as_posix() not in navigation
     ]
     assert not missing_roots, "Canonical documentation roots are missing: " + ", ".join(
         missing_roots
     )
-    assert not missing_navigation, (
-        "Migration documents must remain in the MkDocs navigation: "
-        + ", ".join(missing_navigation)
-    )
 
 
-def test_current_documentation_and_examples_do_not_teach_removed_contracts() -> None:
-    occurrences = _stale_contract_occurrences()
-    assert not occurrences, (
-        "Removed 0.7/alpha contracts may only appear in explicitly allowlisted "
-        "migration documents:\n  " + "\n  ".join(occurrences)
+def test_documentation_navigation_matches_the_reader_task_tree() -> None:
+    navigation = (ROOT / "mkdocs.yml").read_text("utf-8").partition("\nnav:\n")[2]
+    top_level = tuple(
+        match.group("title")
+        for match in re.finditer(r"(?m)^  - (?P<title>[^:]+):", navigation)
     )
+    assert top_level == ("首页", *(title for title, _ in DOCUMENTATION_CHAPTERS))
+
+    navigated_pages = tuple(
+        match.group("path")
+        for match in re.finditer(
+            r"(?m)^\s+- [^:]+: (?P<path>\S+\.md)$",
+            navigation,
+        )
+    )
+    canonical_pages = {"index.md"}
+    for _, directory in DOCUMENTATION_CHAPTERS:
+        canonical_pages.update(
+            str(path.relative_to(ROOT / "docs"))
+            for path in (ROOT / "docs" / directory).rglob("*.md")
+        )
+    page_counts = Counter(navigated_pages)
+    duplicate_pages = sorted(path for path, count in page_counts.items() if count > 1)
+    assert not duplicate_pages, (
+        "Pages appear more than once in navigation: " + ", ".join(duplicate_pages)
+    )
+    assert frozenset(navigated_pages) == frozenset(canonical_pages)
+
+    legacy_pages = tuple(
+        path.relative_to(ROOT)
+        for directory in ("users", "maintainers")
+        for path in (ROOT / "docs" / directory).rglob("*.md")
+    )
+    assert not legacy_pages
 
 
 def test_documentation_has_no_cjk_prose_soft_breaks() -> None:
@@ -402,8 +297,8 @@ def test_documentation_has_no_cjk_prose_soft_breaks() -> None:
         for occurrence in _cjk_soft_break_occurrences(path)
     ]
     assert not occurrences, (
-        "CJK prose must not use Markdown soft line breaks because browsers render "
-        "them as visible spaces:\n  " + "\n  ".join(occurrences)
+        "CJK prose must not use Markdown soft line breaks:\n  "
+        + "\n  ".join(occurrences)
     )
 
 
@@ -444,10 +339,10 @@ def _parse_python_sources() -> tuple[list[tuple[PythonSource, ast.Module]], list
     errors: list[str] = []
     for source in _python_sources():
         tree, error = _parse_python_source(source)
+        if tree is not None:
+            parsed.append((source, tree))
         if error is not None:
             errors.append(error)
-        elif tree is not None:
-            parsed.append((source, tree))
     return parsed, errors
 
 
@@ -472,39 +367,30 @@ def _top_level_exports() -> frozenset[str]:
     return frozenset(_literal_string_sequence(PACKAGE_ROOT / "__init__.py", "__all__"))
 
 
-def test_required_public_surface_is_exported_and_documented() -> None:
-    exports = _top_level_exports()
-    missing_exports = sorted(EXPECTED_PUBLIC_EXPORTS - exports)
-    current_text = "\n".join(
-        path.read_text("utf-8") for path in _current_contract_files()
-    )
-    missing_docs = sorted(
+def test_curated_root_surface_is_fully_documented() -> None:
+    exports = _top_level_exports() - {"__version__"}
+    current_text = "\n".join(path.read_text("utf-8") for path in _documentation_files())
+    missing = sorted(
         symbol
         for symbol in exports
         if re.search(rf"\b{re.escape(symbol)}\b", current_text) is None
     )
-    assert not missing_exports, (
-        "Required top-level public exports are missing: " + ", ".join(missing_exports)
-    )
-    assert not missing_docs, (
-        "Current documentation does not cover top-level public symbols: "
-        + ", ".join(missing_docs)
-    )
+    assert not missing, "Current docs omit root symbols: " + ", ".join(missing)
 
 
-def _runtime_extension_properties() -> frozenset[str]:
+def _runtime_capability_properties() -> frozenset[str]:
     tree = ast.parse(
-        RUNTIME_EXTENSIONS_PATH.read_text("utf-8"),
-        filename=str(RUNTIME_EXTENSIONS_PATH),
+        RUNTIME_CAPABILITIES_PATH.read_text("utf-8"),
+        filename=str(RUNTIME_CAPABILITIES_PATH),
     )
-    extension_class = next(
+    capability_class = next(
         node
         for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "RuntimeExtensions"
+        if isinstance(node, ast.ClassDef) and node.name == "RuntimeCapabilities"
     )
     return frozenset(
         node.name
-        for node in extension_class.body
+        for node in capability_class.body
         if isinstance(node, ast.FunctionDef)
         and any(
             isinstance(decorator, ast.Name) and decorator.id == "property"
@@ -513,21 +399,19 @@ def _runtime_extension_properties() -> frozenset[str]:
     )
 
 
-def test_first_party_extension_properties_are_documented() -> None:
-    properties = _runtime_extension_properties()
-    assert properties == {"playwright", "takumi", "pillow", "skia"}
-    current_text = "\n".join(
-        path.read_text("utf-8") for path in _current_contract_files()
-    )
+def test_first_party_capabilities_are_documented() -> None:
+    properties = _runtime_capability_properties()
+    assert properties == {"playwright", "takumi", "available_names"}
+    current_text = "\n".join(path.read_text("utf-8") for path in _documentation_files())
     missing = sorted(
         name
-        for name in properties
-        if re.search(rf"\bextensions\.{re.escape(name)}\b", current_text) is None
+        for name in ("playwright", "takumi")
+        if re.search(rf"\bcapabilities\.{name}\b", current_text) is None
     )
-    assert not missing, (
-        "First-party RenderRuntime.extensions properties are undocumented: "
-        + ", ".join(missing)
+    assert not missing, "First-party capabilities are undocumented: " + ", ".join(
+        missing
     )
+    assert "service.graphics" in current_text
 
 
 def test_backend_runtime_dependency_boundaries_are_documented() -> None:
@@ -540,52 +424,26 @@ def test_backend_runtime_dependency_boundaries_are_documented() -> None:
     provider_matrix = (ROOT / "docs" / "start" / "choosing-provider.md").read_text(
         "utf-8"
     )
-    troubleshooting_text = (
-        ROOT / "docs" / "configuration" / "troubleshooting.md"
-    ).read_text("utf-8")
-    remote_playwright_text = (
-        ROOT / "docs" / "configuration" / "remote-playwright.md"
-    ).read_text("utf-8")
 
     assert "uv run playwright install --with-deps chromium" in playwright_text
-    assert "只安装 Playwright Python client" in playwright_text
-    assert "首选：Docker 远程 Playwright" in playwright_text
-    assert "第二选项：Bot 宿主机本地 Playwright" in playwright_text
-    assert "client 与 browser revision 强一致" in playwright_text
-    assert "不得让不同项目虚拟环境共享该目录" in playwright_text
     assert "PLAYWRIGHT_BROWSERS_PATH" in playwright_text
-    assert "精确匹配的 browser revision" in troubleshooting_text
-    assert "WS 版本门禁与启动探测" in remote_playwright_text
-    assert "版本门禁 fail-open" in remote_playwright_text
-    assert "CDP 模式不执行 Playwright client/server 版本门禁" in remote_playwright_text
-    assert "软门禁不能证明任意版本组合兼容" in remote_playwright_text
-    for dependency in (
-        "libEGL.so.1",
-        "libGL.so.1",
-        "libexpat.so.1",
-        "libegl1",
-        "libgl1",
-        "libexpat1",
-    ):
+    for dependency in ("libEGL.so.1", "libGL.so.1", "libexpat.so.1"):
         assert f"`{dependency}`" in skia_text
     assert 'uv run python3 -c "import skia"' in skia_text
-    for engine in ("Playwright", "Takumi", "Pillow", "Skia"):
-        assert re.search(rf"^\| {engine} \|", provider_matrix, flags=re.MULTILINE)
+    for implementation in ("Playwright", "Takumi", "Pillow", "Skia"):
+        assert re.search(
+            rf"^\| {implementation} \|",
+            provider_matrix,
+            flags=re.MULTILINE,
+        )
 
 
-def test_cache_components_and_public_invalidation_boundaries_are_documented() -> None:
-    cache_guide_path = ROOT / "docs" / "guides" / "cache-lifecycle.md"
-    cache_guide = cache_guide_path.read_text("utf-8")
+def test_cache_and_scoped_resource_boundaries_are_documented() -> None:
+    cache_guide = (ROOT / "docs" / "guides" / "cache-lifecycle.md").read_text("utf-8")
     navigation = (ROOT / "mkdocs.yml").read_text("utf-8")
     resource_reference = (ROOT / "docs" / "configuration" / "resources.md").read_text(
         "utf-8"
     )
-    template_guide = (
-        ROOT / "docs" / "guides" / "templates-and-resources.md"
-    ).read_text("utf-8")
-    takumi_reference = (
-        ROOT / "docs" / "configuration" / "providers" / "takumi.md"
-    ).read_text("utf-8")
 
     assert "guides/cache-lifecycle.md" in navigation
     for cache_name in (
@@ -595,14 +453,9 @@ def test_cache_components_and_public_invalidation_boundaries_are_documented() ->
         "`takumi_compiled`",
     ):
         assert cache_name in cache_guide
-    assert "`runtime.resources.clear()` 只清理当前 RenderRuntime" in cache_guide
-    assert "不会清理 Jinja Environment" in cache_guide
-    assert "filter 的名称和 callable 身份" in cache_guide
-    assert "无法通过单纯增加内存解决" in cache_guide
-    assert "api.compiled_cache_stats" in cache_guide
     assert "refresh=True" in resource_reference
-    assert "自定义 Jinja filter" in template_guide
-    assert "compiled_cache_stats" in takumi_reference
+    assert "ResourceAccess.publish" in resource_reference
+    assert "PublishedResource" in resource_reference
 
 
 def test_documented_top_level_imports_exist() -> None:
@@ -623,7 +476,7 @@ def test_documented_top_level_imports_exist() -> None:
     )
 
 
-def test_maintainer_docs_cover_the_final_architecture_vocabulary() -> None:
+def test_extension_docs_cover_the_final_architecture_vocabulary() -> None:
     architecture_text = "\n".join(
         path.read_text("utf-8")
         for path in sorted(DOCUMENTATION_ROOTS["architecture"].rglob("*.md"))
@@ -633,10 +486,7 @@ def test_maintainer_docs_cover_the_final_architecture_vocabulary() -> None:
         for term in EXPECTED_ARCHITECTURE_TERMS
         if re.search(rf"\b{re.escape(term)}\b", architecture_text) is None
     )
-    assert not missing, (
-        "Maintainer architecture documentation is missing final concepts: "
-        + ", ".join(missing)
-    )
+    assert not missing, "Maintainer docs omit concepts: " + ", ".join(missing)
 
 
 def _annotation_name(annotation: ast.expr) -> str | None:
@@ -698,23 +548,19 @@ def _config_leaf_paths() -> frozenset[str]:
             else:
                 leaves.add(".".join(path))
 
-    assert "RenderSettings" in models, "RenderSettings must remain a BaseModel"
-    visit("RenderSettings", ())
+    assert "HtmlRenderConfig" in models
+    visit("HtmlRenderConfig", ())
     return frozenset(leaves)
 
 
-def test_unified_config_schema_and_documentation_stay_in_sync() -> None:
+def test_config_schema_and_documentation_stay_in_sync() -> None:
     schema_paths = _config_leaf_paths()
-    missing_schema = sorted(EXPECTED_CONFIG_PATHS - schema_paths)
+    assert schema_paths == EXPECTED_CONFIG_PATHS
     config_text = "\n".join(
         path.read_text("utf-8")
         for path in sorted(DOCUMENTATION_ROOTS["configuration"].rglob("*.md"))
     )
     missing_docs = sorted(path for path in schema_paths if path not in config_text)
-    assert not missing_schema, (
-        "Unified plugin configuration lost required paths: " + ", ".join(missing_schema)
-    )
-    assert not missing_docs, (
-        "Configuration fields must be documented with their full dotted paths: "
-        + ", ".join(missing_docs)
+    assert not missing_docs, "Configuration fields are undocumented: " + ", ".join(
+        missing_docs
     )

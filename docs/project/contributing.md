@@ -91,4 +91,4 @@ PR 描述必须包含：
 
 ## 行为准则
 
-参与协作时默认遵守 [Code of Conduct](https://github.com/kexue-z/entari-plugin-htmlrender/blob/main/CODE_OF_CONDUCT.md)。
+参与协作时默认遵守 [Code of Conduct](https://github.com/entanex/entari-plugin-htmlrender/blob/main/CODE_OF_CONDUCT.md)。

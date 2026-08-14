@@ -5,7 +5,7 @@ description: 缓存、路径白名单、网络策略与显式 aiohttp filehost
 
 # 资源与访问策略
 
-本地与远程访问默认收紧：`local_access.allow_any_path=false`，私网地址默认拒绝。模板的 base 只负责解析相对引用，不会扩大允许读取的路径。
+本地与远程访问默认收紧：`local_access.allow_any_path=false`，私网地址默认拒绝。模板的 base 只解析相对引用，不会扩大允许读取的路径。
 
 ```yaml
 plugins:
@@ -24,7 +24,7 @@ plugins:
         max_concurrency: 16
 ```
 
-每次调用可用 `ResourcePolicy.AUTO`、`STRICT` 或 `OFF` 覆盖 Provider 默认资源模式。策略在授权前执行；cache hit 不绕过路径或网络检查。
+渲染调用通过 `ResourceMaterializationPolicy.AUTO`、`STRICT` 或 `OFF` 显式覆盖Provider 默认物化策略。策略在授权前执行；cache hit 不绕过路径或网络检查。
 
 | 完整配置路径 | 默认值 |
 | --- | ---: |
@@ -44,12 +44,11 @@ plugins:
 | `resources.remote_access.request_timeout_seconds` | `30.0` |
 | `resources.remote_access.max_concurrent_fetches` | `8` |
 
-直接读取可传 `refresh=True` 绕过当前 resident value 并执行重新验证。
+业务代码通过 `service.resources.fetch*()` 读取显式 `ResourceRef`。`refresh=True`跳过当前 resident value 并重新验证来源；inline bytes 已经是 payload，不伪装成可 fetch 的 locator。
 
 ## Filehost
 
-需要把本地/内存资源发布给远程浏览器时安装 `filehost` extra。composition 仅在Provider 的 resource strategy 要求 filehost 时显式创建同一个`HostedAssetStore`、`FilehostAssetPublisher` 与 aiohttp
-`HostedAssetHttpServer`：
+需要把本地/内存资源发布给远程浏览器时安装 `filehost` extra。composition 仅在Provider 的 resource strategy 要求 filehost 时创建同一个 `HostedAssetStore`、`FilehostAssetPublisher` 与 aiohttp `HostedAssetHttpServer`：
 
 ```yaml
 plugins:
@@ -62,7 +61,16 @@ plugins:
         cache_ttl_seconds: 300
 ```
 
-`public_base_url` 必须是浏览器实际可达、由反向代理映射到固定内部 mount 的绝对URL；它不会从 bind 地址、`Host` 或 forwarded header 推导。请求授权随`ResourceResolution.request_headers_by_url` 绑定到精确 URL。
+`public_base_url` 必须是浏览器实际可达、由反向代理映射到固定内部 mount 的绝对URL；它不会从 bind 地址、`Host` 或 forwarded header 推导。对业务调用者，`ResourceAccess.publish()` 建立显式租约并 yield `PublishedResource`：
+
+```python
+from entari_plugin_htmlrender.resources import InlineResource
+
+async with service.resources.publish(InlineResource(b"payload", media_type="application/octet-stream")) as published:
+    url = published.url
+    headers = published.request_headers
+    # url 与精确授权 headers 仅在这个作用域内有效。
+```
 
 | 完整配置路径 | 默认值 |
 | --- | ---: |
@@ -75,4 +83,4 @@ filehost 由 `HtmlRenderService` 在 Launart preparing 启动、cleanup 关闭�
 
 ### Satori upload 不是 filehost
 
-Satori `upload.create` 面向当前事件账号，并把资源交给外部 Satori Server 管理。其协议不提供租约、续期、显式删除、容量预算或可观察的 TTL，也无法在本插件热卸载时确定性清理，因此不实现 `AssetPublisher` 的生命周期契约。需要向消息平台上传最终产物时，应在 handler 中显式使用当前 `Session`；不要把该 API 作为渲染输入资源的 filehost。
+Satori `upload.create` 面向当前事件账号，并把资源交给外部 Satori Server 管理。其协议不提供租约、续期、显式删除、容量预算或可观察的 TTL，也无法在插件热卸载时确定性清理，因此不能实现 `AssetPublisher` 的生命周期契约。向消息平台上传最终产物时，应在 handler 中显式使用当前 `Session`；不要把该 API 当作渲染输入资源的 filehost。

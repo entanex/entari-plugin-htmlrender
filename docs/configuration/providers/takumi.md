@@ -11,7 +11,7 @@ Takumi 在进程内执行 Rust 原生排版，不启动浏览器，不执行 Jav
 ## 安装与选择
 
 ```bash
-uv add "entari-plugin-htmlrender[takumi]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[takumi]>=0.1.0,<0.2"
 ```
 
 ```yaml
@@ -79,13 +79,12 @@ plugins:
 Takumi runtime 对重复的 HTML/CSS native 编译使用有界 singleflight LRU。`compiled_cache_max_source_bytes` 的单位是输入 source 的 UTF-8 bytes，不是 native heap；调优时必须同时观察条目上限。
 
 ```python
-from entari_plugin_htmlrender import RuntimeSource, resolve_runtime
+from entari_plugin_htmlrender.capabilities import TakumiCapability
 
-async def cache_stats(runtime: RuntimeSource) -> tuple[int, int, int]:
-    takumi = resolve_runtime(runtime).extensions.takumi
-    async with takumi.api() as api:
-        await api.render_svg_html("<strong>cached</strong>", width=320)
-        stats = api.compiled_cache_stats
+async def cache_stats(takumi: TakumiCapability) -> tuple[int, int, int]:
+    async with takumi.lease_session() as session:
+        await session.render_svg_html("<strong>cached</strong>", width=320)
+        stats = session.compiled_cache_stats
         return stats.hits, stats.misses, stats.evictions
 ```
 
@@ -110,24 +109,22 @@ Takumi 自带的 Latin fallback 不能覆盖业务所需字符集。需要中文
 
 ## typed Capability
 
-node、measure、SVG、动画和动态字体是 Takumi 专属能力：
+SVG 与动态字体注册是 Takumi 专属 managed capability：
 
 ```python
-from entari_plugin_htmlrender import RuntimeSource, resolve_runtime
+from entari_plugin_htmlrender.capabilities import TakumiCapability
 
-async def render_svg(runtime: RuntimeSource) -> str:
-    takumi = resolve_runtime(runtime).extensions.takumi
-    async with takumi.api() as api:
-        return await api.render_svg_html("<strong>Hello</strong>", width=320)
+async def render_svg(takumi: TakumiCapability) -> str:
+    async with takumi.lease_session() as session:
+        return await session.render_svg_html("<strong>Hello</strong>", width=320)
 ```
 
-`api()` 的异步上下文绑定并持有当前有效 lease。调用方不得让 `api`、compiled
-document/node/stylesheet 逃逸出上下文，也不应把它们保存为进程级单例；普通`bytes`、SVG 字符串和测量快照不受该限制。
+`lease_session()` 绑定并持有当前有效 lease。调用方不得让 session 逃逸出上下文，也不应保存为进程级单例；已返回的 `bytes`、SVG 字符串与 cache stats snapshot 不受该限制。
 
-需要尚未进入稳定 API 的上游能力时，可通过`takumi.renderer()` 获取真实 `takumi_py.Renderer`。该高级入口保留上游全部方法和类型，但同步执行、并发、native panic、资源归一化与异常处理均由调用方承担；详见 [Capability 参考](../../reference/capabilities.md#takumi)。
+需要尚未进入稳定 API 的上游能力时，可通过 `lease_native_renderer()` 显式租用native renderer。该入口返回 `object`，调用方自行恢复上游 typing，并承担同步执行、并发、native panic、资源归一化与底层错误语义；详见[Capability 参考](../../reference/capabilities.md#takumi)。
 
 ## 选择建议
 
-需要脚本、网页导航或浏览器布局语义时选择 Playwright；内容完全受控、希望避免浏览器进程，或需要 native measure/SVG/animation 时选择 Takumi。
+需要脚本、网页导航或浏览器布局语义时选择 Playwright；内容完全受控、希望避免浏览器进程，或需要 Takumi SVG/字体/native 能力时选择 Takumi。
 
 启用或再分发 Takumi 前，请自行检查 `takumi-py` 当前版本的许可与平台 wheel；这里不构成法律意见。

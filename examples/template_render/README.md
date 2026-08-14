@@ -1,6 +1,6 @@
 # 本地模板渲染
 
-[`example.py`](example.py) 展示 Entari handler 获得 DI 注入的`HtmlRenderService` 后，如何调用 `render_template` 与 `render_text` 并显式传入`runtime=service`。模块只返回 `RenderedImage`，不绑定任何消息 adapter。
+[`example.py`](example.py) 展示 Entari handler 获得 DI 注入的`HtmlRenderService` 后，如何通过 `service.renderer` rasterize `TemplateRef` 与文本。模块只返回`RenderedImage`，不绑定任何消息 adapter。
 
 安装 Playwright 或 Takumi extra，并在 Entari 配置中允许模板目录：
 

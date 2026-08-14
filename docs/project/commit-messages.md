@@ -89,13 +89,13 @@ Closes #123
 如果存在不兼容改动，建议使用以下两种方式之一：
 
 ```text
-feat(api)!: rename render_html_to_image to render_html
+feat(graphics)!: make backend selection singular
 ```
 
 或在 footer 中声明：
 
 ```text
-BREAKING CHANGE: `render_html_to_image` has been removed. Use `render_html`.
+BREAKING CHANGE: `graphics.backend` now accepts one configured backend.
 ```
 
 ## Squash 与历史整洁

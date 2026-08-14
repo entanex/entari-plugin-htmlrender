@@ -1,84 +1,66 @@
 ---
 title: Capability 参考
-description: Playwright、Takumi、Pillow、Skia 与第三方 typed extensions
+description: RuntimeCapabilities、Playwright、Takumi 与第三方 typed capability
 ---
 
 # Capability 参考
 
-`RenderRuntime.extensions` 暴露无法放入通用 `HtmlRenderer` 的 Provider/adapter 专属语义。第一方属性为 `.playwright`、`.takumi`、`.pillow`、`.skia`；第三方扩展使用`get(key)` / `require(key)`。
+`HtmlRenderService.capabilities` 暴露无法放入通用 `HtmlRenderer` 的 Provider 专属语义。第一方属性为 `.playwright` 与 `.takumi`；第三方 capability 使用 typed
+`CapabilityKey` 配合 `get()` / `require()`。可用名称由只读`available_names` 返回。
+
+普通 HTML rasterization 不需要 capability。框架无关函数若确实使用专属行为，应直接依赖对应 protocol，而不是接收整个 service。
 
 ## Playwright
 
 ```python
-from entari_plugin_htmlrender import RuntimeSource, resolve_runtime
+from entari_plugin_htmlrender.capabilities import PlaywrightCapability
 
-async def screenshot(runtime: RuntimeSource, url: str) -> bytes:
-    access = resolve_runtime(runtime).extensions.playwright
-    async with access.page() as page:
+async def screenshot(
+    playwright: PlaywrightCapability,
+    url: str,
+) -> bytes:
+    async with playwright.lease_page(viewport={"width": 1280, "height": 800}) as page:
         await page.goto(url)
         return await page.screenshot(type="png")
 ```
 
-`page(**browser_new_page_options)` 与 `browser()` 返回异步上下文管理器，内部对象是Playwright 原生类型。原生异常不会翻译为通用 rendering error。
+`lease_page(**options)` 与 `lease_browser()` 返回 async context manager。原生 Page或 Browser 只能在上下文内使用；URL 导航的 scheme/host/egress 策略由调用层负责。
 
 ## Takumi
 
 ```python
-from entari_plugin_htmlrender import RuntimeSource, resolve_runtime
+from entari_plugin_htmlrender.capabilities import TakumiCapability
 
-async def render_svg(runtime: RuntimeSource) -> str:
-    access = resolve_runtime(runtime).extensions.takumi
-    async with access.api() as api:
-        return await api.render_svg_html("<main>vector</main>", width=640)
+async def render_svg(takumi: TakumiCapability) -> str:
+    async with takumi.lease_session() as session:
+        return await session.render_svg_html(
+            "<main>vector</main>",
+            width=640,
+        )
 ```
 
-`api()` 暴露受管理的 compile/render/measure/SVG/animation/font 操作；`renderer()`租用原生 `takumi_py.Renderer`，调用方自行承担 worker、参数验证与 native 错误边界。
+受管理的 `TakumiSession` 提供 HTML raster、`render_svg_html()`、`register_font_file()`，以及只读的 `registered_font_families` 与`compiled_cache_stats`。这些操作在 runtime admission、lease 与稳定错误边界内。
 
-### TakumiAPI 方法矩阵
+需要尚未进入稳定 managed API 的上游对象时，可显式使用`lease_native_renderer()`。返回值类型刻意为 `object`；调用方选择这一逃生口后自行承担 native typing、线程/worker 与底层错误语义。
 
-<!-- takumi:compile -->
+## 第三方 capability
 
-| 分组 | 方法 |
-| --- | --- |
-| Compile | `compile_html`、`compile_node`、`compile_stylesheet`、`compile_keyframes` |
+```python
+from entari_plugin_htmlrender.rendering import CapabilityKey
+from entari_plugin_htmlrender.runtime import RuntimeCapabilities
 
-<!-- takumi:raster -->
+METRICS = CapabilityKey("acme.metrics", MetricsCapability)
 
-| 分组 | 方法 |
-| --- | --- |
-| Raster | `render_html`、`render_compiled`、`render_node` |
+def optional_metrics(capabilities: RuntimeCapabilities):
+    return capabilities.get(METRICS)
+```
 
-<!-- takumi:measure -->
+名称必须是稳定的小写标识，interface 必须是 `@runtime_checkable` protocol。`require()` 在缺失时抛出 `CapabilityUnavailableError`；`get()` 的 `None` 只表示正常缺失。
 
-| 分组 | 方法 |
-| --- | --- |
-| Measure | `measure_html`、`measure_compiled`、`measure_node` |
+## Graphics 不属于 capability
 
-<!-- takumi:svg -->
-
-| 分组 | 方法 |
-| --- | --- |
-| SVG | `render_svg_html`、`render_svg_compiled`、`render_svg_node` |
-
-<!-- takumi:animation -->
-
-| 分组 | 方法 |
-| --- | --- |
-| Animation | `render_animation`、`render_sequence_at_time`、`encode_frames` |
-
-<!-- takumi:font -->
-
-| 分组 | 方法 |
-| --- | --- |
-| Font | `register_font`、`register_fonts`、`register_font_file` |
-
-只读属性为 `registered_font_families` 与 `compiled_cache_stats`。每个受管理方法都有稳定的 `takumi.api.*` telemetry 名称；`render_sequence_at_time` 保留既有的`takumi.api.render_sequence` operation。
-
-## Pillow 与 Skia
-
-两者实现 `RasterSceneRenderer.render(RenderRasterSceneRequest) -> RenderedImage`。通过 `graphics.backends` 显式启用；它们不消费 `PreparedHtml` 或 `provider_config`。
+Pillow/Skia 实现独立的 `GraphicsRenderer`，由 `HtmlRenderService.graphics` 暴露。业务代码不通过 capability catalog 选择 backend；详见[RasterScene 指南](../guides/raster-scenes.md)。
 
 ## 租约规则
 
-任何 raw Page、Browser、Takumi API/renderer 都只能在当前上下文内使用。runtime
-cleanup 会等待活跃租约；离开上下文或热卸载后必须丢弃对象。
+任何 Page、Browser、Takumi session/native renderer 都只能在当前 async context 内使用。runtime cleanup 会等待活跃租约；离开上下文或插件热卸载后必须丢弃对象。

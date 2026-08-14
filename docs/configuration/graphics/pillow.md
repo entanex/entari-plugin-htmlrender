@@ -11,10 +11,10 @@ Pillow 后端执行后端中立的 `RasterScene`，适合优先考虑安装兼�
 ## 安装
 
 ```bash
-uv add "entari-plugin-htmlrender[pillow]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[pillow]>=0.1.0,<0.2"
 ```
 
-`pillow` extra 安装 Pillow 12 或更高版本。未安装 extra 却启用后端时，composition抛出带安装提示的 `RasterBackendUnavailable`，不会回退到 Skia。
+`pillow` extra 安装 Pillow 12 或更高版本。未安装 extra 却启用后端时，composition抛出带安装提示的 `GraphicsBackendUnavailableError`，不会回退到 Skia。
 
 ## 平台约束
 
@@ -26,14 +26,13 @@ Pillow 为受支持的 Python 和主流平台发布 wheel。官方 Linux wheel �
 plugins:
   htmlrender:
     graphics:
-      backends: [pillow]
+      backend: pillow
 ```
 
 像素、命令与并发限制由共享的 `graphics` 配置控制，见[Graphics 后端总览](index.md#graphics-settings)。
 
 ## 运行边界
 
-Pillow 不进入 `provider`，调用方通过 `resolve_runtime(source).extensions.pillow`获取 renderer。输出遵循共享的 RGBA、source-over、JPEG matte 与质量语义；native
-draw 或 encode 失败翻译为 `RasterBackendExecutionError`。
+Pillow 不进入 `provider`。调用方使用 `service.graphics` 或显式注入的`GraphicsRenderer`。输出遵循共享的 RGBA、source-over、JPEG matte 与质量语义；native draw 或 encode 失败翻译为 `RasterBackendExecutionError`。
 
 完整调用示例见[绘制 RasterScene](../../guides/raster-scenes.md)。

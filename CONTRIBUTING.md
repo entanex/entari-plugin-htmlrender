@@ -59,7 +59,7 @@ CI 还会在 Python 3.10–3.14 上运行 pytest/coverage 与 Entari 插件加�
 5. 处理 review，更新到最新 `main`，等待所有适用 checks 重新通过。
 6. 默认使用 **Squash and merge**，合并后删除功能分支。
 
-当前 `main` 未由 GitHub Ruleset 强制执行全部上述约定，维护者必须在合并前人工核对 checks 和 review 状态。详见 [Pull Request 生命周期](docs/project/pull-requests.md)。
+仓库以 `.github/rulesets/protect-main.json` 定义 `main` 的目标约束，但 Ruleset 文件不会自动写入 GitHub 远端。截至 2026-07-14 的审计尚未启用该远端 Ruleset；启用并重新审计前，维护者必须人工核对 checks 与 review 状态。详见 [Pull Request 生命周期](docs/project/pull-requests.md)与[仓库治理与保护](docs/project/governance.md)。
 
 ## 文档预览与 TestPyPI
 

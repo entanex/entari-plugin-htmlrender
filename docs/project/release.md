@@ -13,14 +13,14 @@ tags:
 
 正式发布以一个经过 review 的版本 PR 开始，以不可移动的 `v<version>` tag 为源代码锚点。PyPI、GitHub Release 和版本化文档是三条相互关联但独立执行、独立恢复的链路。
 
-项目仍处于 pre-1.0。版本号采用 PEP 440 并保持单调递增，但不宣称 `0.x.y` 的 patch 位遵循 SemVer 的兼容含义。发布决策应明确区分“已发布公共 API”“当前分支尚未发布接口”和“必须修正的不可靠默认行为”，并为默认行为变化提供迁移说明。
+项目仍处于 pre-1.0。版本号采用 PEP 440 并保持单调递增，但不宣称 `0.x.y` 的 patch 位遵循 SemVer 的兼容含义。发布决策应明确区分“已发布公共 API”“当前分支尚未发布接口”和“必须修正的不可靠默认行为”，并为默认行为变化提供兼容性说明。
 
 ## 发布前提
 
 版本 PR 必须：
 
 1. 将 `pyproject.toml` 中的项目版本更新为目标版本，并通过 `uv` 更新锁文件；
-1. 完成与该版本相关的实现、测试、迁移说明和使用指南；
+1. 完成与该版本相关的实现、测试、变更说明和使用指南；
 1. 通过 [Pull Request 生命周期](pull-requests.md)中列出的 review 与 checks；
 1. 确认 README、当前文档与 examples 只描述最终公共契约，documentation contract、两套类型检查和 strict docs build 全部通过；
 1. 在 PR preview 人工检查架构图、配置表、代码块换行与 prerelease 提示；
@@ -32,7 +32,7 @@ make build-artifacts
 
 该 target 内部执行 `uv build --no-sources`、pinned `twine==6.2.0 check` 和仓库外隔离安装 smoke。`--no-sources` 很重要：发布构建不得因本地 workspace source 覆盖而得到一个无法从锁定依赖重现的产物。
 
-涉及 package resources 或 native extra 的版本还必须在仓库外、清空 `PYTHONPATH` 后安装真实产物。0.8 的门禁要求 Python 3.10–3.14 验证 wheel，Python 3.12 至少验证一次 sdist；检查全部 package resources 非空且登记在 `RECORD`，验证 bare core 不安装任何 backend，执行 Entari load、Preparation 与 typed artifact smoke，并在 `[takumi]`、`[playwright,filehost]` 和 `[pillow,skia]` 的独立环境中确认锁定依赖与真实渲染。
+涉及 package resources 或 native extra 的版本还必须在仓库外、清空 `PYTHONPATH` 后安装真实产物。发布门禁要求 Python 3.10–3.14 验证 wheel，Python 3.12 至少验证一次 sdist；检查全部 package resources 非空且登记在 `RECORD`，验证 bare core 不安装任何 backend，执行 Entari load、Preparation 与 typed artifact smoke，并在 `[takumi]`、`[playwright,filehost]` 和 `[pillow,skia]` 的独立环境中确认锁定依赖与真实渲染。
 
 ## 并行开发与 release cut
 
@@ -40,12 +40,12 @@ make build-artifacts
 
 1. 功能和修复分支从 `main` 创建，各自完成实现、测试与文档；普通功能 PR 不提前修改项目版本；
 1. 准备发版时，只把已经可发布的变更合入 `main`，未完成分支继续保持开放或放在 feature flag 后；
-1. 从选定的 `main` 快照创建短生命周期 `release/v<version>`，集中完成 `uv version <version>`、锁文件、迁移说明和 release notes；
+1. 从选定的 `main` 快照创建短生命周期 `release/v<version>`，集中完成 `uv version <version>`、锁文件、变更说明和 release notes；
 1. release PR 使用与普通 PR 相同的 review、preview 和 required checks，最终 squash merge；不要在 PR 合并前手工创建 tag；
 1. 合并后的四条 main workflow 按精确 source SHA 保留运行。后续 PR 即使很快合并，也不会取消或混入本次版本门禁；
 1. Auto Tag 只给版本变化的 trusted main SHA 打 tag，因此版本边界由该提交确定，而不是由发布 workflow 启动时仍在移动的 `main` 决定。
 
-当前自动发布只授权 `main` 历史。若未来需要同时维护 `0.8` 与 `0.9` 两条已分叉的稳定线，应先设计受保护的 maintenance branch、回合并规则和 tag 授权，再扩展 ancestry gate；不要临时从维护分支打 tag 后绕过校验。
+当前自动发布只授权 `main` 历史。若未来需要维护已分叉的稳定线，应先设计受保护的 maintenance branch、回合并规则和 tag 授权，再扩展 ancestry gate；不要临时从维护分支打 tag 后绕过校验。
 
 ## 自动发布主链路
 

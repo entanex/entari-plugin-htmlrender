@@ -1,6 +1,6 @@
 ---
 title: 工程协作流程
-description: 0.8 仓库结构、工作流与交付门禁
+description: 仓库结构、工作流与交付门禁
 icon: lucide/folder-git-2
 ---
 
@@ -10,14 +10,16 @@ icon: lucide/folder-git-2
 
 ```text
 entari_plugin_htmlrender/
-├─ api/                 # caller-first 顶层便捷函数
-├─ capabilities/        # 稳定的第一方 Provider Capability 契约与 lookup key
-├─ runtime/             # RenderRuntime、HtmlRenderer、use cases、bindings
-├─ rendering/           # request、artifact、error、Capability、ports
-├─ preparation/         # 中立 PreparedHtml pipeline
-├─ resources/           # 资源 contracts / service
-├─ graphics/            # RasterScene contracts
+├─ __init__.py          # curated caller contract/value/error facade
+├─ capabilities/        # 第一方 Provider capability contract 与 typed key
+├─ rendering/           # caller contracts、artifact、operation、advanced ports
+├─ preparation/         # 中立 PreparedHtml value 与纯 parse
+├─ resources/           # ResourceRef/content/access contracts
+├─ graphics/            # RasterScene values 与 GraphicsRenderer
+├─ runtime/             # advanced aggregate、use cases、bindings
 ├─ providers/           # Provider SDK 与 discovery
+├─ config.py            # framework-neutral strict configuration
+├─ composition.py       # one-shot RuntimePlan composition root
 ├─ adapters/
 │  ├─ playwright/       # 浏览器 Provider
 │  ├─ takumi/           # native Provider
@@ -26,12 +28,12 @@ entari_plugin_htmlrender/
 │  ├─ resources/        # filesystem/package/remote/filehost adapters
 │  ├─ templates/        # Jinja adapter
 │  └─ observability/    # Sentry/Prometheus adapters
-└─ host/                # Entari registration、configuration 与 composition root
+└─ entari/              # Entari registration 与 HtmlRenderService
 ```
 
-目录按依赖方向而非工具类型组织。核心 contracts 不导入 adapters/host；新的跨层例外必须先修正抽象，不增加 architecture allowlist。
+目录按依赖方向而非工具类型组织。核心 contracts 不导入 adapters/composition/Entari；新的跨层例外必须先修正抽象，不增加 architecture allowlist。
 
-Playwright 的安装、signal 与 process helper 由 adapter 内部拥有；仓库不保留按“通用工具”命名的顶层 `utils` 兼容目录。枚举也由其领域模块拥有：资源策略在 `resources.config`，浏览器配置在 `adapters.playwright.config`，启动策略在 `host.config`。
+Playwright 的安装、signal 与 process helper 由 adapter 内部拥有；仓库不保留按“通用工具”命名的顶层兼容目录。枚举也由其领域模块拥有：资源策略在`resources.config`，浏览器配置在 `adapters.playwright.config`，启动策略在`config`。
 
 ## 工作流入口
 
@@ -105,7 +107,7 @@ prek run actionlint --all-files --hook-stage=manual
 - Ruff、basedpyright、ty 与相关 pytest 通过，type completeness 保持 100%；
 - coverage 保持门槛；
 - examples 与 Python 代码块跟随公共 API；
-- 非 migration 文档不再描述已删除契约；
+- README、文档与 examples 只描述当前公开契约；
 - build artifacts 与所需真实 Provider smoke 通过。
 
 详细规则见 [编码规范](coding-standards.md)、[测试矩阵](testing.md)和 [发布流程](release.md)。

@@ -15,10 +15,10 @@ tags:
 
 ## 正式版本目录
 
-- `Docs` workflow 在 `main` 的文档相关路径变化时只执行 strict build，作为发布前门禁；
+- `Docs` workflow 对每个 `main` push 执行 strict build，不使用 paths filter，并作为同一 source SHA 的发布前门禁；
 - `Publish` 在 PyPI 文件 hash 与 GitHub Release 均确认后，从经过验证的 tag 部署正式文档；
 - 版本读取自 tag 内 `pyproject.toml` 的项目版本；
-- 每个版本部署为独立目录，例如 `/0.7.0/`、`/0.8.0/`；
+- 每个版本部署为独立目录，例如 `/0.1.0/`、`/0.1.1/`；
 - `latest` alias 指向最近部署版本，根路径重定向到 `latest`；
 - 旧版本继续保留，用于查阅对应软件版本的 API 与配置。
 
@@ -40,13 +40,13 @@ preview 通过 `DOCS_SITE_URL`、`DOCS_SCOPE` 和 `DOCS_VERSION_PROVIDER=preview
 
 文档验证、软件发布和 Pages 部署分别具有自己的失败边界：
 
-- 版本 PR 会因 `pyproject.toml` 变化触发 Docs；同一 SHA 的 Docs 成功是 `Auto Tag on Version Change` 创建 tag 前的门禁；
+- 每个 `main` push 都会触发 Docs；同一 SHA 的 Docs 成功是 `Auto Tag on Version Change` 创建 tag 前的门禁；
 - Docs 成功只说明 tag 对应源码能够严格构建文档，不会创建 `/<version>/`，也不会更新 `latest`；
 - `Publish` 只有在 PyPI hash 回读和 GitHub Release 成功后，才从同一 tag 部署正式文档；
 - Pages 部署失败时，已经发布的 PyPI 与 GitHub Release 保持不变；对同一 tag 重跑 `Publish`，由幂等校验补齐文档；
 - 不得为了恢复文档而移动 tag、重发版本或从 release 分支手工复制静态文件。
 
-因此 `/0.8.0/` 的出现晚于软件发布，但 GitHub Release 成功仍不等于 Pages 已更新；发布后应分别核对 PyPI、GitHub Release 和版本 URL。
+因此 `/0.1.0/` 的出现晚于软件发布，但 GitHub Release 成功仍不等于 Pages 已更新；发布后应分别核对 PyPI、GitHub Release 和版本 URL。
 
 ## 分支职责
 
@@ -98,9 +98,9 @@ make docs-list
 维护者只有在 CI 不可用、软件版本已经正式发布且确认 `gh-pages` 最新状态后才应从 tag 手动部署：
 
 ```bash
-git switch --detach v0.8.0
+git switch --detach v0.1.0
 git fetch origin gh-pages:gh-pages
-uv run mike deploy --update-aliases 0.8.0 latest
+uv run mike deploy --update-aliases 0.1.0 latest
 uv run mike set-default latest
 git push origin gh-pages
 ```

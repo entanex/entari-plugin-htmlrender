@@ -9,7 +9,7 @@ icon: lucide/monitor-cog
 ## 安装与最小配置
 
 ```bash
-uv add "entari-plugin-htmlrender[playwright]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[playwright]>=0.1.0,<0.2"
 ```
 
 ```yaml
@@ -93,7 +93,6 @@ uv run playwright install --with-deps chromium
 | `provider_config.install_mirror` | `null` | 浏览器安装镜像 |
 | `provider_config.install_proxy` | `null` | 浏览器安装代理 |
 | `provider_config.skip_browser_install` | `false` | 缺少本地浏览器时禁止自动安装 |
-| `provider_config.cleanup_legacy_cache` | `false` | 是否清理旧浏览器缓存 |
 | `provider_config.close_on_exit` | `true` | composition 关闭时关闭本地浏览器 |
 | `provider_config.storage_path` | `null` | Playwright 浏览器存储目录；默认使用插件数据目录 |
 
@@ -105,11 +104,11 @@ uv run playwright install --with-deps chromium
 
 | 完整路径 | 默认值 | 说明 |
 | --- | --- | --- |
-| `provider_config.resource_resolve_mode` | `auto` | `off`、`auto`、`strict` |
+| `provider_config.materialization_policy` | `auto` | `off`、`auto`、`strict` |
 | `provider_config.remote_local_resource_policy` | `memory` | `memory`、`passthrough`、`filehost`、`error` |
 | `provider_config.local_local_resource_policy` | `file` | `file`、`passthrough`、`filehost` |
 
-未传每次调用的 `resource_policy` 时，执行端严格采用`resource_resolve_mode`；显式 `ResourcePolicy` 会覆盖该默认值。`off` 调用不读取、物化或发布本地引用；若选中的 transport 是 `filehost`，composition 仍会准备publisher，使后续单次调用可以覆盖为 `auto` 或 `strict`。`auto` 容忍无法读取的引用，`strict` 则将其报告为资源错误。
+未传每次调用的 `materialization_policy` 时，执行端采用 Provider 的`materialization_policy`；显式 `ResourceMaterializationPolicy` 会覆盖该默认值。`off` 不读取、物化或发布文档引用；若 transport 是 `filehost`，composition 仍会准备 publisher，使后续单次调用可以覆盖为 `auto` 或 `strict`。`auto` 容忍无法读取的引用，`strict` 将其报告为资源错误。
 
 远程模式推荐 `memory`：本地图片、字体和 CSS 被物化为 render-scoped asset，由页面 route 返回，不要求共享 filesystem。`passthrough` 仅适用于显式共享卷；`error` 用于禁止所有本地引用。
 
@@ -117,7 +116,7 @@ uv run playwright install --with-deps chromium
 asset store 提供。可选 `filehost` extra 会安装 `py-machineid`，用于派生默认请求头守卫值：
 
 ```bash
-uv add "entari-plugin-htmlrender[playwright,filehost]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[playwright,filehost]>=0.1.0,<0.2"
 ```
 
 不安装该 extra 时 transport 仍可使用内置机器标识回退；对多副本或需要显式轮换的部署，直接配置 secret `resources.filehost.request_header_value`，不要依赖自动派生值。
@@ -145,14 +144,13 @@ filehost 运行参数由核心 Resource Service 管理，位于 `resources.fileh
 
 ## typed Capability
 
-通用 `render_*` 不接受导航、header 或 User-Agent。页面控制通过显式 runtime 获取：
+`HtmlRenderer` 不接受导航、header 或 User-Agent。页面控制通过显式 capability lease：
 
 ```python
-from entari_plugin_htmlrender import RuntimeSource, resolve_runtime
+from entari_plugin_htmlrender.capabilities import PlaywrightCapability
 
-async def open_page(runtime: RuntimeSource) -> None:
-    playwright = resolve_runtime(runtime).extensions.playwright
-    async with playwright.page(
+async def open_page(playwright: PlaywrightCapability) -> None:
+    async with playwright.lease_page(
         viewport={"width": 1280, "height": 800},
         extra_http_headers={"X-Trace": "example"},
     ) as page:
@@ -161,4 +159,4 @@ async def open_page(runtime: RuntimeSource) -> None:
 
 远程部署与安全边界见 [远程 Playwright](../remote-playwright.md)。
 
-若需要完整 `Browser` 能力而不只是一张自动回收的 Page，可改用`playwright.browser()`。它直接返回 Provider 所有的 Playwright Browser，保留上游全部类型提示；生命周期、资源所有权和 telemetry 约束见[Capability 参考](../../reference/capabilities.md#playwright)。
+若需要完整 `Browser` 能力而不只是一张自动回收的 Page，可改用`playwright.lease_browser()`。原生对象同样不能逃逸租约；生命周期、资源所有权和telemetry 约束见 [Capability 参考](../../reference/capabilities.md#playwright)。

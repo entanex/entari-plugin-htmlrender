@@ -128,9 +128,9 @@ PR preview 只是同一 GitHub Pages origin 下的路径命名空间，并不是
 
 ## 正式文档部署
 
-`Docs` 在 `main` 文档相关路径变更时只执行 strict build。版本 PR 合并后，它的成功结果作为同一 source SHA 的发布门禁，但不会提前创建正式版本目录或移动 `latest`。
+`Docs` 对每个 `main` push 执行 strict build，不使用 paths filter。它的成功结果作为同一 source SHA 的发布门禁，但不会提前创建正式版本目录或移动 `latest`；这样即使文档未变化，Auto Tag 也始终能汇合同一 SHA 的四条门禁。
 
-只有 `Publish` 完成 PyPI hash 回读与 GitHub Release 后，`Publish versioned documentation` 才重新检出经过验证的 tag、再次 strict build，并调用 `mike` 写入正式版本目录。这样 `/0.8.0/` 表示该版本已经存在可安装产物，而不是“某个版本 PR 已合并”。
+只有 `Publish` 完成 PyPI hash 回读与 GitHub Release 后，`Publish versioned documentation` 才重新检出经过验证的 tag、再次 strict build，并调用 `mike` 写入正式版本目录。这样 `/0.1.0/` 表示该版本已经存在可安装产物，而不是“某个版本 PR 已合并”。
 
 正式版本和 PR previews 仍共享生成物分支 `gh-pages`。不同 PR 的 preview 更新互不取消；正式部署与 preview action 每次从最新远程状态开始，只使用非 force push，并在冲突时有限重试，避免一个 writer 覆盖另一个 writer 已发布的目录。
 
@@ -144,13 +144,26 @@ PR preview 只是同一 GitHub Pages origin 下的路径命名空间，并不是
 
 版本差异检测、tag/source/version 不变量、trusted publishing 权限拆分及部分失败恢复见 [发布流程](release.md)。普通 `pyproject.toml` 配置变更在版本未变化时不会发布。发布 workflow 的写权限按 job 收窄，不允许构建步骤同时持有 PyPI OIDC 和仓库写权限。
 
+## 仓库内 Composite Actions
+
+重复但边界稳定的步骤由 `.github/actions/` 统一所有，workflow 只声明调用场景：
+
+| Action | 唯一职责 |
+| --- | --- |
+| `setup-project` | 安装固定版本的 uv/Python，并按 `all`、`docs`、`test` 或 `none` 同步依赖 |
+| `build-distributions` | 构建 wheel/sdist，执行 Twine、隔离安装与 archive 内容验证，并输出 SHA-256 |
+| `build-docs` | 执行 Zensical strict build 并保留构建日志 |
+| `setup-skia-runtime` | 安装 Skia smoke 所需的 Linux 动态库 |
+
+Composite action 不负责 checkout、job permissions、environment、artifact 传递或发布。调用 job 必须显式持有最小权限；获得 `id-token: write`、`contents: write` 或 Pages 权限的 job 不得借此重新执行未受信任的 PR 代码。PR preview 的受信任部署阶段也不调用 PR checkout 中的本地 action。
+
 ## Action 供应链
 
 - 所有本仓库直接使用的第三方与 GitHub actions 固定到完整 commit SHA，行尾注释记录对应 release 版本；
 - CI 与发布 workflow 固定 `uv==0.11.28`；Docker remote smoke 的 bootstrap 也使用同一版本，升级时应作为工具链变更统一验证；
 - `.github/dependabot.yml` 定期检查 `github-actions` 更新；Dependabot PR 仍需 review release notes、action diff 与权限变化；
 - 外部 action 与 reusable workflow 的传递依赖按固定 SHA 规则审计；
-- 不接受只把固定 SHA 改为 `@main`、`@main` 或 moving major tag 的更新。
+- 不接受只把固定 SHA 改为 `@main`、版本分支或 moving major tag 的更新。
 
 ## 本地对应命令
 
@@ -170,7 +183,7 @@ PR preview 只是同一 GitHub Pages origin 下的路径命名空间，并不是
 | Strict docs build | `make docs-build` |
 | Build artifacts + metadata check | `make build-artifacts` |
 
-`make test-ci` 包含 documentation contract：检查旧契约、公共导出、完整配置路径和 Python 示例；`make typecheck` / `make ty` 同时覆盖 examples。`make docs-build` 负责链接、导航和页面渲染，不能替代前两类检查。
+`make test-ci` 与远端 Coverage Matrix 共用 90% 总覆盖率门禁，并包含 documentation contract：检查六章任务导航、canonical 页面唯一性、公共导出、完整配置路径与 Python 示例；`make typecheck` / `make ty` 同时覆盖 examples。`make docs-build` 负责链接、导航和页面渲染，不能替代前两类检查。
 
 ## 排障入口
 

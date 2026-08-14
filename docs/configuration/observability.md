@@ -6,7 +6,7 @@ description: 直接 Sentry SDK 与 Prometheus client 集成
 # 可选依赖与可观测性
 
 ```bash
-uv add "entari-plugin-htmlrender[sentry,prometheus]>=0.8.0,<0.9"
+uv add "entari-plugin-htmlrender[sentry,prometheus]>=0.1.0,<0.2"
 ```
 
 ```yaml

@@ -19,11 +19,11 @@ htmlrender 会处理不可信 HTML、模板变量、文件路径和 URL。安全
 - 默认拒绝私网地址；按业务建立 `allow_hosts`，必要时叠加 `deny_hosts`。
 - 限制 redirect、timeout、并发与单资源大小。
 - DNS、redirect 与最终连接地址均需保持在策略内；部署层同时限制 egress。
-- Playwright `Page.goto()` 是原生导航能力，不受 `ResourcePolicy` 保护；导航 URL必须由调用层单独校验。
+- Playwright `Page.goto()` 是原生导航能力，不受`ResourceMaterializationPolicy` 保护；导航 URL 必须由调用层单独校验。
 
 ## 资源发布
 
-filehost 的 `public_base_url` 是显式部署配置，不能由请求 header 推导。授权 header仅用于 `ResourceResolution` 中匹配的精确 URL，不得复用到同 host 的其他路径。
+filehost 的 `public_base_url` 是显式部署配置，不能由请求 header 推导。`PublishedResource` 原子携带 URL 与精确请求头，二者只在 publication lease 内有效；不得把授权复用到同 host 的其他路径。
 
 ## 预算与日志
 
