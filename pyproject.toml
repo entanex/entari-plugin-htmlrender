@@ -316,7 +316,6 @@ include = [
     "/tests",
     "/typings",
     "/.gitignore",
-    "/.markdownlint.json",
     "/.python-version",
     "/CODE_OF_CONDUCT.md",
     "/CODING_STANDARDS.md",

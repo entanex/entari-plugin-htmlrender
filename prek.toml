@@ -121,6 +121,16 @@ rev = "v0.48.0"
 hooks = [
   {
     id = "markdownlint-fix",
+    args = [
+      "--disable",
+      "MD013",
+      "MD025",
+      "MD033",
+      "MD041",
+      "MD046",
+      "MD060",
+      "--"
+    ],
     exclude = '''
 (?x)^(
   docs/formatter/black\.md
