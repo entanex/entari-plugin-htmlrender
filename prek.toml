@@ -46,6 +46,7 @@ rev = "v1.45.1"
 hooks = [
   {
     id = "typos",
+    exclude = '^CHANGELOG\.md$',
     priority = 0
   }
 ]
@@ -124,6 +125,7 @@ hooks = [
     args = [
       "--disable",
       "MD013",
+      "MD024",
       "MD025",
       "MD033",
       "MD041",

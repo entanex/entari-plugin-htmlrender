@@ -317,6 +317,7 @@ include = [
     "/typings",
     "/.gitignore",
     "/.python-version",
+    "/CHANGELOG.md",
     "/CODE_OF_CONDUCT.md",
     "/CODING_STANDARDS.md",
     "/COMMIT_MESSAGE.md",
