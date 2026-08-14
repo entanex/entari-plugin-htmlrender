@@ -5,7 +5,7 @@ UV ?= uv
 UV_RUN ?= $(UV) run
 PYTEST ?= $(UV_RUN) pytest
 ZENSICAL ?= $(UV_RUN) zensical
-TWINE ?= $(UV) run --no-project --with twine==6.2.0 twine
+TWINE ?= $(UV) run --no-project --with twine==7.0.0 twine
 VERIFY_DISTRIBUTION ?= python3 scripts/verify_distribution.py
 DOCKER_COMPOSE ?= docker compose
 

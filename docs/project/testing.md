@@ -81,7 +81,7 @@ Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，�
 
 ## 分发包与文档
 
-- 修改 `pyproject.toml`、`uv.lock`、包内资源、入口点或发布 workflow：运行 `make build-artifacts`；该 target 内部执行 `uv build --no-sources` 与 pinned `twine==6.2.0 check`；
+- 修改 `pyproject.toml`、`uv.lock`、包内资源、入口点或发布 workflow：运行 `make build-artifacts`；该 target 内部执行 `uv build --no-sources` 与 pinned `twine==7.0.0 check`；
 - package resource 门禁必须在仓库外、清空 `PYTHONPATH` 后安装真实 wheel；Python 3.10–3.14 均验证 package resources 与 Entari/preparation smoke，Python 3.12 另验证 sdist；
 - wheel/`RECORD` 检查 package resources 均存在且非空；bare-core smoke 断言 Playwright、Takumi、Pillow 与 Skia 均未安装；`[takumi]` 校验锁定版本并执行真实 native PNG，`[pillow,skia]` 验证独立 `RasterScene` 能力；
 - 修改文档、MkDocs/Zensical 配置、文档依赖、Make target 或 docs workflow：运行 `make docs-build`，该 target 执行 strict build；

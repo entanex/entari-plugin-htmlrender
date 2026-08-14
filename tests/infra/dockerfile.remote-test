@@ -1,10 +1,11 @@
 # Lightweight render image for remote Playwright integration smoke tests.
 ARG PYTHON_BASE_IMAGE=python:3.12-bookworm
+ARG UV_VERSION=0.11.28
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 FROM ${PYTHON_BASE_IMAGE}
 
-ARG UV_VERSION=0.11.28
-
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 ENV TZ=Asia/Shanghai \
     DEBIAN_FRONTEND=noninteractive \

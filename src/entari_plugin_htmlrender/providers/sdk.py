@@ -12,7 +12,8 @@ from __future__ import annotations
 from collections.abc import Mapping  # noqa: TC003 -- runtime annotation contract
 from dataclasses import dataclass
 import re
-from typing import Final, NewType, Protocol, TypeAlias, TypeVar, runtime_checkable
+from typing import Final, NewType, TypeAlias, TypeVar
+from typing_extensions import Protocol, runtime_checkable
 
 from entari_plugin_htmlrender.rendering.capabilities import (  # noqa: TC001
     CapabilityCatalog,
