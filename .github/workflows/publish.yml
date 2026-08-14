@@ -106,7 +106,6 @@ jobs:
       contents: read
     outputs:
       release_tag: ${{ steps.verify.outputs.release_tag }}
-      source_sha: ${{ steps.verify.outputs.source_sha }}
       version: ${{ steps.verify.outputs.version }}
     env:
       BUILD_LOG: publish-build.log
@@ -166,7 +165,6 @@ jobs:
           fi
           uv lock --check
           echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "source_sha=${TAG_SHA}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "Verified ${RELEASE_TAG} at ${TAG_SHA}."
 
@@ -334,7 +332,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.build.outputs.release_tag }}
-          SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
         run: |
           set -euo pipefail
           if gh release view "${RELEASE_TAG}" \
@@ -346,7 +343,6 @@ jobs:
             gh release create "${RELEASE_TAG}" dist/* \
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \
-              --target "${SOURCE_SHA}" \
               --title "${RELEASE_TAG}" \
               --generate-notes
           fi
