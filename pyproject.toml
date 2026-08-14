@@ -1,9 +1,9 @@
 [project]
 name = "entari-plugin-htmlrender"
-version = "0.8.1"
+version = "0.1.0"
 description = "提供 HTML、Markdown、模板渲染与独立栅格场景能力"
 readme = "README.md"
-authors = [{ name = "kexue", email = "x@kexue-cloud.cn" }]
+authors = [{ name = "Tacrolimus", email = "balconyjh@gmail.com" }]
 requires-python = ">=3.10,<4.0"
 license = { file = "LICENSE" }
 dependencies = [
@@ -49,8 +49,8 @@ skia = [
     "skia-python>=144.0.post2",
 ]
 [project.urls]
-"Homepage" = "https://github.com/kexue-z/entari-plugin-htmlrender"
-"Bug Tracker" = "https://github.com/kexue-z/entari-plugin-htmlrender/issues"
+"Homepage" = "https://github.com/entanex/entari-plugin-htmlrender"
+"Bug Tracker" = "https://github.com/entanex/entari-plugin-htmlrender/issues"
 
 [dependency-groups]
 dev = [
