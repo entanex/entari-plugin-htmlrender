@@ -71,7 +71,7 @@ flowchart LR
 1. 四条全部成功后检出该精确 SHA，并确认它位于 `origin/main`；同一 SHA 的多个完成事件按 concurrency key 串行化；
 1. 从 source SHA 第一父提交的 `pyproject.toml` 读取旧版本，再与当前项目版本比较；版本相同则正常结束；
 1. 只有版本实际变化时才用 pinned `packaging` 验证 PEP 440：新旧版本必须使用 canonical spelling，新版本必须严格递增，且不能带 PyPI 不接受的 local segment；
-1. 在 tag 产生前检查锁文件，构建唯一 wheel/sdist 并执行 pinned Twine 校验；package preflight 失败不会占用版本号；
+1. 在 tag 产生前确认 `Publish` 已在默认分支登记且处于 active 状态，再检查锁文件、构建唯一 wheel/sdist 并执行 pinned Twine 校验；workflow 或 package preflight 失败都不会占用版本号；
 1. preflight 成功后解析 `v<version>` 并查询远程 tag；tag 不存在时创建带注解 tag，使其准确指向本次 trusted main SHA；已指向同一 SHA 时复用，指向其他 commit 时失败；
 1. 以该 tag ref 显式 dispatch `Publish`；dispatch 前按 source SHA 查询既有 run，避免多个完成事件重复发布。
 

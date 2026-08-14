@@ -156,3 +156,17 @@ def test_pre_tag_recovery_preserves_release_gates() -> None:
         "Prek:prek.yml",
     ):
         assert required in workflow
+
+
+def test_publish_workflow_is_verified_before_tag_creation() -> None:
+    auto_tag = _workflow("auto-tag.yml")
+    publish = _workflow("publish.yml")
+    publish_test = _workflow("publish-test.yml")
+
+    assert "run-name: Publish ${{ inputs.release_tag }}" in publish
+    assert "run-name: TestPyPI from ${{ github.ref_name }}" in publish_test
+    assert "actions/workflows/publish.yml" in auto_tag
+    assert auto_tag.index("Verify publish workflow is dispatchable") < auto_tag.index(
+        "Create and push the tag"
+    )
+    assert "existing_runs=$(publish_run_count)" in auto_tag

@@ -267,6 +267,24 @@ jobs:
             echo "create=true" >> "${GITHUB_OUTPUT}"
           fi
 
+      - name: Verify publish workflow is dispatchable
+        if: steps.version.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! workflow_state=$(gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/publish.yml" \
+            --jq '.state'); then
+            echo "::error::Publish workflow is not registered on the default branch."
+            exit 1
+          fi
+          if [[ "${workflow_state}" != "active" ]]; then
+            echo "::error::Publish workflow is ${workflow_state}, expected active."
+            exit 1
+          fi
+
       - name: Install Skia runtime libraries
         if: steps.version.outputs.changed == 'true' && steps.tag.outputs.create == 'true'
         uses: ./.github/actions/setup-skia-runtime
@@ -315,7 +333,8 @@ jobs:
               --jq '.total_count'
           }
 
-          if [[ "$(publish_run_count)" -gt 0 ]]; then
+          existing_runs=$(publish_run_count)
+          if [[ "${existing_runs}" -gt 0 ]]; then
             echo "Publish already has a workflow_dispatch run for ${TAG} at ${SOURCE_SHA}; skipping duplicate dispatch."
             exit 0
           fi
@@ -326,7 +345,8 @@ jobs:
             -f release_tag="${TAG}"
 
           for attempt in $(seq 1 10); do
-            if [[ "$(publish_run_count)" -gt 0 ]]; then
+            existing_runs=$(publish_run_count)
+            if [[ "${existing_runs}" -gt 0 ]]; then
               echo "Dispatched publish.yml from ${TAG}."
               exit 0
             fi
