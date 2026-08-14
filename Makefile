@@ -19,6 +19,7 @@ DIST_DIR ?= $(CURDIR)/dist
 # Options
 DIST_SMOKE_PYTHON ?= 3.12
 PYTEST_PARALLEL ?= -n auto --dist=loadfile
+COVERAGE_FAIL_UNDER ?= 90
 PLAYWRIGHT_VERSION ?= $(shell $(UV) tree --locked --package playwright --depth 0 2>/dev/null | awk '$$1 == "playwright" { sub(/^v/, "", $$2); print $$2 }')
 
 ##@ General
@@ -97,7 +98,7 @@ test: test-ci ## Run CI profile tests in parallel.
 
 test-ci: ensure-uv ## Run CI profile tests in parallel.
 	@echo "==> Running CI test profile"
-	HTMLRENDER_TEST_PROFILE=ci $(PYTEST) $(PYTEST_PARALLEL) tests
+	HTMLRENDER_TEST_PROFILE=ci $(PYTEST) $(PYTEST_PARALLEL) --cov-fail-under=$(COVERAGE_FAIL_UNDER) tests
 
 check-browser-install: ## Check local Playwright browser installation.
 	@echo "==> Checking project-local Playwright browser installation"
@@ -172,16 +173,9 @@ docs-build: ensure-uv ## Build docs site.
 	@echo "==> Building docs site"
 	$(ZENSICAL) build --strict
 
-docs-deploy: ensure-uv ## Deploy versioned docs locally (e.g. make docs-deploy VERSION=0.7.0).
+docs-deploy: ensure-uv ## Deploy versioned docs locally (e.g. make docs-deploy VERSION=0.1.0).
 	@echo "==> Deploying docs version $(VERSION)"
 	$(UV_RUN) mike deploy --update-aliases $(VERSION) latest
 
 docs-list: ensure-uv ## List all deployed doc versions.
 	$(UV_RUN) mike list
-
-##@ Compatibility
-
-.PHONY: download-deps prepare-build
-download-deps: sync-all ## Deprecated alias for sync-all.
-
-prepare-build: sync-build ## Deprecated alias for sync-build.

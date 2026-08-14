@@ -1,0 +1,19 @@
+name: Build documentation
+description: Build the Zensical documentation site in strict mode and retain its log
+
+inputs:
+  log-file:
+    description: Path that receives the complete strict-build output
+    required: false
+    default: docs-build.log
+
+runs:
+  using: composite
+  steps:
+    - name: Build documentation strictly
+      shell: bash
+      env:
+        DOCS_LOG: ${{ inputs.log-file }}
+      run: |
+        set -euo pipefail
+        uv run zensical build --strict 2>&1 | tee "${DOCS_LOG}"

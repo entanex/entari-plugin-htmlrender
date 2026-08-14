@@ -45,17 +45,16 @@ jobs:
       PYTEST_LOG: pytest-py${{ matrix.python-version }}-${{ matrix.target.arch }}.log
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Set up project
+        uses: ./.github/actions/setup-project
         with:
           python-version: ${{ matrix.python-version }}
-          version: "0.11.28"
-          enable-cache: true
           cache-suffix: coverage-py${{ matrix.python-version }}-${{ matrix.target.arch }}
+          dependency-scope: all
 
       - name: Install Skia runtime libraries
         uses: ./.github/actions/setup-skia-runtime
@@ -72,9 +71,6 @@ jobs:
           python3 --version
           uv --version
           if command -v lscpu >/dev/null 2>&1; then lscpu; fi
-
-      - name: Sync deps
-        run: uv sync --locked --all-extras --all-groups
 
       - name: Show Dependency Snapshot
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug_enabled == 'true' }}

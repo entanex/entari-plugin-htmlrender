@@ -6,12 +6,6 @@ on:
       - main
   pull_request:
   workflow_dispatch:
-    inputs:
-      debug_enabled:
-        description: Enable extra debug diagnostics
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -23,82 +17,52 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  ruff:
-    name: Ruff
+  quality:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: ruff
+            name: Ruff
+          - check: ty
+            name: Ty
+          - check: basedpyright
+            name: Basedpyright
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Set up project
+        uses: ./.github/actions/setup-project
         with:
-          python-version: "3.12"
-          version: "0.11.28"
-          enable-cache: true
-          cache-suffix: lint-type-${{ github.event_name }}
+          cache-suffix: quality-${{ matrix.check }}-${{ github.event_name }}
+          dependency-scope: all
 
-      - name: Show Runner Context
+      - name: Run ${{ matrix.name }}
+        shell: bash
+        env:
+          QUALITY_CHECK: ${{ matrix.check }}
         run: |
-          echo "Runner: $RUNNER_NAME ($RUNNER_OS/$RUNNER_ARCH)"
-          python3 --version
-          uv --version
-
-      - name: Sync deps
-        run: uv sync --locked --all-extras --all-groups
-
-      - name: Ruff
-        run: |
-          uv run ruff format --check .
-          uv run ruff check .
-
-  ty:
-    name: Ty
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          python-version: "3.12"
-          version: "0.11.28"
-          enable-cache: true
-          cache-suffix: ty-${{ github.event_name }}
-
-      - name: Sync deps
-        run: uv sync --locked --all-extras --all-groups
-
-      - name: Ty
-        run: uv run ty check
-
-  basedpyright:
-    name: Basedpyright
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          python-version: "3.12"
-          version: "0.11.28"
-          enable-cache: true
-          cache-suffix: basedpyright-${{ github.event_name }}
-
-      - name: Sync deps
-        run: uv sync --locked --all-extras --all-groups
-
-      - name: Basedpyright
-        run: make typecheck
+          set -euo pipefail
+          case "${QUALITY_CHECK}" in
+            ruff)
+              make ruff-format-check ruff-check
+              ;;
+            ty)
+              make ty
+              ;;
+            basedpyright)
+              make typecheck
+              ;;
+            *)
+              echo "::error::Unsupported quality check: ${QUALITY_CHECK}"
+              exit 1
+              ;;
+          esac
 
   package:
     name: Package Build
@@ -107,35 +71,23 @@ jobs:
     env:
       BUILD_LOG: package-build.log
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Set up project
+        uses: ./.github/actions/setup-project
         with:
-          python-version: "3.12"
-          version: "0.11.28"
-          enable-cache: true
           cache-suffix: package-${{ github.event_name }}
+          dependency-scope: none
 
       - name: Install Skia runtime libraries
         uses: ./.github/actions/setup-skia-runtime
 
-      - name: Build distributions
-        run: |
-          set -o pipefail
-          uv build --no-sources 2>&1 | tee "${BUILD_LOG}"
-
-      - name: Validate distributions
-        run: |
-          uvx --from twine==6.2.0 twine check dist/*
-          make verify-artifacts DIST_DIR=dist
-
-      - name: Show built distributions
-        run: |
-          ls -la dist
-          sha256sum dist/* || true
+      - name: Build and verify distributions
+        uses: ./.github/actions/build-distributions
+        with:
+          log-file: ${{ env.BUILD_LOG }}
 
       - name: Upload built distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -166,17 +118,16 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Set up project
+        uses: ./.github/actions/setup-project
         with:
           python-version: ${{ matrix.python-version }}
-          version: "0.11.28"
-          enable-cache: true
           cache-suffix: package-wheel-${{ matrix.python-version }}-${{ github.event_name }}
+          dependency-scope: none
 
       - name: Install Skia runtime libraries
         uses: ./.github/actions/setup-skia-runtime
@@ -205,7 +156,7 @@ jobs:
       RENDER_IMAGE: htmlrender-remote-test:ci
       PLAYWRIGHT_IMAGE: htmlrender-playwright:ci
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -310,31 +261,25 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Set up project
+        uses: ./.github/actions/setup-project
         with:
           python-version: ${{ matrix.python-version }}
-          version: "0.11.28"
-          enable-cache: true
           cache-suffix: entari-load-${{ matrix.python-version }}-${{ github.event_name }}
-
-      - name: Sync test environment
-        run: uv sync --locked --group test
+          dependency-scope: test
 
       - name: Verify library and Entari loading
-        run: uv run pytest tests/host/test_registration.py -q --no-cov
+        run: uv run pytest tests/entari/test_plugin.py -q --no-cov
 
   result:
     name: Required Checks
     if: always()
     needs:
-      - ruff
-      - ty
-      - basedpyright
+      - quality
       - package
       - package-wheel-smoke
       - remote-browser-render
@@ -346,19 +291,15 @@ jobs:
       - name: Require every CI layer
         shell: bash
         env:
-          BASEDPYRIGHT_RESULT: ${{ needs.basedpyright.result }}
           ENTARI_LOAD_RESULT: ${{ needs.entari-load.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
           PACKAGE_WHEEL_SMOKE_RESULT: ${{ needs.package-wheel-smoke.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
           REMOTE_BROWSER_RESULT: ${{ needs.remote-browser-render.result }}
-          RUFF_RESULT: ${{ needs.ruff.result }}
-          TY_RESULT: ${{ needs.ty.result }}
         run: |
           failed=false
           for result in \
-            "${RUFF_RESULT}" \
-            "${TY_RESULT}" \
-            "${BASEDPYRIGHT_RESULT}" \
+            "${QUALITY_RESULT}" \
             "${PACKAGE_RESULT}" \
             "${PACKAGE_WHEEL_SMOKE_RESULT}" \
             "${REMOTE_BROWSER_RESULT}" \

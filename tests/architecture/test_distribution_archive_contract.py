@@ -5,9 +5,20 @@ from pathlib import Path
 import pytest
 
 from scripts.verify_distribution import (
+    _BASE_SMOKE,
+    _ENTARI_PLUGIN_SMOKE,
+    _GRAPHICS_SMOKE,
+    _TAKUMI_SMOKE,
     DistributionVerificationError,
     _validate_archive_paths,
 )
+
+_INSTALL_SMOKES = {
+    "core": _BASE_SMOKE,
+    "entari": _ENTARI_PLUGIN_SMOKE,
+    "takumi": _TAKUMI_SMOKE,
+    "graphics": _GRAPHICS_SMOKE,
+}
 
 
 @pytest.mark.parametrize(
@@ -40,3 +51,50 @@ def test_distribution_archive_guard_allows_release_metadata() -> None:
         ],
         artifact=Path("artifact.tar.gz"),
     )
+
+
+@pytest.mark.parametrize(("name", "source"), _INSTALL_SMOKES.items())
+def test_distribution_install_smokes_are_valid_python(
+    name: str,
+    source: str,
+) -> None:
+    compile(source, f"<{name}-distribution-smoke>", "exec")
+
+
+def test_distribution_install_smokes_use_the_semantic_runtime_surface() -> None:
+    assert "HtmlRenderConfig" in _BASE_SMOKE
+    assert "build_runtime_plan" in _BASE_SMOKE
+    assert "runtime.templates.render" in _BASE_SMOKE
+    assert "runtime.resources.fetch_text" in _BASE_SMOKE
+    assert "runtime.renderer.supported_operations" in _BASE_SMOKE
+    assert "runtime.capabilities.available_names" in _BASE_SMOKE
+
+    assert "runtime.capabilities.takumi" in _TAKUMI_SMOKE
+    assert "capability.lease_session()" in _TAKUMI_SMOKE
+    assert "runtime.renderer.rasterize_text" in _TAKUMI_SMOKE
+
+    assert "GraphicsSettings" in _GRAPHICS_SMOKE
+    assert 'for backend in ("pillow", "skia")' in _GRAPHICS_SMOKE
+    assert "runtime.graphics.rasterize" in _GRAPHICS_SMOKE
+    assert "runtime.graphics.render" not in _GRAPHICS_SMOKE
+
+
+@pytest.mark.parametrize(
+    "removed_surface",
+    [
+        "entari_plugin_htmlrender.host",
+        "compose_runtime",
+        "RenderSettings",
+        "runtime.extensions",
+        "capability.api()",
+        "RenderRasterSceneRequest",
+        "PILLOW_RASTER_SCENE_RENDERER",
+        "SKIA_RASTER_SCENE_RENDERER",
+        "from entari_plugin_htmlrender import render_text",
+    ],
+)
+def test_distribution_install_smokes_do_not_retain_removed_surfaces(
+    removed_surface: str,
+) -> None:
+    combined = "\n".join(_INSTALL_SMOKES.values())
+    assert removed_surface not in combined

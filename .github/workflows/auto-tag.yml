@@ -127,20 +127,19 @@ jobs:
 
       - name: Checkout the gated source commit
         if: steps.gates.outputs.ready == 'true'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
 
-      - name: Install uv
+      - name: Set up project
         if: steps.gates.outputs.ready == 'true'
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: ./.github/actions/setup-project
         with:
-          python-version: "3.12"
-          version: "0.11.28"
-          enable-cache: false
+          enable-cache: "false"
+          dependency-scope: none
 
       - name: Verify source and select the release version
         if: steps.gates.outputs.ready == 'true'
@@ -165,33 +164,39 @@ jobs:
             exit 1
           fi
 
-          if ! PARENT_SHA=$(git rev-parse --verify "${SOURCE_SHA}^1"); then
-            echo "changed=false" >> "${GITHUB_OUTPUT}"
-            echo "Source has no first parent; no automatic release tag is needed."
-            exit 0
+          VERSION=$(uv version --short)
+          INITIAL_RELEASE=false
+          if [[ -z "$(git tag --list 'v[0-9]*')" ]]; then
+            INITIAL_RELEASE=true
           fi
-          if ! git cat-file -e "${PARENT_SHA}:pyproject.toml"; then
-            echo "::error::Cannot read pyproject.toml from first parent ${PARENT_SHA}."
+          if PARENT_SHA=$(git rev-parse --verify "${SOURCE_SHA}^1") && \
+             git cat-file -e "${PARENT_SHA}:pyproject.toml"; then
+            PREVIOUS_VERSION=$(git show "${PARENT_SHA}:pyproject.toml" | python3 -c \
+              'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["project"]["version"])')
+          elif [[ "${INITIAL_RELEASE}" == "true" ]]; then
+            PREVIOUS_VERSION="${VERSION}"
+          else
+            echo "::error::Cannot resolve a previous project version for ${SOURCE_SHA}."
             exit 1
           fi
-
-          PREVIOUS_VERSION=$(git show "${PARENT_SHA}:pyproject.toml" | python3 -c \
-            'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["project"]["version"])')
-          VERSION=$(uv version --short)
-          if [[ "${VERSION}" == "${PREVIOUS_VERSION}" && "${RECOVERY_MODE}" != "true" ]]; then
+          if [[ "${VERSION}" == "${PREVIOUS_VERSION}" && \
+                "${RECOVERY_MODE}" != "true" && \
+                "${INITIAL_RELEASE}" != "true" ]]; then
             echo "changed=false" >> "${GITHUB_OUTPUT}"
             echo "Project version remains ${VERSION}; no release tag is needed."
             exit 0
           fi
 
           uv run --no-project --with packaging==26.2 python3 - \
-            "${PREVIOUS_VERSION}" "${VERSION}" "${RECOVERY_MODE}" <<'PY'
+            "${PREVIOUS_VERSION}" "${VERSION}" "${RECOVERY_MODE}" \
+            "${INITIAL_RELEASE}" <<'PY'
           import sys
 
           from packaging.version import InvalidVersion, Version
 
-          previous_raw, current_raw, recovery_raw = sys.argv[1:]
+          previous_raw, current_raw, recovery_raw, initial_raw = sys.argv[1:]
           recovery = recovery_raw == "true"
+          initial = initial_raw == "true"
           try:
               previous = Version(previous_raw)
               current = Version(current_raw)
@@ -205,7 +210,11 @@ jobs:
               )
           if current.local is not None:
               raise SystemExit("::error::PyPI releases cannot use a local version segment.")
-          if current < previous or (current == previous and not recovery):
+          if initial and current != Version("0.1.0"):
+              raise SystemExit(
+                  f"::error::The initial release must be 0.1.0, got {current}.",
+              )
+          if not initial and (current < previous or (current == previous and not recovery)):
               raise SystemExit(
                   f"::error::Automatic releases must increase the version: {previous} -> {current}.",
               )
@@ -222,7 +231,9 @@ jobs:
           echo "previous_version=${PREVIOUS_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
-          if [[ "${VERSION}" == "${PREVIOUS_VERSION}" ]]; then
+          if [[ "${INITIAL_RELEASE}" == "true" ]]; then
+            echo "Preparing initial release ${VERSION} from ${SOURCE_SHA}."
+          elif [[ "${VERSION}" == "${PREVIOUS_VERSION}" ]]; then
             echo "Recovering untagged version ${VERSION} from current main ${SOURCE_SHA}."
           else
             echo "Detected version change ${PREVIOUS_VERSION} -> ${VERSION}."
@@ -262,13 +273,9 @@ jobs:
 
       - name: Build and validate release candidates before tagging
         if: steps.version.outputs.changed == 'true' && steps.tag.outputs.create == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv build --clear --no-sources --wheel --sdist
-          uvx --from twine==6.2.0 twine check dist/*
-          make verify-artifacts DIST_DIR=dist
-          sha256sum dist/*
+        uses: ./.github/actions/build-distributions
+        with:
+          log-file: auto-tag-build.log
 
       - name: Create and push the tag
         if: steps.version.outputs.changed == 'true' && steps.tag.outputs.create == 'true'

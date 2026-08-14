@@ -110,8 +110,9 @@ import os
 from pathlib import Path, PurePosixPath
 
 import entari_plugin_htmlrender as htmlrender
-from entari_plugin_htmlrender.host import RenderSettings
-from entari_plugin_htmlrender.host.composition import compose_runtime
+from entari_plugin_htmlrender.composition import build_runtime_plan
+from entari_plugin_htmlrender.config import HtmlRenderConfig
+from entari_plugin_htmlrender.resources import PackageResourceRef
 
 expected_version = os.environ["HTMLRENDER_EXPECTED_VERSION"]
 expected_resources = json.loads(os.environ["HTMLRENDER_EXPECTED_RESOURCES"])
@@ -158,23 +159,45 @@ check(parsed.html.startswith("<main>"), "Pure HTML parsing failed")
 
 
 async def main() -> None:
-    runtime = compose_runtime(RenderSettings()).build_runtime()
+    template_root = Path(htmlrender.__file__).resolve().parent / "templates" / "text"
+    config = HtmlRenderConfig.model_validate(
+        {
+            "resources": {
+                "local_access": {
+                    "allowed_paths": [template_root],
+                }
+            }
+        }
+    )
+    runtime = build_runtime_plan(config).build_runtime()
     await runtime.startup()
     try:
-        text = await htmlrender.prepare_text(
-            "wheel <smoke> & Unicode 字符",
-            runtime=runtime,
+        check(
+            runtime.renderer.supported_operations == frozenset(),
+            "Core runtime unexpectedly exposes provider-backed raster operations",
+        )
+        text = await runtime.templates.render(
+            htmlrender.TemplateRef(template_root, "text.html"),
+            {
+                "css": "body { color: #123456; }",
+                "text": "wheel <smoke> & Unicode 字符",
+            },
         )
         check(
-            "wheel &lt;smoke&gt; &amp; Unicode 字符" in text.html,
-            "Installed text preparation did not preserve escaping and Unicode",
+            "wheel &lt;smoke&gt; &amp; Unicode 字符" in text.content,
+            "Installed template renderer did not preserve escaping and Unicode",
         )
-        markdown = await htmlrender.prepare_markdown(
-            "# wheel smoke\n\n$$x^2$$",
-            runtime=runtime,
+        stylesheet = await runtime.resources.fetch_text(
+            PackageResourceRef(
+                "entari_plugin_htmlrender",
+                "templates/text/text.css",
+            )
         )
-        check("<h1>wheel smoke</h1>" in markdown.html, "Markdown preparation failed")
-        check(".katex" in markdown.html, "KaTeX resources are missing")
+        check(".main-box" in stylesheet, "Installed package resource fetch failed")
+        check(
+            runtime.capabilities.available_names == frozenset(),
+            "Core runtime unexpectedly exposes provider-specific capabilities",
+        )
     finally:
         await runtime.aclose()
 
@@ -209,10 +232,9 @@ from importlib.metadata import version
 import os
 import struct
 
-from entari_plugin_htmlrender import render_text
-from entari_plugin_htmlrender.capabilities import TAKUMI
-from entari_plugin_htmlrender.host import RenderSettings
-from entari_plugin_htmlrender.host.composition import compose_runtime
+from entari_plugin_htmlrender import RasterOptions
+from entari_plugin_htmlrender.composition import build_runtime_plan
+from entari_plugin_htmlrender.config import HtmlRenderConfig
 
 
 def check(condition: object, message: str) -> None:
@@ -227,25 +249,27 @@ check(
 
 
 async def main() -> None:
-    runtime = compose_runtime(RenderSettings(provider="takumi")).build_runtime()
+    runtime = build_runtime_plan(
+        HtmlRenderConfig.model_validate({"provider": "takumi"})
+    ).build_runtime()
     await runtime.startup()
     try:
-        capability = runtime.extensions.require(TAKUMI)
-        node = {
-            "type": "container",
-            "style": {"width": 8, "height": 4, "backgroundColor": "#ff0000"},
-        }
-        async with capability.api() as api:
-            rendered = await api.render_node(node, width=8, height=4)
+        capability = runtime.capabilities.takumi
+        async with capability.lease_session() as session:
+            rendered = await session.render_html(
+                '<div style="width:8px;height:4px;background:#ff0000"></div>',
+                width=8,
+                height=4,
+                device_pixel_ratio=1.0,
+            )
         check(rendered.startswith(b"\x89PNG\r\n\x1a\n"), "Takumi did not return PNG")
         check(struct.unpack(">II", rendered[16:24]) == (8, 4), "Takumi dimensions differ")
-        artifact = await render_text(
+        artifact = await runtime.renderer.rasterize_text(
             "installed Takumi smoke",
-            width=180,
-            device_pixel_ratio=1.0,
-            runtime=runtime,
+            raster=RasterOptions(width=180, device_pixel_ratio=1.0),
         )
         check(bytes(artifact).startswith(b"\x89PNG\r\n\x1a\n"), "Text smoke failed")
+        check(artifact.width == 180, "Text smoke returned an unexpected width")
     finally:
         await runtime.aclose()
 
@@ -255,19 +279,15 @@ asyncio.run(main())
 
 _GRAPHICS_SMOKE = r"""
 import asyncio
-import struct
 
+from entari_plugin_htmlrender.composition import build_runtime_plan
+from entari_plugin_htmlrender.config import GraphicsSettings, HtmlRenderConfig
 from entari_plugin_htmlrender.graphics import (
-    PILLOW_RASTER_SCENE_RENDERER,
-    SKIA_RASTER_SCENE_RENDERER,
     FillRect,
     PixelRect,
     RasterScene,
-    RenderRasterSceneRequest,
     RGBAColor,
 )
-from entari_plugin_htmlrender.host import GraphicsSettings, RenderSettings
-from entari_plugin_htmlrender.host.composition import compose_runtime
 
 
 def check(condition: object, message: str) -> None:
@@ -276,30 +296,35 @@ def check(condition: object, message: str) -> None:
 
 
 async def main() -> None:
-    runtime = compose_runtime(
-        RenderSettings(
-            graphics=GraphicsSettings(
-                backends=("pillow", "skia"),
-                max_pixels=1024,
-                max_concurrency=1,
-            )
-        )
-    ).build_runtime()
-    request = RenderRasterSceneRequest(
-        RasterScene(
-            8,
-            4,
-            commands=(FillRect(PixelRect(1, 1, 3, 2), RGBAColor(255, 0, 0, 128)),),
-        )
+    scene = RasterScene(
+        8,
+        4,
+        commands=(FillRect(PixelRect(1, 1, 3, 2), RGBAColor(255, 0, 0, 128)),),
     )
-    try:
-        for key in (PILLOW_RASTER_SCENE_RENDERER, SKIA_RASTER_SCENE_RENDERER):
-            artifact = await runtime.extensions.require(key).render(request)
-            rendered = bytes(artifact)
-            check(rendered.startswith(b"\x89PNG\r\n\x1a\n"), f"{key.name} did not return PNG")
-            check(struct.unpack(">II", rendered[16:24]) == (8, 4), "Raster dimensions differ")
-    finally:
-        await runtime.aclose()
+    for backend in ("pillow", "skia"):
+        runtime = build_runtime_plan(
+            HtmlRenderConfig(
+                graphics=GraphicsSettings(
+                    backend=backend,
+                    max_pixels=1024,
+                    max_concurrency=1,
+                )
+            )
+        ).build_runtime()
+        await runtime.startup()
+        try:
+            artifact = await runtime.graphics.rasterize(scene)
+            check(
+                bytes(artifact).startswith(b"\x89PNG\r\n\x1a\n"),
+                f"{backend} did not return PNG",
+            )
+            check(artifact.format == "png", f"{backend} returned the wrong format")
+            check(
+                (artifact.width, artifact.height) == (8, 4),
+                f"{backend} raster dimensions differ",
+            )
+        finally:
+            await runtime.aclose()
 
 
 asyncio.run(main())

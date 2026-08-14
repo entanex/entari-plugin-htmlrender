@@ -1,0 +1,57 @@
+name: Set up project
+description: Install the pinned uv toolchain and synchronize a declared dependency scope
+
+inputs:
+  python-version:
+    description: Python version installed and selected by setup-uv
+    required: false
+    default: "3.12"
+  enable-cache:
+    description: Whether setup-uv should restore and save its dependency cache
+    required: false
+    default: "true"
+  cache-suffix:
+    description: Cache key suffix that separates workflow responsibilities
+    required: false
+    default: project
+  dependency-scope:
+    description: Dependency scope to synchronize (all, docs, test, or none)
+    required: false
+    default: all
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv and Python
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        version: "0.11.28"
+        enable-cache: ${{ inputs.enable-cache }}
+        cache-suffix: ${{ inputs.cache-suffix }}
+        # v9 defaults to retaining the complete cache; preserve the bounded
+        # cache behavior used by this repository before the v9 upgrade.
+        prune-cache: true
+
+    - name: Synchronize project dependencies
+      if: inputs.dependency-scope != 'none'
+      shell: bash
+      env:
+        DEPENDENCY_SCOPE: ${{ inputs.dependency-scope }}
+      run: |
+        set -euo pipefail
+        case "${DEPENDENCY_SCOPE}" in
+          all)
+            uv sync --locked --all-extras --all-groups
+            ;;
+          docs)
+            uv sync --locked --group docs --no-default-groups
+            ;;
+          test)
+            uv sync --locked --group test
+            ;;
+          *)
+            echo "::error::Unsupported dependency scope: ${DEPENDENCY_SCOPE}"
+            exit 1
+            ;;
+        esac

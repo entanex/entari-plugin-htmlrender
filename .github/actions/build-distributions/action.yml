@@ -1,0 +1,27 @@
+name: Build and verify distributions
+description: Build clean wheel and sdist artifacts, then verify metadata and isolated installs
+
+inputs:
+  log-file:
+    description: Path that receives the complete uv build output
+    required: false
+    default: distribution-build.log
+
+runs:
+  using: composite
+  steps:
+    - name: Build wheel and source distribution
+      shell: bash
+      env:
+        BUILD_LOG: ${{ inputs.log-file }}
+      run: |
+        set -euo pipefail
+        uv build --clear --no-sources --wheel --sdist 2>&1 | tee "${BUILD_LOG}"
+
+    - name: Verify distributions
+      shell: bash
+      run: |
+        set -euo pipefail
+        uvx --from twine==6.2.0 twine check dist/*
+        make verify-artifacts DIST_DIR=dist
+        sha256sum dist/*
