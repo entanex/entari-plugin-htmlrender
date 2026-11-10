@@ -19,6 +19,7 @@ from entari_plugin_htmlrender.errors import (
     ResourceAccessDeniedError,
     RuntimeUnavailableError,
 )
+from entari_plugin_htmlrender.graphics import RasterScene
 from entari_plugin_htmlrender.providers.sdk import (
     ProviderAvailable,
     ProviderBinding,
@@ -246,6 +247,37 @@ async def test_available_provider_receives_narrow_dependencies_and_renders() -> 
 
     artifact = await runtime.renderer.rasterize_html("<p>hi</p>")
     assert (artifact.format, artifact.width, artifact.height) == ("png", 1600, 733)
+    await runtime.aclose()
+
+
+async def test_configured_graphics_backends_are_exposed_as_capabilities() -> None:
+    runtime = build_runtime_plan(
+        HtmlRenderConfig.model_validate({"graphics": {"backends": ["pillow", "skia"]}})
+    ).build_runtime()
+
+    pillow = runtime.capabilities.pillow
+    skia = runtime.capabilities.skia
+    assert runtime.graphics is pillow
+    assert pillow is not skia
+    assert runtime.capabilities.available_names == frozenset(
+        {
+            "graphics.pillow.raster_scene_renderer",
+            "graphics.skia.raster_scene_renderer",
+        }
+    )
+
+    pillow_image = await pillow.rasterize(RasterScene(2, 2))
+    skia_image = await skia.rasterize(RasterScene(2, 2))
+    assert (pillow_image.format, pillow_image.width, pillow_image.height) == (
+        "png",
+        2,
+        2,
+    )
+    assert (skia_image.format, skia_image.width, skia_image.height) == (
+        "png",
+        2,
+        2,
+    )
     await runtime.aclose()
 
 

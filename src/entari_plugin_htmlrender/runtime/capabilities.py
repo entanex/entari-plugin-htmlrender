@@ -10,6 +10,11 @@ from entari_plugin_htmlrender.capabilities import (
     PlaywrightCapability,
     TakumiCapability,
 )
+from entari_plugin_htmlrender.graphics import (
+    PILLOW_RASTER_SCENE_RENDERER,
+    SKIA_RASTER_SCENE_RENDERER,
+    GraphicsRenderer,
+)
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.rendering.capabilities import (
@@ -36,6 +41,16 @@ class RuntimeCapabilities:
     @property
     def takumi(self) -> TakumiCapability:
         return self._catalog.require(TAKUMI)
+
+    @property
+    def pillow(self) -> GraphicsRenderer:
+        """Return the independently composed Pillow raster renderer."""
+        return self._catalog.require(PILLOW_RASTER_SCENE_RENDERER)
+
+    @property
+    def skia(self) -> GraphicsRenderer:
+        """Return the independently composed Skia raster renderer."""
+        return self._catalog.require(SKIA_RASTER_SCENE_RENDERER)
 
     @property
     def available_names(self) -> frozenset[str]:

@@ -1,7 +1,8 @@
-"""Composition-owned selection of an in-process graphics adapter."""
+"""Composition-owned selection of independent in-process graphics adapters."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, final
 
@@ -10,19 +11,22 @@ from entari_plugin_htmlrender.errors import (
     GraphicsBackendUnavailableError,
     InvalidRenderInputError,
 )
+from entari_plugin_htmlrender.graphics import (
+    PILLOW_RASTER_SCENE_RENDERER,
+    SKIA_RASTER_SCENE_RENDERER,
+)
 from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
 from entari_plugin_htmlrender.graphics.models import (
     DEFAULT_RASTER_ENCODE_OPTIONS,
     RasterEncodeOptions,
     RasterScene,
 )
+from entari_plugin_htmlrender.rendering.capabilities import CapabilityCatalog
 from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.config import GraphicsSettings
-    from entari_plugin_htmlrender.graphics.models import (
-        GraphicsBackendName,
-    )
+    from entari_plugin_htmlrender.graphics.models import GraphicsBackendName
     from entari_plugin_htmlrender.graphics.ports import GraphicsRenderer
     from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
     from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
@@ -32,7 +36,7 @@ if TYPE_CHECKING:
 
 @final
 class _UnavailableGraphicsRenderer:
-    """Stable renderer shape for absent or unavailable backend selection."""
+    """Stable renderer shape for absent or unavailable primary selection."""
 
     def __init__(
         self,
@@ -74,6 +78,14 @@ class _UnavailableGraphicsRenderer:
             )
 
 
+@dataclass(frozen=True, slots=True)
+class GraphicsComposition:
+    """Primary compatibility renderer plus independently available backends."""
+
+    primary: GraphicsRenderer
+    capabilities: CapabilityCatalog
+
+
 def _missing_module_reason(module: str, extra: str) -> str | None:
     try:
         available = find_spec(module) is not None
@@ -84,22 +96,15 @@ def _missing_module_reason(module: str, extra: str) -> str | None:
     return f"Install entari-plugin-htmlrender[{extra}] to use this backend."
 
 
-def build_graphics_renderer(
+def _build_backend_renderer(
+    backend: GraphicsBackendName,
     settings: GraphicsSettings,
     *,
     worker: WorkerExecutor,
     observer: OperationObserver,
     operation_admission: OperationAdmissionGate,
-) -> GraphicsRenderer:
-    """Bind one configured backend behind the stable graphics contract."""
-    backend = settings.backend
-    if backend is None:
-        return _UnavailableGraphicsRenderer(
-            None,
-            "Configure graphics.backend before rendering raster scenes.",
-            operation_admission,
-        )
-
+) -> tuple[GraphicsRenderer, bool]:
+    """Build one backend with its own raster-work budget."""
     budget = RasterWorkBudget(
         max_pixels=settings.max_pixels,
         max_concurrency=settings.max_concurrency,
@@ -108,50 +113,107 @@ def build_graphics_renderer(
     if backend == "pillow":
         reason = _missing_module_reason("PIL", "pillow")
         if reason is not None:
-            return _UnavailableGraphicsRenderer(backend, reason, operation_admission)
+            return (
+                _UnavailableGraphicsRenderer(backend, reason, operation_admission),
+                False,
+            )
         try:
             from entari_plugin_htmlrender.adapters.pillow import (  # noqa: PLC0415
                 PillowRasterSceneRenderer,
             )
         except ImportError as error:
-            return _UnavailableGraphicsRenderer(
-                backend,
-                f"Pillow adapter import failed: {error}",
-                operation_admission,
+            return (
+                _UnavailableGraphicsRenderer(
+                    backend,
+                    f"Pillow adapter import failed: {error}",
+                    operation_admission,
+                ),
+                False,
             )
-        return PillowRasterSceneRenderer(
-            worker=worker,
-            observer=observer,
-            operation_admission=operation_admission,
-            budget=budget,
+        return (
+            PillowRasterSceneRenderer(
+                worker=worker,
+                observer=observer,
+                operation_admission=operation_admission,
+                budget=budget,
+            ),
+            True,
         )
 
-    if backend == "skia":
-        reason = _missing_module_reason("skia", "skia")
-        if reason is not None:
-            return _UnavailableGraphicsRenderer(backend, reason, operation_admission)
-        try:
-            from entari_plugin_htmlrender.adapters.skia import (  # noqa: PLC0415
-                SkiaRasterSceneRenderer,
-            )
-        except ImportError as error:
-            return _UnavailableGraphicsRenderer(
+    reason = _missing_module_reason("skia", "skia")
+    if reason is not None:
+        return (
+            _UnavailableGraphicsRenderer(backend, reason, operation_admission),
+            False,
+        )
+    try:
+        from entari_plugin_htmlrender.adapters.skia import (  # noqa: PLC0415
+            SkiaRasterSceneRenderer,
+        )
+    except ImportError as error:
+        return (
+            _UnavailableGraphicsRenderer(
                 backend,
                 f"Skia adapter import failed: {error}",
                 operation_admission,
-            )
-        return SkiaRasterSceneRenderer(
+            ),
+            False,
+        )
+    return (
+        SkiaRasterSceneRenderer(
             worker=worker,
             observer=observer,
             operation_admission=operation_admission,
             budget=budget,
-        )
-
-    return _UnavailableGraphicsRenderer(
-        backend,
-        "Unknown graphics backend; expected 'pillow' or 'skia'.",
-        operation_admission,
+        ),
+        True,
     )
 
 
-__all__ = ["build_graphics_renderer"]
+def build_graphics_composition(
+    settings: GraphicsSettings,
+    *,
+    worker: WorkerExecutor,
+    observer: OperationObserver,
+    operation_admission: OperationAdmissionGate,
+) -> GraphicsComposition:
+    """Compose independent configured backends behind one runtime gate."""
+    selected = settings.backends
+    if not selected and settings.backend is not None:
+        selected = (settings.backend,)
+    primary_backend = settings.backend
+    if primary_backend is None and selected:
+        primary_backend = selected[0]
+
+    built: dict[GraphicsBackendName, tuple[GraphicsRenderer, bool]] = {}
+    catalog = CapabilityCatalog()
+    for backend in selected:
+        renderer, available = _build_backend_renderer(
+            backend,
+            settings,
+            worker=worker,
+            observer=observer,
+            operation_admission=operation_admission,
+        )
+        built[backend] = (renderer, available)
+        if available:
+            key = (
+                PILLOW_RASTER_SCENE_RENDERER
+                if backend == "pillow"
+                else SKIA_RASTER_SCENE_RENDERER
+            )
+            catalog = catalog.with_capability(key, renderer)
+
+    if primary_backend is None:
+        primary: GraphicsRenderer = _UnavailableGraphicsRenderer(
+            None,
+            "Configure graphics.backend or graphics.backends before rendering "
+            "raster scenes.",
+            operation_admission,
+        )
+    else:
+        primary = built[primary_backend][0]
+    return GraphicsComposition(primary=primary, capabilities=catalog)
+
+
+__all__ = ["GraphicsComposition", "build_graphics_composition"]
