@@ -12,7 +12,7 @@ renderer。选择它不会改变场景模型，也不保证与 Pillow 产生相�
 ## 安装
 
 ```bash
-uv add "entari-plugin-htmlrender[skia]>=0.1.0,<0.2"
+uv add "entari-plugin-htmlrender[skia]>=0.2.0,<0.3"
 ```
 
 `skia` extra 安装 `skia-python>=144.0.post2`。未安装 extra 却启用后端时，composition 抛出带安装提示的 `GraphicsBackendUnavailableError`，不会回退到 Pillow。
@@ -21,7 +21,7 @@ uv add "entari-plugin-htmlrender[skia]>=0.1.0,<0.2"
 
 !!! warning "Skia 发布平台限制"
 
-    `skia-python` 当前只发布预编译 wheel，没有 sdist 或 musllinux wheel。Linux wheel 要求 manylinux 2.28 兼容环境；macOS 需要 11 或更高版本。Windows x64 覆盖 Python 3.10–3.14，ARM64 只覆盖 3.11–3.14，且没有 win32 wheel。Alpine/musl 或较旧 glibc 镜像不应启用 `skia` extra；`all` extra 也包含 Skia，具有相同平台约束。
+    `skia-python` 当前只发布预编译 wheel，没有 sdist 或 musllinux wheel。Linux wheel 要求 manylinux 2.28 兼容环境；macOS 需要 11 或更高版本。Windows x64 与 ARM64 分别覆盖 Python 3.11–3.14，且没有 win32 wheel。Alpine/musl 或较旧 glibc 镜像不应启用 `skia` extra；`all` extra 也包含 Skia，具有相同平台约束。
 
 ### Linux 动态库
 
@@ -58,9 +58,14 @@ uv run python3 -c "import skia"
 plugins:
   htmlrender:
     graphics:
+      backends: [pillow, skia]
       backend: skia
 ```
 
-像素、命令与并发限制由共享的 `graphics` 配置控制，见[Graphics 后端总览](index.md#graphics-settings)。调用方使用 `service.graphics` 或显式注入的 `GraphicsRenderer`；native draw 或 encode 失败翻译为`RasterBackendExecutionError`。
+也可以只配置 `backends: [skia]`，或继续使用兼容写法 `backend: skia`。Pillow 与 Skia 同时启用时，调用 `service.capabilities.skia` 可独立取得 Skia renderer；本次配置同时把 `backend: skia` 指定为主入口。
+
+像素与命令上限使用同一组 `graphics` 配置，但每个 backend 持有独立并发预算；两个 backend 仍共享 runtime admission 和 worker，见 [Graphics 后端总览](index.md#graphics-settings)。
+
+Skia 为主 backend 且依赖缺失时，首次通过 `service.graphics` 调用会抛出 `GraphicsBackendUnavailableError`；Skia 仅作为次级 backend 且不可用时，`service.capabilities.skia` 不会注册并抛出 `CapabilityUnavailableError`。两种路径都不会回退到 Pillow。Native draw 或 encode 失败翻译为 `RasterBackendExecutionError`。
 
 完整调用示例见[绘制 RasterScene](../../guides/raster-scenes.md)。

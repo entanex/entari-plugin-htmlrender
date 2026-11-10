@@ -149,12 +149,36 @@ class ObservabilitySettings(_StrictRenderModel):
 
 
 class GraphicsSettings(_StrictRenderModel):
-    """Selection and budget for the backend-neutral graphics renderer."""
+    """Selection and budgets for backend-neutral graphics renderers."""
 
     backend: GraphicsBackendName | None = None
+    backends: tuple[GraphicsBackendName, ...] = ()
     max_pixels: int = Field(default=16 * 1024 * 1024, gt=0)
     max_concurrency: int = Field(default=2, gt=0)
     max_commands: int = Field(default=100_000, gt=0)
+
+    @field_validator("backends")
+    @classmethod
+    def _unique_backends(
+        cls,
+        value: tuple[GraphicsBackendName, ...],
+    ) -> tuple[GraphicsBackendName, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("graphics backends must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_backend_selection(self) -> Self:
+        if (
+            self.backend is not None
+            and self.backends
+            and self.backend not in self.backends
+        ):
+            raise ValueError(
+                "graphics.backend must be included in graphics.backends when both "
+                "are configured"
+            )
+        return self
 
 
 class HtmlRenderSettings(_StrictRenderModel):

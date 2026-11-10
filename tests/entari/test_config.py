@@ -24,6 +24,7 @@ def test_htmlrender_config_defaults() -> None:
     assert settings.html.max_auto_height == 16_384
     assert settings.html.max_concurrency == 2
     assert settings.graphics.backend is None
+    assert settings.graphics.backends == ()
     assert settings.graphics.max_pixels == 16 * 1024 * 1024
     assert settings.graphics.max_concurrency == 2
     assert settings.resources.cache.max_entries == 256
@@ -62,6 +63,7 @@ def test_htmlrender_config_nested_parse() -> None:
             },
             "graphics": {
                 "backend": "skia",
+                "backends": ["skia", "pillow"],
                 "max_pixels": 1_000_000,
                 "max_concurrency": 1,
             },
@@ -94,6 +96,7 @@ def test_htmlrender_config_nested_parse() -> None:
     assert settings.html.max_auto_height == 512
     assert settings.html.max_concurrency == 1
     assert settings.graphics.backend == "skia"
+    assert settings.graphics.backends == ("skia", "pillow")
     assert settings.graphics.max_pixels == 1_000_000
     assert settings.graphics.max_concurrency == 1
     assert settings.resources.cache.max_entries == 8
@@ -128,7 +131,20 @@ def test_htmlrender_config_nested_parse() -> None:
         ),
         ({"graphics": {"backend": ["pillow"]}}, "graphics.backend"),
         ({"graphics": {"backend": "unknown"}}, "graphics.backend"),
-        ({"graphics": {"backends": ["pillow"]}}, "graphics.backends"),
+        ({"graphics": {"backends": ["unknown"]}}, "graphics.backends.0"),
+        (
+            {"graphics": {"backends": ["pillow", "pillow"]}},
+            "graphics.backends",
+        ),
+        (
+            {
+                "graphics": {
+                    "backend": "skia",
+                    "backends": ["pillow"],
+                }
+            },
+            "graphics.backend",
+        ),
     ],
 )
 def test_render_tree_rejects_unknown_fields(

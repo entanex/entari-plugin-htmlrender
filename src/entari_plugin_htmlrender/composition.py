@@ -63,7 +63,7 @@ from entari_plugin_htmlrender.resources.service import ResourceService
 from entari_plugin_htmlrender.runtime.composition import build_runtime
 from entari_plugin_htmlrender.runtime.runtime import RenderRuntime  # noqa: TC001
 
-from ._graphics_composition import build_graphics_renderer
+from ._graphics_composition import build_graphics_composition
 from .config import HtmlRenderConfig
 
 if TYPE_CHECKING:
@@ -509,7 +509,7 @@ def _build_runtime_for(plan: RuntimePlan) -> RenderRuntime:
     cache_settings = _cache_settings(config)
     worker = AnyioWorkerExecutor()
     operation_admission = OperationAdmissionGate()
-    graphics = build_graphics_renderer(
+    graphics_composition = build_graphics_composition(
         config.graphics,
         worker=worker,
         observer=operation_observer,
@@ -708,8 +708,9 @@ def _build_runtime_for(plan: RuntimePlan) -> RenderRuntime:
         provider_id=provider_id,
         preparer=preparer,
         resources=resources,
-        graphics=graphics,
+        graphics=graphics_composition.primary,
         operation_admission=operation_admission,
+        capabilities=graphics_composition.capabilities,
         html_render_budget=HtmlRenderBudget(
             max_source_bytes=config.html.max_source_bytes,
             max_pixels=config.html.max_pixels,

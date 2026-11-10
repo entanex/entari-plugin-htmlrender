@@ -11,6 +11,7 @@ import anyio.lowlevel
 import pytest
 
 from entari_plugin_htmlrender.errors import (
+    CapabilityUnavailableError,
     ProviderLifecycleError,
     RuntimeUnavailableError,
 )
@@ -388,5 +389,9 @@ def test_runtime_capabilities_default_empty_and_support_typed_lookup() -> None:
 
     assert empty.capabilities.available_names == frozenset()
     assert empty.capabilities.get(key) is None
+    with pytest.raises(CapabilityUnavailableError):
+        _ = empty.capabilities.pillow
+    with pytest.raises(CapabilityUnavailableError):
+        _ = empty.capabilities.skia
     assert populated.capabilities.available_names == frozenset({"test.marker"})
     assert populated.capabilities.require(key) is marker

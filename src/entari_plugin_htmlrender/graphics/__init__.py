@@ -1,5 +1,11 @@
 """Backend-neutral raster-scene values and rendering contract."""
 
+from .capabilities import (
+    PILLOW_RASTER_SCENE_RENDERER as PILLOW_RASTER_SCENE_RENDERER,
+)
+from .capabilities import (
+    SKIA_RASTER_SCENE_RENDERER as SKIA_RASTER_SCENE_RENDERER,
+)
 from .errors import (
     GraphicsBackendUnavailableError as GraphicsBackendUnavailableError,
 )
@@ -14,6 +20,8 @@ from .models import RGBAColor as RGBAColor
 from .ports import GraphicsRenderer as GraphicsRenderer
 
 __all__ = [
+    "PILLOW_RASTER_SCENE_RENDERER",
+    "SKIA_RASTER_SCENE_RENDERER",
     "FillRect",
     "GraphicsBackendName",
     "GraphicsBackendUnavailableError",
