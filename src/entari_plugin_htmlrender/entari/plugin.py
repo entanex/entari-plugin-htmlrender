@@ -12,6 +12,7 @@ from entari_plugin_htmlrender.composition import build_runtime_plan
 from entari_plugin_htmlrender.config import HtmlRenderConfig
 from entari_plugin_htmlrender.providers.sdk import PLAYWRIGHT_PROVIDER_ID
 
+from .providers import install_contract_providers
 from .service import HtmlRenderService
 
 if TYPE_CHECKING:
@@ -63,6 +64,7 @@ def register_plugin() -> HtmlRenderService:
         config,
         hosted_asset_server=plan.hosted_asset_server,
     )
+    install_contract_providers()
     add_service(cast("Service", service))
     return service
 
