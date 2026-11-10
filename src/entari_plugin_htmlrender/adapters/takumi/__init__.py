@@ -1,3 +1,5 @@
+from .advanced import TakumiAPIAdapter as TakumiAPIAdapter
+from .advanced import TakumiCompiledDocument as TakumiCompiledDocument
 from .api import TakumiSessionAdapter as TakumiSessionAdapter
 from .config import (
     FileCachePolicy as FileCachePolicy,
@@ -29,7 +31,9 @@ from .types import (
 
 __all__ = [
     "FileCachePolicy",
+    "TakumiAPIAdapter",
     "TakumiBackendError",
+    "TakumiCompiledDocument",
     "TakumiConfig",
     "TakumiFontConfig",
     "TakumiImageResource",

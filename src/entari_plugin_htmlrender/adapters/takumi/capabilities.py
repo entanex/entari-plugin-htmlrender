@@ -5,11 +5,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, final
 
+from entari_plugin_htmlrender.adapters.takumi.advanced import TakumiAPIAdapter
 from entari_plugin_htmlrender.adapters.takumi.api import (
     TakumiSessionAdapter,
     _translate_managed_error,
 )
 from entari_plugin_htmlrender.adapters.takumi.runtime import require_runtime_state
+from entari_plugin_htmlrender.capabilities.takumi import _TakumiLeaseGuard
 from entari_plugin_htmlrender.rendering.observers import observe_operation
 
 if TYPE_CHECKING:
@@ -19,7 +21,10 @@ if TYPE_CHECKING:
 
     from entari_plugin_htmlrender.adapters._lease import ExecutionLeaseProvider
     from entari_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
-    from entari_plugin_htmlrender.capabilities.takumi import TakumiSession
+    from entari_plugin_htmlrender.capabilities.takumi import (
+        TakumiAPI,
+        TakumiSession,
+    )
     from entari_plugin_htmlrender.rendering.ports import (
         OperationAdmission,
         OperationObserver,
@@ -31,13 +36,15 @@ _OBSERVATION_ATTRIBUTES = {
 }
 _LEASE_NATIVE_RENDERER_OPERATION = "takumi.lease_native_renderer"
 _LEASE_SESSION_OPERATION = "takumi.lease_session"
+_LEASE_API_OPERATION = "takumi.lease_api"
 
 
 @final
 class TakumiCapabilityAdapter:
-    """Lease the managed Takumi API or the provider-owned Renderer.
+    """Lease the small session, advanced API, or native Renderer.
 
     ``lease_session()`` yields the managed stable session.
+    ``lease_api()`` yields the complete managed Takumi API.
     ``lease_native_renderer()`` yields the upstream object for explicitly
     unmanaged native operations.
     """
@@ -60,11 +67,36 @@ class TakumiCapabilityAdapter:
             self._leases.lease() as state,
         ):
             with _translate_managed_error(_LEASE_SESSION_OPERATION):
+                runtime = require_runtime_state(state)
+                lease_guard = _TakumiLeaseGuard(runtime)
                 session = TakumiSessionAdapter(
-                    require_runtime_state(state),
+                    runtime,
                     self._observer,
+                    lease_guard,
                 )
-            yield session
+            try:
+                yield session
+            finally:
+                lease_guard.invalidate()
+
+    @asynccontextmanager
+    async def lease_api(self) -> AsyncIterator[TakumiAPI]:
+        async with (
+            self._operation_admission.operation(_LEASE_API_OPERATION),
+            self._leases.lease() as state,
+        ):
+            with _translate_managed_error(_LEASE_API_OPERATION):
+                runtime = require_runtime_state(state)
+                lease_guard = _TakumiLeaseGuard(runtime)
+                api = TakumiAPIAdapter(
+                    runtime,
+                    self._observer,
+                    lease_guard,
+                )
+            try:
+                yield api
+            finally:
+                lease_guard.invalidate()
 
     @asynccontextmanager
     async def lease_native_renderer(self) -> AsyncIterator[Renderer]:
