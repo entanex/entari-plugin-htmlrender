@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
     from entari_plugin_htmlrender.adapters.playwright.render import PlaywrightLease
+    from entari_plugin_htmlrender.resources.ports import AssetPublisher
 
 
 @dataclass(slots=True)
@@ -62,6 +63,7 @@ def _resources(
     materialization_policy: ResourceMaterializationPolicy = (
         ResourceMaterializationPolicy.AUTO
     ),
+    publisher: AssetPublisher | None = None,
 ) -> ResourceService:
     strategy: ResourceStrategy
     if remote:
@@ -83,6 +85,16 @@ def _resources(
         ),
         local_access=local_access,
         strategy=strategy,
+        publisher=publisher,
+    )
+
+
+def _route(mocker: MockerFixture, url: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        request=SimpleNamespace(url=url, headers={"user-agent": "pw"}),
+        continue_=mocker.AsyncMock(),
+        fetch=mocker.AsyncMock(return_value="api-response"),
+        fulfill=mocker.AsyncMock(),
     )
 
 
@@ -706,6 +718,80 @@ async def test_local_file_policy_keeps_stylesheet_io_in_browser(
 
 
 @pytest.mark.anyio
+async def test_resource_url_token_authorization_matches_playwright_request_without_fragment(
+    mocker: MockerFixture,
+    tmp_path: Path,
+) -> None:
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+        install_filehost_request_route,
+    )
+
+    asset = tmp_path / "asset one.svg"
+    payload = b'<svg xmlns="http://www.w3.org/2000/svg"/>'
+    asset.write_bytes(payload)
+    publisher = mocker.Mock()
+    publisher.publish = mocker.AsyncMock(
+        return_value=_published(
+            "https://assets.example/asset.svg",
+            {"X-HTMLRender-Filehost-Request": "unit-token"},
+        )
+    )
+    resources = _resources(
+        remote_policy=RemoteLocalResourcePolicy.FILEHOST,
+        publisher=publisher,
+    )
+
+    resolution = await resources.resolve_url_tokens(
+        ["asset%20one.svg?theme=dark#icon"],
+        template_base=tmp_path,
+        strict=True,
+    )
+
+    published = "https://assets.example/asset.svg?theme=dark#icon"
+    normalized = "https://assets.example/asset.svg?theme=dark"
+    assert resolution.value == [published]
+    assert resolution.request_headers_by_url == {
+        normalized: {"X-HTMLRender-Filehost-Request": "unit-token"}
+    }
+    publication = publisher.publish.await_args
+    assert publication is not None
+    assert publication.args[0].data == payload
+
+    page = mocker.AsyncMock()
+    await install_filehost_request_route(
+        page,
+        authorization=resolution.request_headers_by_url,
+    )
+
+    page.route.assert_awaited_once()
+    route_handler = page.route.await_args.args[1]
+    exact = _route(mocker, normalized)
+    await route_handler(exact)
+    exact.continue_.assert_not_awaited()
+    exact_headers = exact.fetch.await_args.kwargs["headers"]
+    assert exact_headers["X-HTMLRender-Filehost-Request"] == "unit-token"
+    assert exact_headers["user-agent"] == "pw"
+    assert exact.fetch.await_args.kwargs["max_redirects"] == 0
+    exact.fulfill.assert_awaited_once_with(response="api-response")
+
+    other_query = _route(
+        mocker,
+        "https://assets.example/asset.svg?theme=light",
+    )
+    await route_handler(other_query)
+    other_query.fetch.assert_not_awaited()
+    other_query.continue_.assert_awaited_once_with()
+
+    other_url = _route(
+        mocker,
+        "https://assets.example/other.svg?theme=dark",
+    )
+    await route_handler(other_url)
+    other_url.fetch.assert_not_awaited()
+    other_url.continue_.assert_awaited_once_with()
+
+
+@pytest.mark.anyio
 async def test_install_filehost_request_route_injects_only_on_exact_published_url(
     mocker: MockerFixture,
 ) -> None:
@@ -723,17 +809,9 @@ async def test_install_filehost_request_route_injects_only_on_exact_published_ur
     page.route.assert_awaited_once()
     route_handler = page.route.await_args.args[1]
 
-    def _route(url: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            request=SimpleNamespace(url=url, headers={"user-agent": "pw"}),
-            continue_=mocker.AsyncMock(),
-            fetch=mocker.AsyncMock(return_value="api-response"),
-            fulfill=mocker.AsyncMock(),
-        )
-
     # Exact published URL (port/fragment normalized) is fetched with the header
     # and NO redirect following, then fulfilled directly.
-    exact = _route("http://render:9012/filehost/abc?v=1#frag")
+    exact = _route(mocker, "http://render:9012/filehost/abc?v=1#frag")
     await route_handler(exact)
     exact.continue_.assert_not_awaited()
     assert (
@@ -744,19 +822,19 @@ async def test_install_filehost_request_route_injects_only_on_exact_published_ur
     exact.fulfill.assert_awaited_once_with(response="api-response")
 
     # Same path, different query — no authorization, plain continue.
-    other_query = _route("http://render:9012/filehost/abc?v=2")
+    other_query = _route(mocker, "http://render:9012/filehost/abc?v=2")
     await route_handler(other_query)
     other_query.fetch.assert_not_awaited()
     other_query.continue_.assert_awaited_once_with()
 
     # Same path prefix on another origin — no authorization.
-    external = _route("https://example.com/filehost/abc?v=1")
+    external = _route(mocker, "https://example.com/filehost/abc?v=1")
     await route_handler(external)
     external.fetch.assert_not_awaited()
     external.continue_.assert_awaited_once_with()
 
     # Unpublished path on the same origin — no authorization.
-    unpublished = _route("http://render:9012/other/abc?v=1")
+    unpublished = _route(mocker, "http://render:9012/other/abc?v=1")
     await route_handler(unpublished)
     unpublished.fetch.assert_not_awaited()
     unpublished.continue_.assert_awaited_once_with()

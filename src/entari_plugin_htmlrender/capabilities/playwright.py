@@ -8,10 +8,17 @@ from contextlib import (  # noqa: TC003 -- public hints
 )
 from pathlib import Path  # noqa: TC003 -- public hints
 from re import Pattern  # noqa: TC003 -- public hints
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 from typing_extensions import TypedDict, Unpack
 
 from entari_plugin_htmlrender.rendering.capabilities import CapabilityKey
+
+if TYPE_CHECKING:
+    from playwright.async_api import Browser, Page
+else:
+    # Keep runtime annotation introspection valid without importing an optional engine.
+    Browser = Any
+    Page = Any
 
 
 class PlaywrightPageOptions(TypedDict, total=False):
@@ -59,18 +66,16 @@ class PlaywrightPageOptions(TypedDict, total=False):
 class PlaywrightCapability(Protocol):
     """Lease native Playwright objects within runtime-owned lifetimes.
 
-    Native objects intentionally have type ``Any`` because Playwright is an
-    optional dependency. The stable contract owns the lease and option shape;
-    projects that install Playwright retain its native typing at adapter call
-    sites without importing it during base-package startup.
+    Static analyzers retain Playwright's native types when its extra is installed.
+    Runtime introspection remains valid without importing the optional engine.
     """
 
     def lease_page(
         self,
         **options: Unpack[PlaywrightPageOptions],
-    ) -> AbstractAsyncContextManager[Any]: ...
+    ) -> AbstractAsyncContextManager[Page]: ...
 
-    def lease_browser(self) -> AbstractAsyncContextManager[Any]: ...
+    def lease_browser(self) -> AbstractAsyncContextManager[Browser]: ...
 
 
 PLAYWRIGHT: CapabilityKey[PlaywrightCapability] = CapabilityKey(
