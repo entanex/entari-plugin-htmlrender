@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from exceptiongroup import BaseExceptionGroup
 import pytest
 
 from entari_plugin_htmlrender.composition import _ComposedLifecycle

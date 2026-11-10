@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -20,7 +20,7 @@ __all__ = [
 ]
 
 
-class BrowserEngine(str, Enum):
+class BrowserEngine(StrEnum):
     """Playwright browser engine."""
 
     CHROMIUM = "chromium"
@@ -28,7 +28,7 @@ class BrowserEngine(str, Enum):
     WEBKIT = "webkit"
 
 
-class ChromiumChannel(str, Enum):
+class ChromiumChannel(StrEnum):
     """Chromium distribution channel accepted by Playwright."""
 
     CHROMIUM = "chromium"

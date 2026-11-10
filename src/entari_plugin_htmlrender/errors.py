@@ -6,8 +6,6 @@ from dataclasses import dataclass
 import re
 from typing import final
 
-from exceptiongroup import BaseExceptionGroup
-
 _MAX_MESSAGE_LENGTH = 512
 _MAX_CAUSE_MESSAGE_LENGTH = 256
 _MAX_EXCEPTION_TYPE_LENGTH = 96

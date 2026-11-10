@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class RenderOperation(str, Enum):
+class RenderOperation(StrEnum):
     """Stable domain identities for renderer operations.
 
     Values describe both the input domain and output artifact. They are not

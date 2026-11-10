@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from functools import partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 import anyio
 from anyio import CapacityLimiter
 from anyio.to_thread import run_sync
-from exceptiongroup import BaseExceptionGroup
 from playwright.async_api import (
     Browser,
     BrowserType,
@@ -39,10 +38,6 @@ if TYPE_CHECKING:
     from .config import PlaywrightConfig
 
 _WS_PROBE_DEADLINE_SECONDS = 4.0
-
-
-class StrEnum(str, Enum):
-    pass
 
 
 class LaunchFailureKind(StrEnum):

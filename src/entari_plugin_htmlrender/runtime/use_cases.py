@@ -8,7 +8,7 @@ from entari_plugin_htmlrender.rendering.artifacts import RenderedHtml, RenderedI
 from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from entari_plugin_htmlrender.preparation.models import (
         PreparedHtml,
@@ -21,6 +21,10 @@ if TYPE_CHECKING:
         ResourceMaterializationPolicy,
     )
     from entari_plugin_htmlrender.resources.models import ResourceRef
+    from entari_plugin_htmlrender.resources.templating import (
+        ExtensionSpec,
+        FilterCallable,
+    )
 
 
 @final
@@ -130,12 +134,16 @@ class _RasterizeTemplate:
         template: TemplateRef,
         variables: Mapping[str, object],
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         raster: RasterOptions,
         materialization_policy: ResourceMaterializationPolicy | None,
     ) -> RenderedImage:
         prepared = await self._preparer.prepare_template(
             template,
             variables,
+            filters=filters,
+            extensions=extensions,
             materialization_policy=materialization_policy,
         )
         return await self._executor.execute(
@@ -175,8 +183,13 @@ class _RenderTemplate:
         self,
         template: TemplateRef,
         variables: Mapping[str, object],
+        *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
     ) -> RenderedHtml:
-        content = await self._preparer.render_template(template, variables)
+        content = await self._preparer.render_template(
+            template, variables, filters=filters, extensions=extensions
+        )
         return RenderedHtml(content=content)
 
 

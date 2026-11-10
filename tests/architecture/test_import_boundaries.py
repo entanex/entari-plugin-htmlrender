@@ -326,7 +326,7 @@ def test_source_tree_has_zero_nonebot_imports() -> None:
     violations = [
         f"{edge.module}:{edge.lineno} {edge.kind} {edge.target}"
         for edge in _collect_edges()
-        if _matches(edge.target, "nonebot")
+        if edge.target.partition(".")[0].startswith("nonebot")
     ]
     assert not violations, "NoneBot imports remain:\n  " + "\n  ".join(violations)
 

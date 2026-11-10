@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
-from exceptiongroup import BaseExceptionGroup
 import pytest
 
 from entari_plugin_htmlrender.adapters.playwright.availability import (

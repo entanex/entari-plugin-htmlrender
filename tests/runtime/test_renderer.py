@@ -42,7 +42,12 @@ from entari_plugin_htmlrender.runtime.use_cases import (
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
+
+    from entari_plugin_htmlrender.resources.templating import (
+        ExtensionSpec,
+        FilterCallable,
+    )
 
 
 PREPARED = parse_html("<p>prepared</p>")
@@ -89,6 +94,9 @@ class _FakePreparer:
     html_content: str = "<p>template html</p>"
     calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     delay: float = 0
+    template_options: (
+        tuple[Mapping[str, FilterCallable] | None, Sequence[ExtensionSpec]] | None
+    ) = None
 
     async def _wait(self) -> None:
         if self.delay:
@@ -139,8 +147,11 @@ class _FakePreparer:
         template: TemplateRef,
         variables: Mapping[str, object],
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml:
+        self.template_options = (filters, extensions)
         await self._wait()
         self.calls.append(
             (
@@ -158,7 +169,11 @@ class _FakePreparer:
         self,
         template: TemplateRef,
         variables: Mapping[str, object],
+        *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
     ) -> str:
+        del filters, extensions
         await self._wait()
         self.calls.append(
             (
@@ -303,6 +318,24 @@ async def test_template_renderer_returns_rendered_html() -> None:
     ]
 
 
+async def test_template_rasterization_forwards_customizations() -> None:
+    renderer, _, preparer, executor = _full_renderers()
+    template = TemplateRef(Path("templates"), "card.html")
+    filters = {"badge": str.upper}
+    extensions = ["jinja2.ext.do"]
+
+    await renderer.rasterize_template(
+        template, {"name": "Entari"}, filters=filters, extensions=extensions
+    )
+
+    assert preparer.template_options is not None
+    received_filters, received_extensions = preparer.template_options
+    assert received_filters == filters
+    assert received_filters is not filters
+    assert received_extensions == ("jinja2.ext.do",)
+    assert executor.calls[-1].operation is RenderOperation.TEMPLATE_TO_IMAGE
+
+
 @pytest.mark.parametrize("phase", ["preparation", "execution"])
 async def test_total_deadline_has_one_public_error_taxonomy(phase: str) -> None:
     renderer, _, preparer, executor = _full_renderers()
@@ -403,7 +436,7 @@ def test_public_contract_annotations_are_runtime_resolvable() -> None:
     assert template_hints["template"] is TemplateRef
 
 
-def test_public_contract_has_no_request_or_jinja_extension_surface() -> None:
+def test_jinja_options_are_scoped_to_template_rendering() -> None:
     for method_name in (
         "rasterize_html",
         "rasterize_text",
@@ -413,12 +446,12 @@ def test_public_contract_has_no_request_or_jinja_extension_surface() -> None:
     ):
         parameters = signature(getattr(HtmlRenderer, method_name)).parameters
         assert "request" not in parameters
-        assert "filters" not in parameters
-        assert "extensions" not in parameters
+        assert ("filters" in parameters) is (method_name == "rasterize_template")
+        assert ("extensions" in parameters) is (method_name == "rasterize_template")
         assert "width" not in parameters
         assert "height" not in parameters
         assert "raster" in parameters
 
     template_parameters = signature(TemplateRenderer.render).parameters
-    assert "filters" not in template_parameters
-    assert "extensions" not in template_parameters
+    assert "filters" in template_parameters
+    assert "extensions" in template_parameters

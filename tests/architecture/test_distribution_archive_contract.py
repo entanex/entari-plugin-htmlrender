@@ -1,20 +1,27 @@
 """Regression tests for release archive boundaries."""
 
+from email.message import Message
 from pathlib import Path
 
 import pytest
 
 from scripts.verify_distribution import (
     _BASE_SMOKE,
+    _DEPENDENCY_SMOKE,
     _ENTARI_PLUGIN_SMOKE,
     _GRAPHICS_SMOKE,
     _TAKUMI_SMOKE,
+    BASE_REQUIREMENTS,
+    EXPECTED_EXTRAS,
+    OPTIONAL_REQUIREMENTS,
     DistributionVerificationError,
     _validate_archive_paths,
+    _validate_metadata,
 )
 
 _INSTALL_SMOKES = {
     "core": _BASE_SMOKE,
+    "dependencies": _DEPENDENCY_SMOKE,
     "entari": _ENTARI_PLUGIN_SMOKE,
     "takumi": _TAKUMI_SMOKE,
     "graphics": _GRAPHICS_SMOKE,
@@ -32,6 +39,10 @@ _INSTALL_SMOKES = {
         "project-0.1.0/docs/.DS_Store",
         "package/__pycache__/module.cpython-312.pyc",
         "package-0.1.0.egg-info/PKG-INFO",
+        "entari_plugin_htmlrender/adapters/htmlkit/__init__.py",
+        "project-0.2.0/docs/configuration/providers/htmlkit.md",
+        "nonebot/__init__.py",
+        "nonebot_plugin_htmlkit/core.abi3.so",
     ],
 )
 def test_distribution_archive_guard_rejects_repository_artifacts(
@@ -51,6 +62,53 @@ def test_distribution_archive_guard_allows_release_metadata() -> None:
         ],
         artifact=Path("artifact.tar.gz"),
     )
+
+
+def _release_metadata() -> Message:
+    metadata = Message()
+    metadata["Name"] = "entari-plugin-htmlrender"
+    metadata["Version"] = "0.2.0"
+    metadata["Requires-Python"] = ">=3.11,<4.0"
+    for extra in EXPECTED_EXTRAS:
+        metadata["Provides-Extra"] = extra
+    for requirement in BASE_REQUIREMENTS:
+        metadata["Requires-Dist"] = requirement
+    for extra, requirements in OPTIONAL_REQUIREMENTS.items():
+        for requirement in requirements:
+            metadata["Requires-Dist"] = f'{requirement}; extra == "{extra}"'
+            metadata["Requires-Dist"] = f'{requirement}; extra == "all"'
+    return metadata
+
+
+def test_distribution_metadata_accepts_independent_backends() -> None:
+    _validate_metadata(
+        _release_metadata(),
+        expected_version="0.2.0",
+        artifact=Path("artifact.whl"),
+    )
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "nonebot2>=2.3",
+        'nonebot2>=2.3; extra == "all"',
+        'nonebot-plugin-htmlkit==0.1.0rc5; extra == "all"',
+        'NoneBot_Plugin_LocalStore>=0.7; extra == "filehost"',
+    ],
+)
+def test_distribution_metadata_rejects_nonebot_in_every_extra(
+    requirement: str,
+) -> None:
+    metadata = _release_metadata()
+    metadata["Requires-Dist"] = requirement
+
+    with pytest.raises(DistributionVerificationError, match="NoneBot dependencies"):
+        _validate_metadata(
+            metadata,
+            expected_version="0.2.0",
+            artifact=Path("artifact.whl"),
+        )
 
 
 @pytest.mark.parametrize(("name", "source"), _INSTALL_SMOKES.items())

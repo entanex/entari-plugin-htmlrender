@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import cast
 
-from exceptiongroup import ExceptionGroup
 import pytest
 
 from entari_plugin_htmlrender.errors import (

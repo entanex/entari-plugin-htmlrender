@@ -19,13 +19,14 @@ from entari_plugin_htmlrender.rendering import (
     CapabilityCatalog,
     CapabilityKey,
 )
-from entari_plugin_htmlrender.resources import ResourceContent
+from entari_plugin_htmlrender.resources import ResourceContent, ResourceResolution
 from entari_plugin_htmlrender.runtime import RuntimeState
 from entari_plugin_htmlrender.runtime.composition import build_runtime
 from tests.image_fixtures import rendered_image
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncIterator, Mapping, Sequence
+    from pathlib import Path
 
     from entari_plugin_htmlrender.graphics import RasterScene
     from entari_plugin_htmlrender.preparation.models import PreparedHtml
@@ -37,6 +38,11 @@ if TYPE_CHECKING:
         PublishedResource,
         ResourceMaterializationPolicy,
         ResourceRef,
+    )
+    from entari_plugin_htmlrender.resources.ports import ResourceMaterializer
+    from entari_plugin_htmlrender.resources.templating import (
+        ExtensionSpec,
+        FilterCallable,
     )
 
 
@@ -123,17 +129,22 @@ class _FakePreparer:
         template: TemplateRef,
         variables: Mapping[str, object],
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml:
-        del template, variables, materialization_policy
+        del template, variables, materialization_policy, filters, extensions
         return parse_html(self.template_html)
 
     async def render_template(
         self,
         template: TemplateRef,
         variables: Mapping[str, object],
+        *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
     ) -> str:
-        del template, variables
+        del template, variables, filters, extensions
         return self.template_html
 
 
@@ -167,6 +178,39 @@ class _FakeResources:
             encoding,
             errors,
         )
+
+    async def resolve_template_vars(
+        self,
+        variables: Mapping[str, object],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[dict[str, object]]:
+        del template_base, strict, materializer
+        return ResourceResolution(dict(variables))
+
+    async def to_resource_url(
+        self,
+        value: str | Path | bytes,
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[str]:
+        del template_base, strict, materializer
+        return ResourceResolution(value if isinstance(value, str) else str(value))
+
+    async def resolve_url_tokens(
+        self,
+        values: Sequence[str],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[list[str]]:
+        del template_base, strict, materializer
+        return ResourceResolution(list(values))
 
     @asynccontextmanager
     async def publish(

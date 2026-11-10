@@ -229,7 +229,7 @@ class FilehostAssetPublisher:
                     self._settings.max_resource_bytes,
                 )
                 await self.publish(InlineResource(data), suffix=suffix or None)
-            except Exception as error:  # noqa: PERF203 -- optional files are isolated
+            except Exception as error:
                 logger.warning(
                     "Could not prewarm a filehost resource: %s",
                     type(error).__name__,

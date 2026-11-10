@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from inspect import signature
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast, get_type_hints
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import anyio
 import anyio.lowlevel
-from exceptiongroup import BaseExceptionGroup
 import pytest
 
 from entari_plugin_htmlrender.adapters.resources import ConfiguredLocalAccessPolicy
@@ -25,6 +26,7 @@ from entari_plugin_htmlrender.resources.config import (
     LocalResourceStrategy,
     RemoteLocalResourcePolicy,
     RemoteResourceStrategy,
+    ResourceMaterializationPolicy,
 )
 from entari_plugin_htmlrender.resources.models import (
     FileResourceRef,
@@ -34,6 +36,7 @@ from entari_plugin_htmlrender.resources.models import (
     PublishedResource,
     ResourceContent,
     ResourceRef,
+    ResourceResolution,
     ResourceRevision,
 )
 from entari_plugin_htmlrender.resources.ports import (
@@ -211,6 +214,7 @@ def _service(
     fetcher: ResourceFetcher | None = None,
     publisher: RecordingPublisher | None = None,
     traversal_budget: ResourceTraversalBudget | None = None,
+    strategy: LocalResourceStrategy | RemoteResourceStrategy | None = None,
 ) -> ResourceService:
     return ResourceService(
         fetcher=fetcher or RecordingFetcher(ResourceContent(b"value")),
@@ -218,7 +222,7 @@ def _service(
             allowed_roots=(tmp_path,),
             allow_any=False,
         ),
-        strategy=LocalResourceStrategy(),
+        strategy=strategy or LocalResourceStrategy(),
         publisher=publisher,
         traversal_budget=traversal_budget,
     )
@@ -550,6 +554,157 @@ async def test_preparation_materializer_is_bounded_and_recursive(
 
 
 @pytest.mark.anyio
+async def test_public_resource_resolution_preserves_exact_filehost_headers(
+    tmp_path: Path,
+) -> None:
+    publisher = RecordingPublisher()
+    resources = _service(
+        tmp_path,
+        publisher=publisher,
+        strategy=RemoteResourceStrategy(
+            local_resource_policy=RemoteLocalResourcePolicy.FILEHOST
+        ),
+    )
+    asset = tmp_path / "asset.png"
+
+    variables = await resources.resolve_template_vars(
+        {
+            "nested": {"path": asset, "data": b"image"},
+            "plain": "caption",
+        },
+        template_base=tmp_path,
+        strict=True,
+    )
+    single = await resources.to_resource_url(asset, strict=True)
+    tokens = await resources.resolve_url_tokens(
+        ["asset.css?theme=dark#icon", "https://cdn.example/base.css", "#local"],
+        template_base=tmp_path,
+        strict=True,
+    )
+
+    assert isinstance(variables, ResourceResolution)
+    assert variables.value == {
+        "nested": {
+            "path": "https://assets.example/resource",
+            "data": "https://assets.example/resource",
+        },
+        "plain": "caption",
+    }
+    assert variables.request_headers_by_url == {
+        "https://assets.example/resource": {"X-Test-Asset": "token"}
+    }
+    assert single.value == "https://assets.example/resource"
+    assert single.request_headers_by_url == variables.request_headers_by_url
+    assert tokens.value == [
+        "https://assets.example/resource?theme=dark#icon",
+        "https://cdn.example/base.css",
+        "#local",
+    ]
+    assert tokens.request_headers_by_url == {
+        "https://assets.example/resource?theme=dark": {"X-Test-Asset": "token"}
+    }
+    assert publisher.published
+    assert all(lease_id is None for _, lease_id, _ in publisher.published)
+
+
+@pytest.mark.anyio
+async def test_public_template_resolution_honors_disabled_mode_and_override(
+    tmp_path: Path,
+) -> None:
+    asset = tmp_path / "asset.bin"
+    resources = _service(
+        tmp_path,
+        strategy=LocalResourceStrategy(
+            materialization_policy=ResourceMaterializationPolicy.OFF
+        ),
+    )
+    values = {"asset": asset}
+
+    disabled = await resources.resolve_template_vars(values)
+    overridden = await resources.resolve_template_vars(
+        values,
+        materializer="file",
+        strict=True,
+    )
+
+    assert disabled.value == values
+    assert disabled.request_headers_by_url == {}
+    assert overridden.value == {"asset": asset.as_uri()}
+    assert overridden.request_headers_by_url == {}
+
+
+def test_resource_resolution_headers_are_deeply_immutable_and_validated() -> None:
+    result = ResourceResolution(
+        {"url": "https://assets.example/item"},
+        {"https://assets.example/item": {"X-Test": "value"}},
+    )
+
+    with pytest.raises(TypeError):
+        cast("dict[str, object]", result.request_headers_by_url)["new"] = {}
+    with pytest.raises(TypeError):
+        cast(
+            "dict[str, str]",
+            result.request_headers_by_url["https://assets.example/item"],
+        )["X-Test"] = "changed"
+    with pytest.raises(InvalidRenderInputError) as captured:
+        ResourceResolution("value", {"relative-url": {}})
+
+    assert captured.value.operation == "create_resource_resolution"
+    assert captured.value.field == "request_headers_by_url"
+    for fragment in ("#", "#fragment"):
+        with pytest.raises(InvalidRenderInputError):
+            ResourceResolution(
+                "value", {f"https://assets.example/item?variant=1{fragment}": {}}
+            )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("materializer", ["unknown", object()])
+async def test_empty_resolution_validates_materializer(
+    tmp_path: Path, materializer: object
+) -> None:
+    resources = _service(tmp_path)
+    invalid = cast("ResourceMaterializer", materializer)
+    with pytest.raises(InvalidRenderInputError) as template_error:
+        await resources.resolve_template_vars({}, materializer=invalid)
+    with pytest.raises(InvalidRenderInputError) as token_error:
+        await resources.resolve_url_tokens([], materializer=invalid)
+    with pytest.raises(InvalidRenderInputError) as url_error:
+        await resources.to_resource_url("https://example.com", materializer=invalid)
+    assert template_error.value.field == token_error.value.field == "materializer"
+    assert url_error.value.field == "materializer"
+
+
+@pytest.mark.anyio
+async def test_url_token_budget_fails_before_publication(tmp_path: Path) -> None:
+    publisher = RecordingPublisher()
+    resources = _service(
+        tmp_path,
+        publisher=publisher,
+        traversal_budget=ResourceTraversalBudget(max_nodes=3),
+    )
+    with pytest.raises(InvalidRenderInputError, match="node budget"):
+        await resources.resolve_url_tokens(
+            ["a.png", "b.png", "c.png"], materializer="filehost"
+        )
+    assert not publisher.published
+    result = await resources.resolve_url_tokens(["#one", "#two"])
+    assert result.value == ["#one", "#two"]
+
+
+def test_public_resource_resolvers_do_not_expose_publisher_leases() -> None:
+    for owner in (
+        ResourceAccess.resolve_template_vars,
+        ResourceAccess.to_resource_url,
+        ResourceAccess.resolve_url_tokens,
+        ResourceService.resolve_template_vars,
+        ResourceService.to_resource_url,
+        ResourceService.resolve_url_tokens,
+    ):
+        assert "lease_id" not in signature(owner).parameters
+
+
+@pytest.mark.anyio
 async def test_preparation_materializer_strictness_is_explicit(
     tmp_path: Path,
 ) -> None:
@@ -683,8 +838,73 @@ async def test_filehost_url_tokens_preserve_query_fragment_and_authorization(
         "data:text/plain,ready",
         "#local-fragment",
     ]
-    assert result.request_headers_by_url == {rewritten: {"X-Test-Asset": "token"}}
+    request_parts = urlsplit(rewritten)
+    normalized_request = urlunsplit(
+        (
+            request_parts.scheme,
+            request_parts.netloc,
+            request_parts.path,
+            request_parts.query,
+            "",
+        )
+    )
+    assert normalized_request == "https://assets.example/resource?theme=dark"
+    assert result.request_headers_by_url == {
+        normalized_request: {"X-Test-Asset": "token"}
+    }
     assert publisher.published[0][1] == lease_id
+
+
+@pytest.mark.anyio
+async def test_url_tokens_percent_decode_utf8_and_spaces_before_materialization(
+    tmp_path: Path,
+) -> None:
+    resources = _service(tmp_path)
+    paths = (tmp_path / "logo one.png", tmp_path / "图片 图.png")
+    for path in paths:
+        path.write_bytes(b"asset")
+
+    result = await resources.resolve_url_tokens(
+        ["logo%20one.png", "%E5%9B%BE%E7%89%87%20%E5%9B%BE.png"],
+        template_base=tmp_path,
+        strict=True,
+    )
+
+    assert result.value == [path.as_uri() for path in paths]
+    assert result.request_headers_by_url == {}
+
+
+@pytest.mark.anyio
+async def test_url_tokens_reject_encoded_path_escape_after_decoding(
+    tmp_path: Path,
+) -> None:
+    resources = _service(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.png"
+    outside.write_bytes(b"outside")
+    token = quote(f"../{outside.name}", safe="")
+
+    with pytest.raises(ResourceAccessDeniedError) as captured:
+        await resources.resolve_url_tokens(
+            [token],
+            template_base=tmp_path,
+            strict=True,
+        )
+
+    assert captured.value.operation == "authorize"
+
+
+@pytest.mark.anyio
+async def test_url_tokens_reject_invalid_utf8_path_escape(tmp_path: Path) -> None:
+    resources = _service(tmp_path)
+
+    with pytest.raises(ResourceFetchError) as captured:
+        await resources.resolve_url_tokens(
+            ["asset-%FF.svg"],
+            template_base=tmp_path,
+            strict=True,
+        )
+
+    assert captured.value.operation == "materialize"
 
 
 @pytest.mark.anyio
@@ -720,6 +940,9 @@ async def test_preparation_rejects_cycles_before_materializer_io(
         ResourceMaterializer.materialize,
         ResourceAccess.fetch,
         ResourceAccess.publish,
+        ResourceAccess.resolve_template_vars,
+        ResourceAccess.to_resource_url,
+        ResourceAccess.resolve_url_tokens,
         PreparationResourceAccess.materialize_template_variables,
         PublishedResource,
     ],
@@ -739,4 +962,16 @@ def test_fetch_and_publish_keep_locator_payload_boundary_explicit() -> None:
     )
     assert get_type_hints(ResourceAccess.publish)["content"] == (
         ResourceContent | InlineResource
+    )
+    assert (
+        get_type_hints(ResourceAccess.resolve_template_vars)["return"]
+        == (ResourceResolution[dict[str, object]])
+    )
+    assert (
+        get_type_hints(ResourceAccess.to_resource_url)["return"]
+        == (ResourceResolution[str])
+    )
+    assert (
+        get_type_hints(ResourceAccess.resolve_url_tokens)["return"]
+        == (ResourceResolution[list[str]])
     )

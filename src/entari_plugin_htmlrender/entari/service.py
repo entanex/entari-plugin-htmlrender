@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Protocol, final
 
-from exceptiongroup import BaseExceptionGroup
 from launart import Launart
 from launart.status import Phase  # noqa: TC002 -- public annotation contract
 
 from entari_plugin_htmlrender._logging import logger
 from entari_plugin_htmlrender.config import HtmlRenderConfig, RuntimeStartupPolicy
 from entari_plugin_htmlrender.graphics import GraphicsRenderer  # noqa: TC001
+from entari_plugin_htmlrender.preparation.service import HtmlPreparer  # noqa: TC001
 from entari_plugin_htmlrender.rendering.contracts import (  # noqa: TC001
     HtmlRenderer,
     TemplateRenderer,
@@ -79,6 +79,10 @@ class HtmlRenderService(_ServiceBase):
     @property
     def templates(self) -> TemplateRenderer:
         return self._runtime.templates
+
+    @property
+    def preparation(self) -> HtmlPreparer:
+        return self._runtime.preparation
 
     @property
     def resources(self) -> ResourceAccess:

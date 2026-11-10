@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 import math
 from types import MappingProxyType
 from typing import TYPE_CHECKING, TypeVar, final
 
 import anyio
+from jinja2.ext import Extension
 
 from entari_plugin_htmlrender.errors import (
     InvalidRenderInputError,
@@ -40,6 +41,10 @@ if TYPE_CHECKING:
     from entari_plugin_htmlrender.rendering.artifacts import (
         RenderedHtml,
         RenderedImage,
+    )
+    from entari_plugin_htmlrender.resources.templating import (
+        ExtensionSpec,
+        FilterCallable,
     )
 
     from .bindings import _HtmlRendererBindings
@@ -135,6 +140,43 @@ def _snapshot_variables(
             "variables must be a mapping with string keys.",
         )
     return MappingProxyType(dict(variables))
+
+
+def _snapshot_template_options(
+    operation: str,
+    filters: Mapping[str, FilterCallable] | None,
+    extensions: Sequence[ExtensionSpec],
+) -> tuple[Mapping[str, FilterCallable] | None, tuple[ExtensionSpec, ...]]:
+    if filters is not None and (
+        not isinstance(filters, Mapping)
+        or any(
+            not isinstance(name, str) or not callable(fn)
+            for name, fn in filters.items()
+        )
+    ):
+        raise _invalid(
+            operation, "filters", "filters must map string names to callables."
+        )
+    if isinstance(extensions, (str, bytes)) or not isinstance(extensions, Sequence):
+        raise _invalid(
+            operation,
+            "extensions",
+            "extensions must be a sequence of extension names or classes.",
+        )
+    snapshot = tuple(extensions)
+    if any(
+        not (
+            isinstance(extension, str)
+            or (isinstance(extension, type) and issubclass(extension, Extension))
+        )
+        for extension in snapshot
+    ):
+        raise _invalid(
+            operation,
+            "extensions",
+            "extensions must contain import names or Jinja Extension classes.",
+        )
+    return (None if filters is None else MappingProxyType(dict(filters))), snapshot
 
 
 @contextmanager
@@ -301,6 +343,8 @@ class _DefaultHtmlRenderer:
         template: TemplateRef,
         variables: Mapping[str, object] | None = None,
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         raster: RasterOptions = _DEFAULT_RASTER_OPTIONS,
         materialization_policy: ResourceMaterializationPolicy | None = None,
         timeout_seconds: float | None = None,
@@ -314,6 +358,7 @@ class _DefaultHtmlRenderer:
                 "template must be a TemplateRef value.",
             )
         variables = _snapshot_variables(operation, variables)
+        filters, extensions = _snapshot_template_options(operation, filters, extensions)
         raster = _validate_raster(operation, raster)
         materialization_policy = _validate_policy(
             operation,
@@ -328,6 +373,8 @@ class _DefaultHtmlRenderer:
                 return await use_case.execute(
                     template,
                     variables,
+                    filters=filters,
+                    extensions=extensions,
                     raster=raster,
                     materialization_policy=materialization_policy,
                 )
@@ -386,6 +433,8 @@ class _DefaultTemplateRenderer:
         template: TemplateRef,
         variables: Mapping[str, object] | None = None,
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         timeout_seconds: float | None = None,
     ) -> RenderedHtml:
         operation = RenderOperation.TEMPLATE_TO_HTML.value
@@ -397,6 +446,7 @@ class _DefaultTemplateRenderer:
                 "template must be a TemplateRef value.",
             )
         variables = _snapshot_variables(operation, variables)
+        filters, extensions = _snapshot_template_options(operation, filters, extensions)
         with _operation_deadline(operation, timeout_seconds):
             async with self._operation_admission.operation(operation):
                 if self._use_case is None:
@@ -405,7 +455,9 @@ class _DefaultTemplateRenderer:
                         provider_id=self._provider_id,
                     )
                 use_case = self._use_case
-                return await use_case.execute(template, variables)
+                return await use_case.execute(
+                    template, variables, filters=filters, extensions=extensions
+                )
 
 
 __all__ = ["HtmlRenderer", "TemplateRenderer"]

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from entari_plugin_htmlrender.errors import ProviderError
     from entari_plugin_htmlrender.graphics import GraphicsRenderer
+    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
     from entari_plugin_htmlrender.rendering.contracts import (
         HtmlRenderer,
         TemplateRenderer,
@@ -285,6 +286,7 @@ async def test_retained_capability_reports_runtime_closing_and_closed(
     )
     lifecycle = _BlockingLifecycle()
     runtime = RenderRuntime(
+        preparer=cast("HtmlPreparer", object()),
         renderer=cast("HtmlRenderer", object()),
         templates=cast("TemplateRenderer", object()),
         resources=cast("ResourceAccess", object()),

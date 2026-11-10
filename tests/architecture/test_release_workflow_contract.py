@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -108,6 +109,66 @@ def test_production_workflows_use_the_entari_loader_smoke() -> None:
 
     ci = _workflow("ci.yml")
     assert "uv run pytest tests/entari/test_plugin.py -q --no-cov" in ci
+
+
+def test_runtime_and_distribution_matrices_start_at_python_311() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+    ci = _workflow("ci.yml")
+    coverage = _workflow("coverage.yml")
+    verifier = (ROOT / "scripts" / "verify_distribution.py").read_text(encoding="utf-8")
+
+    assert project["requires-python"] == ">=3.11,<4.0"
+    assert "arclet-entari[pydantic]>=0.19.4,<0.20.0" in project["dependencies"]
+    assert 'python-version: ["3.11", "3.13", "3.14"]' in ci
+    assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in ci
+    assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in coverage
+    assert '"3.10"' not in ci
+    assert '"3.10"' not in coverage
+    assert '">=3.11,<4.0"' in verifier
+    assert '"arclet-entari[pydantic]>=0.19.4,<0.20.0"' in verifier
+
+
+def test_all_dependency_sets_and_lockfile_are_independent_of_nonebot() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+    extras = project["optional-dependencies"]
+    requirements = [
+        *project["dependencies"],
+        *(requirement for group in extras.values() for requirement in group),
+        *(
+            requirement
+            for group in pyproject["dependency-groups"].values()
+            for requirement in group
+            if isinstance(requirement, str)
+        ),
+    ]
+    assert "htmlkit" not in extras
+    assert not [value for value in requirements if "nonebot" in value.lower()]
+
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    assert not [
+        package["name"]
+        for package in lock["package"]
+        if package["name"].lower().startswith("nonebot")
+    ]
+
+
+def test_markdown_dependencies_use_the_shared_pymdown_math_extension() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = pyproject["project"]["dependencies"]
+    for requirement in (
+        "anyio>=4.13.0",
+        "markdown>=3.11.3",
+        "pymdown-extensions>=12.3",
+    ):
+        assert requirement in dependencies
+    assert not any("python-markdown-math" in value for value in dependencies)
+
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    assert "python-markdown-math" not in {
+        package["name"] for package in lock["package"]
+    }
 
 
 def test_external_actions_are_pinned_to_full_commit_shas() -> None:

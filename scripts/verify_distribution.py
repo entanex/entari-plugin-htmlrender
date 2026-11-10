@@ -49,24 +49,22 @@ OPTIONAL_REQUIREMENTS: Final = {
     "takumi": (f"takumi-py=={TAKUMI_VERSION}",),
 }
 BASE_REQUIREMENTS: Final = (
-    "anyio>=4.12.0",
-    "arclet-entari[pydantic]>=0.18.6,<0.19.0",
-    "exceptiongroup>=1.3.0",
+    "anyio>=4.13.0",
+    "arclet-entari[pydantic]>=0.19.4,<0.20.0",
     "jinja2>=3.0.3",
-    "markdown>=3.10.0",
+    "markdown>=3.11.3",
     "pygments>=2.10.0",
-    "pymdown-extensions>=11.0",
-    "python-markdown-math>=0.8",
+    "pymdown-extensions>=12.3",
     "typing-extensions>=4.15.0",
 )
-REQUIRES_PYTHON_FORMS: Final = frozenset({">=3.10,<4.0", "<4.0,>=3.10"})
+REQUIRES_PYTHON_FORMS: Final = frozenset({">=3.11,<4.0", "<4.0,>=3.11"})
 PACKAGE_RESOURCES: Final = (
     "entari_plugin_htmlrender/templates/markdown/github-markdown-light.css",
     "entari_plugin_htmlrender/templates/markdown/markdown.html",
     "entari_plugin_htmlrender/templates/markdown/pygments-default.css",
     "entari_plugin_htmlrender/templates/markdown/katex/katex.min.b64_fonts.css",
     "entari_plugin_htmlrender/templates/markdown/katex/katex.min.js",
-    "entari_plugin_htmlrender/templates/markdown/katex/mathtex-script-type.min.js",
+    "entari_plugin_htmlrender/templates/markdown/katex/arithmatex.js",
     "entari_plugin_htmlrender/templates/markdown/katex/mhchem.min.js",
     "entari_plugin_htmlrender/templates/text/text.css",
     "entari_plugin_htmlrender/templates/text/text.html",
@@ -136,6 +134,9 @@ check(
 for optional_module in (
     "PIL",
     "machineid",
+    "mdx_math",
+    "nonebot",
+    "nonebot_plugin_htmlkit",
     "playwright",
     "prometheus_client",
     "sentry_sdk",
@@ -187,6 +188,21 @@ async def main() -> None:
             "wheel &lt;smoke&gt; &amp; Unicode 字符" in text.content,
             "Installed template renderer did not preserve escaping and Unicode",
         )
+        formula = await runtime.preparation.prepare_markdown(
+            r"Inline $a^2+b^2=c^2$." + "\n\n" + r"$$\frac{1}{2}$$",
+        )
+        check(
+            'class="arithmatex"' in formula.html,
+            "Installed Markdown pipeline did not prepare Arithmatex formulas",
+        )
+        check(
+            "math/tex" not in formula.html,
+            "Installed Markdown pipeline retained the removed script format",
+        )
+        check(
+            htmlrender.DocumentRequirement.JAVASCRIPT in formula.requirements,
+            "Formula preparation did not declare its browser requirement",
+        )
         stylesheet = await runtime.resources.fetch_text(
             PackageResourceRef(
                 "entari_plugin_htmlrender",
@@ -218,8 +234,9 @@ def check(condition: object, message: str) -> None:
 
 
 load_config(os.environ["HTMLRENDER_ENTARI_CONFIG"])
-plugin = load_plugin("entari_plugin_htmlrender")
-check(plugin is not None, "Entari could not load entari_plugin_htmlrender")
+loaded = load_plugin("entari_plugin_htmlrender")
+check(bool(loaded), "Entari could not load entari_plugin_htmlrender")
+plugin = loaded.plugin
 check(plugin.id == "entari_plugin_htmlrender", "Entari loaded an unexpected plugin id")
 check(not plugin.is_static, "HTMLRender must remain hot-unloadable")
 for heavy_module in ("playwright", "skia", "takumi_py"):
@@ -275,6 +292,25 @@ async def main() -> None:
 
 
 asyncio.run(main())
+"""
+
+_DEPENDENCY_SMOKE = r"""
+from importlib.metadata import distributions
+from importlib.util import find_spec
+import re
+
+for distribution in distributions():
+    name = distribution.metadata["Name"]
+    normalized = re.sub(r"[-_.]+", "-", name).lower()
+    if normalized.startswith("nonebot"):
+        raise RuntimeError(f"Installation contains a NoneBot dependency: {name}")
+
+for module in ("nonebot", "nonebot_plugin_htmlkit"):
+    if find_spec(module) is not None:
+        raise RuntimeError(f"Installation contains a removed runtime: {module}")
+
+if find_spec("entari_plugin_htmlrender.adapters.htmlkit") is not None:
+    raise RuntimeError("Installation still includes the removed HTMLKit adapter")
 """
 
 _GRAPHICS_SMOKE = r"""
@@ -389,6 +425,11 @@ def _validate_archive_paths(names: list[str], *, artifact: Path) -> None:
             path.is_absolute()
             or ".." in parts
             or any(part in FORBIDDEN_ARCHIVE_PATH_PARTS for part in folded_parts)
+            or any(
+                part in {"htmlkit", "htmlkit.py", "htmlkit.md"}
+                or part.startswith("nonebot")
+                for part in folded_parts
+            )
             or any(part.endswith(".egg-info") for part in folded_parts)
             or leaf in FORBIDDEN_ARCHIVE_FILES
             or leaf.startswith(".coverage.")
@@ -401,7 +442,7 @@ def _validate_archive_paths(names: list[str], *, artifact: Path) -> None:
         remainder = len(forbidden) - 10
         suffix = f" (and {remainder} more)" if remainder > 0 else ""
         raise DistributionVerificationError(
-            f"{artifact.name} contains forbidden VCS, cache, or build artifacts: "
+            f"{artifact.name} contains forbidden VCS, cache, build, or removed runtime artifacts: "
             f"{sample}{suffix}."
         )
 
@@ -678,6 +719,7 @@ def _run_install_smokes(
         )
         for label, smoke in (
             ("Run installed-wheel core smoke", _BASE_SMOKE),
+            ("Check installed-wheel core dependencies", _DEPENDENCY_SMOKE),
             ("Run installed-wheel Entari plugin-load smoke", _ENTARI_PLUGIN_SMOKE),
         ):
             _run([str(wheel_python), "-c", smoke], cwd=wheel_run, env=env, label=label)
@@ -710,6 +752,20 @@ def _run_install_smokes(
             env=env,
             label="Run installed-wheel graphics smoke",
         )
+        _install(
+            wheel_python,
+            f"{wheel.resolve()}[all]",
+            uv=uv,
+            cwd=wheel_run,
+            env=env,
+            label="Install all wheel extras",
+        )
+        _run(
+            [str(wheel_python), "-c", _DEPENDENCY_SMOKE],
+            cwd=wheel_run,
+            env=env,
+            label="Check installed-wheel all-extra dependencies",
+        )
 
         if not smoke_sdist:
             return
@@ -730,6 +786,7 @@ def _run_install_smokes(
         )
         for label, smoke in (
             ("Run installed-sdist core smoke", _BASE_SMOKE),
+            ("Check installed-sdist core dependencies", _DEPENDENCY_SMOKE),
             ("Run installed-sdist Entari plugin-load smoke", _ENTARI_PLUGIN_SMOKE),
         ):
             _run([str(sdist_python), "-c", smoke], cwd=sdist_run, env=env, label=label)

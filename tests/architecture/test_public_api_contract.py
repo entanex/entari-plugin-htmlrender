@@ -6,13 +6,14 @@ from importlib.metadata import version
 from typing import get_type_hints
 
 import entari_plugin_htmlrender as htmlrender
-from entari_plugin_htmlrender import HtmlRenderer, TemplateRenderer
+from entari_plugin_htmlrender import HtmlPreparer, HtmlRenderer, TemplateRenderer
 
 _EXPECTED_ROOT_EXPORTS = {
     "CapabilityUnavailableError",
     "DocumentBase",
     "DocumentRequirement",
     "HtmlRenderError",
+    "HtmlPreparer",
     "HtmlRenderer",
     "InvalidRenderInputError",
     "PreparedAsset",
@@ -53,6 +54,11 @@ def test_caller_protocol_annotations_are_runtime_resolvable() -> None:
         HtmlRenderer.rasterize_template,
         HtmlRenderer.rasterize_prepared,
         TemplateRenderer.render,
+        HtmlPreparer.prepare_html,
+        HtmlPreparer.prepare_text,
+        HtmlPreparer.prepare_markdown,
+        HtmlPreparer.prepare_template,
+        HtmlPreparer.render_template,
     ):
         annotations = get_type_hints(method)
         assert "return" in annotations

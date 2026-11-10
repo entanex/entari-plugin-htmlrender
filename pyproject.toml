@@ -1,20 +1,18 @@
 [project]
 name = "entari-plugin-htmlrender"
-version = "0.1.0"
+version = "0.2.0"
 description = "提供 HTML、Markdown、模板渲染与独立栅格场景能力"
 readme = "README.md"
 authors = [{ name = "Tacrolimus", email = "balconyjh@gmail.com" }]
-requires-python = ">=3.10,<4.0"
+requires-python = ">=3.11,<4.0"
 license = { file = "LICENSE" }
 dependencies = [
-    "anyio>=4.12.0",
-    "arclet-entari[pydantic]>=0.18.6,<0.19.0",
-    "exceptiongroup>=1.3.0",
+    "anyio>=4.13.0",
+    "arclet-entari[pydantic]>=0.19.4,<0.20.0",
     "jinja2>=3.0.3",
-    "markdown>=3.10.0",
+    "markdown>=3.11.3",
     "pygments>=2.10.0",
-    "pymdown-extensions>=11.0",
-    "python-markdown-math>=0.8",
+    "pymdown-extensions>=12.3",
     "typing-extensions>=4.15.0",
 ]
 [project.optional-dependencies]
@@ -107,7 +105,7 @@ exclude_lines = [
 [tool.ruff]
 line-length = 88
 indent-width = 4
-target-version = "py310"
+target-version = "py311"
 exclude = [
     ".bzr",
     ".direnv",
@@ -251,7 +249,7 @@ mark-parentheses = false
 keep-runtime-typing = true
 
 [tool.basedpyright]
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 pythonPlatform = "All"
 typeCheckingMode = "standard"
 stubPath = "typings"
@@ -264,6 +262,7 @@ executionEnvironments = [
 exclude = [
     "**/__pycache__",
     ".venv/**",
+    ".artifacts/**",
 ]
 
 [tool.ty.rules]

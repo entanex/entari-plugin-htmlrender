@@ -11,8 +11,9 @@ def _run_isolated(source: str) -> None:
         check=False,
         capture_output=True,
         text=True,
+        timeout=30,
     )
-    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_normal_import_is_a_side_effect_free_caller_facade() -> None:
@@ -55,11 +56,13 @@ def test_entari_loader_registers_concrete_caller_service() -> None:
                 from entari_plugin_htmlrender.config import HtmlRenderConfig
                 from entari_plugin_htmlrender.entari import HtmlRenderService
 
-                plugin = load_plugin(
+                loaded = load_plugin(
                     "entari_plugin_htmlrender",
                     {"provider": None, "startup": "off"},
                 )
 
+                assert loaded
+                plugin = loaded.plugin
                 assert plugin is not None
                 assert plugin.metadata is not None
                 assert plugin.metadata.role is PluginRole.LIBRARY
@@ -68,6 +71,7 @@ def test_entari_loader_registers_concrete_caller_service() -> None:
                 service = plugin._services["htmlrender.runtime"]
                 assert isinstance(service, HtmlRenderService)
                 assert service.renderer is not None
+                assert service.preparation is not None
                 assert service.templates is not None
                 assert service.resources is not None
                 assert service.graphics is not None

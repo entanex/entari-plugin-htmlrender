@@ -3,16 +3,13 @@ from __future__ import annotations
 import codecs
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 import re
-from types import MappingProxyType
-from typing import Any, Generic, TypeAlias, TypeGuard, TypeVar
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from typing import Any, TypeAlias, TypeGuard
+from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 import anyio
-from exceptiongroup import BaseExceptionGroup
 
 from entari_plugin_htmlrender._logging import logger
 from entari_plugin_htmlrender.errors import (
@@ -41,6 +38,7 @@ from .models import (
     RemoteResourceRef,
     ResourceContent,
     ResourceRef,
+    ResourceResolution,
 )
 from .ports import (
     AssetPublisher,
@@ -54,29 +52,7 @@ _WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _TransportPolicy: TypeAlias = LocalLocalResourcePolicy | RemoteLocalResourcePolicy
 _MaterializerSpec: TypeAlias = str | ResourceMaterializer | None
 _RequestHeadersByUrl: TypeAlias = dict[str, Mapping[str, str]]
-T = TypeVar("T")
 _RESOURCE_REF_TYPES = (FileResourceRef, PackageResourceRef, RemoteResourceRef)
-
-
-@dataclass(frozen=True, slots=True)
-class _MaterializationResult(Generic[T]):
-    """Internal value rewrite with exact authorization for rewritten URLs."""
-
-    value: T
-    request_headers_by_url: Mapping[str, Mapping[str, str]] = field(
-        default_factory=dict
-    )
-
-    def __post_init__(self) -> None:
-        frozen_headers = {
-            url: MappingProxyType(dict(headers))
-            for url, headers in sorted(self.request_headers_by_url.items())
-        }
-        object.__setattr__(
-            self,
-            "request_headers_by_url",
-            MappingProxyType(frozen_headers),
-        )
 
 
 # Derived from the enum members themselves so a value rename cannot leave a
@@ -119,6 +95,18 @@ def _split_resource_url(value: str) -> SplitResult:
         raise ResourceFetchError(
             f"Invalid resource URL {value!r}.",
             reference=value,
+            operation="materialize",
+            source=error,
+        ) from error
+
+
+def _decode_url_path(value: str, *, reference: str) -> str:
+    try:
+        return unquote(value, encoding="utf-8", errors="strict")
+    except UnicodeError as error:
+        raise ResourceFetchError(
+            f"Invalid UTF-8 escape in resource URL {reference!r}.",
+            reference=reference,
             operation="materialize",
             source=error,
         ) from error
@@ -430,6 +418,31 @@ class ResourceService:
             is not ResourceMaterializationPolicy.OFF
         )
 
+    def _validate_resolution_inputs(
+        self,
+        *,
+        strict: bool | None,
+        template_base: str | Path | None,
+        materializer: _MaterializerSpec,
+        operation: str,
+    ) -> None:
+        if strict is not None and type(strict) is not bool:
+            raise InvalidRenderInputError(
+                "strict must be a boolean or None.",
+                operation=operation,
+                field="strict",
+            )
+        if template_base is not None and not isinstance(
+            template_base,
+            (str, Path),
+        ):
+            raise InvalidRenderInputError(
+                "template_base must be a string, Path, or None.",
+                operation=operation,
+                field="template_base",
+            )
+        self._policy(materializer)
+
     async def _materialize_with_custom(
         self,
         materializer: ResourceMaterializer,
@@ -651,10 +664,10 @@ class ResourceService:
         strict: bool | None = None,
         materializer: _MaterializerSpec = None,
         lease_id: PublicationLeaseId | None = None,
-    ) -> _MaterializationResult[dict[str, Any]]:
+    ) -> ResourceResolution[dict[str, Any]]:
         request_headers_by_url: _RequestHeadersByUrl = {}
         if not self._should_materialize(materializer):
-            return _MaterializationResult(dict(template_vars))
+            return ResourceResolution(dict(template_vars))
         result = await self._materialize_any(
             template_vars,
             template_base=_normalize_template_base(template_base),
@@ -675,10 +688,48 @@ class ResourceService:
                 reference=template_vars,
                 operation="materialize",
             )
-        return _MaterializationResult(
+        return ResourceResolution(
             result,
             request_headers_by_url,
         )
+
+    async def resolve_template_vars(
+        self,
+        variables: Mapping[str, object],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: _MaterializerSpec = None,
+    ) -> ResourceResolution[dict[str, object]]:
+        """Resolve local values in nested template data.
+
+        The returned authorization mapping uses final published URLs as keys.
+        No filesystem or publisher I/O occurs when template-variable
+        materialization is disabled and no explicit materializer is supplied.
+        Filehost URLs are cache-backed and unpinned. They can be evicted by
+        capacity limits or publisher teardown; use :meth:`publish` when a
+        single URL must stay valid for one caller-held scope.
+        """
+
+        self._validate_resolution_inputs(
+            strict=strict,
+            template_base=template_base,
+            materializer=materializer,
+            operation="resolve_template_vars",
+        )
+        if not isinstance(variables, Mapping):
+            raise InvalidRenderInputError(
+                "variables must be a mapping.",
+                operation="resolve_template_vars",
+                field="variables",
+            )
+        result = await self._materialize_template_vars(
+            variables,
+            template_base=template_base,
+            strict=strict,
+            materializer=materializer,
+        )
+        return ResourceResolution(result.value, result.request_headers_by_url)
 
     async def materialize_template_variables(
         self,
@@ -706,7 +757,7 @@ class ResourceService:
         strict: bool | None = None,
         materializer: _MaterializerSpec = None,
         lease_id: PublicationLeaseId | None = None,
-    ) -> _MaterializationResult[str]:
+    ) -> ResourceResolution[str]:
         request_headers_by_url: _RequestHeadersByUrl = {}
         result = await self._materialize_any(
             value,
@@ -722,7 +773,41 @@ class ResourceService:
                 reference=value,
                 operation="materialize",
             )
-        return _MaterializationResult(result, request_headers_by_url)
+        return ResourceResolution(result, request_headers_by_url)
+
+    async def to_resource_url(
+        self,
+        value: str | Path | bytes,
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: _MaterializerSpec = None,
+    ) -> ResourceResolution[str]:
+        """Resolve one local value to its backend-consumable URL.
+
+        A returned filehost URL is cache-backed and unpinned. Use
+        :meth:`publish` when the URL needs a caller-controlled publication
+        lifetime.
+        """
+
+        self._validate_resolution_inputs(
+            strict=strict,
+            template_base=template_base,
+            materializer=materializer,
+            operation="to_resource_url",
+        )
+        if not isinstance(value, (str, Path, bytes)):
+            raise InvalidRenderInputError(
+                "value must be a string, Path, or bytes.",
+                operation="to_resource_url",
+                field="value",
+            )
+        return await self._materialize_resource_url(
+            value,
+            template_base=template_base,
+            strict=strict,
+            materializer=materializer,
+        )
 
     async def _materialize_url_tokens(
         self,
@@ -732,7 +817,7 @@ class ResourceService:
         strict: bool | None = None,
         materializer: _MaterializerSpec = None,
         lease_id: PublicationLeaseId | None = None,
-    ) -> _MaterializationResult[list[str]]:
+    ) -> ResourceResolution[list[str]]:
         base = _normalize_template_base(template_base)
         resolved: list[str] = []
         request_headers_by_url: _RequestHeadersByUrl = {}
@@ -743,7 +828,7 @@ class ResourceService:
                 continue
             token_headers_by_url: _RequestHeadersByUrl = {}
             value = await self._materialize_scalar(
-                parsed.path,
+                _decode_url_path(parsed.path, reference=raw),
                 template_base=base,
                 strict=strict,
                 materializer=materializer,
@@ -754,23 +839,70 @@ class ResourceService:
                 resolved.append(raw)
                 continue
             target = _split_resource_url(value)
-            resolved_url = urlunsplit(
-                (
-                    target.scheme,
-                    target.netloc,
-                    target.path,
-                    parsed.query or target.query,
-                    parsed.fragment,
-                )
+            resolved_parts = (
+                target.scheme,
+                target.netloc,
+                target.path,
+                parsed.query or target.query,
             )
+            resolved_url = urlunsplit((*resolved_parts, parsed.fragment))
             resolved.append(resolved_url)
             headers = token_headers_by_url.get(value)
             if headers is not None:
+                # Browsers omit fragments from HTTP requests. Keep the query
+                # significant while matching the key Playwright will look up.
+                authorization_url = urlunsplit((*resolved_parts, ""))
                 _record_published_resource(
-                    PublishedResource(resolved_url, headers),
+                    PublishedResource(authorization_url, headers),
                     request_headers_by_url,
                 )
-        return _MaterializationResult(resolved, request_headers_by_url)
+        return ResourceResolution(resolved, request_headers_by_url)
+
+    async def resolve_url_tokens(
+        self,
+        values: Sequence[str],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: _MaterializerSpec = None,
+    ) -> ResourceResolution[list[str]]:
+        """Resolve local URL tokens while preserving query strings and fragments.
+
+        Filehost results follow the same unpinned cache lifetime as
+        :meth:`to_resource_url`. Authorization keys omit fragments because
+        HTTP requests do; query strings remain part of the exact match.
+        """
+
+        self._validate_resolution_inputs(
+            strict=strict,
+            template_base=template_base,
+            materializer=materializer,
+            operation="resolve_url_tokens",
+        )
+        if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+            raise InvalidRenderInputError(
+                "values must be a sequence of URL strings.",
+                operation="resolve_url_tokens",
+                field="values",
+            )
+        if len(values) + 1 > self._traversal_budget.max_nodes:
+            raise InvalidRenderInputError(
+                "URL token resolution exceeds the traversal node budget.",
+                operation="resolve_url_tokens",
+                field="values",
+            )
+        if any(not isinstance(value, str) for value in values):
+            raise InvalidRenderInputError(
+                "values must contain only URL strings.",
+                operation="resolve_url_tokens",
+                field="values",
+            )
+        return await self._materialize_url_tokens(
+            values,
+            template_base=template_base,
+            strict=strict,
+            materializer=materializer,
+        )
 
     async def clear(self) -> None:
         await self._fetcher.clear()

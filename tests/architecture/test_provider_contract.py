@@ -5,6 +5,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from entari_plugin_htmlrender.providers.sdk import (
+    PLAYWRIGHT_PROVIDER_ID,
+    RESERVED_PROVIDER_IDS,
+    TAKUMI_PROVIDER_ID,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = ROOT / "src" / "entari_plugin_htmlrender"
 SDK_PATH = PACKAGE_ROOT / "providers" / "sdk.py"
@@ -121,6 +127,13 @@ def test_provider_dtos_carry_the_final_resource_dependencies_and_strategy() -> N
     assert {"description", "observation_attributes"}.isdisjoint(bindings), (
         "ProviderBinding must not advertise metadata fields with no runtime contract"
     )
+
+
+def test_first_party_provider_ids_are_all_reserved() -> None:
+    assert {
+        PLAYWRIGHT_PROVIDER_ID,
+        TAKUMI_PROVIDER_ID,
+    } == RESERVED_PROVIDER_IDS
 
 
 def test_runtime_exposes_dedicated_service_facades_from_composition() -> None:
