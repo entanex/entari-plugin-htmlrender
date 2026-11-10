@@ -17,7 +17,7 @@ tags:
 | Workflow | 文件 | 主要职责 | 触发条件 |
 | --- | --- | --- | --- |
 | CI | `.github/workflows/ci.yml` | Ruff format/check、类型检查、分发安装矩阵、远程浏览器 smoke、Entari load | push `main`、PR、手动 |
-| Coverage | `.github/workflows/coverage.yml` | Python 3.10–3.14 × x64/arm64 pytest/coverage | push `main`、PR、手动 |
+| Coverage | `.github/workflows/coverage.yml` | Python 3.11–3.14 × x64/arm64 pytest/coverage | push `main`、PR、手动 |
 | Prek | `.github/workflows/prek.yml` | 仓库级 prek hooks | push `main`、PR、手动 |
 | Docs PR Preview Build | `.github/workflows/docs-pr-preview.yml` | 检测文档相关变更，以只读权限严格构建静态站 | PR open/sync/reopen |
 | Docs PR Preview Deploy | `.github/workflows/docs-pr-preview-deploy.yml` | 校验并发布 build artifact，更新 PR 预览评论 | preview build 完成 |
@@ -35,10 +35,10 @@ tags:
 
 - `Ruff`：依次运行 `ruff format --check` 与 `ruff check`，只验证 checkout，不改写文件；
 - `Ty` 与 `Basedpyright`：两套类型检查器分别执行；
-- `Package Build`：`uv build --no-sources` 构建 wheel/sdist，用 `twine check` 校验 metadata，并在 Python 3.12 隔离安装 bare core、`[takumi]`、`[playwright,filehost]` 与 `[pillow,skia]`；
-- `Wheel Smoke`：复用同一 artifact，在 Python 3.10、3.11、3.13、3.14 隔离安装wheel，断言 core 零 backend，并为受支持的 native extra 执行真实 PNG；
+- `Package Build`：`uv build --no-sources` 构建 wheel/sdist，用 `twine check` 校验 metadata，并在 Python 3.12 隔离环境中先安装 bare core，再依次增加 `[takumi]`、`[pillow,skia]` 与 `[all]`，验证可选能力和依赖边界；
+- `Wheel Smoke`：复用同一 artifact，在 Python 3.11、3.13、3.14 隔离安装 wheel，断言 core 不含 HTML/Graphics backend 或宿主框架插件依赖；`[takumi]` 执行真实 native render。Python 3.12 的 smoke 已由 `Package Build` 覆盖；
 - `Remote Browser Render Smoke (Docker)`：通过 Docker Compose 顺序验证远程 Playwright WebSocket 的 MEMORY 与 filehost 路径，覆盖 text、Markdown 相对图片、CSS 字体/背景和模板本地资源，并检查 filehost 请求头、CORS、资源后缀与未认证 403；
-- `Entari Load`：在 Python 3.10–3.14 隔离安装 wheel，分别验证普通 library import 与 Entari loader 注册/卸载。
+- `Entari Load`：在 Python 3.11–3.14 的项目环境中运行 Entari 0.19.x loader 注册/卸载测试；真实安装产物的加载由 `Package Build` 和 `Wheel Smoke` 验证。
 
 pytest 不在 `CI` 中重复执行，由 `Coverage` 统一覆盖。
 
@@ -46,7 +46,7 @@ pytest 不在 `CI` 中重复执行，由 `Coverage` 统一覆盖。
 
 ### Coverage
 
-`Coverage` 对 Python 3.10–3.14 分别在 x64 和 arm64 runner 上执行 CI profile。各矩阵项独立失败，不因一个版本失败而取消其他版本，并产生：
+`Coverage` 对 Python 3.11–3.14 分别在 x64 和 arm64 runner 上执行 CI profile。各矩阵项独立失败，不因一个版本失败而取消其他版本，并产生：
 
 ```text
 coverage-py<python-version>-<arch>.xml
@@ -130,7 +130,7 @@ PR preview 只是同一 GitHub Pages origin 下的路径命名空间，并不是
 
 `Docs` 对每个 `main` push 执行 strict build，不使用 paths filter。它的成功结果作为同一 source SHA 的发布门禁，但不会提前创建正式版本目录或移动 `latest`；这样即使文档未变化，Auto Tag 也始终能汇合同一 SHA 的四条门禁。
 
-只有 `Publish` 完成 PyPI hash 回读与 GitHub Release 后，`Publish versioned documentation` 才重新检出经过验证的 tag、再次 strict build，并调用 `mike` 写入正式版本目录。这样 `/0.1.0/` 表示该版本已经存在可安装产物，而不是“某个版本 PR 已合并”。
+只有 `Publish` 完成 PyPI hash 回读与 GitHub Release 后，`Publish versioned documentation` 才重新检出经过验证的 tag、再次 strict build，并调用 `mike` 写入正式版本目录。这样 `/0.2.0/` 表示该版本已经存在可安装产物，而不是“某个版本 PR 已合并”。
 
 正式版本和 PR previews 仍共享生成物分支 `gh-pages`。不同 PR 的 preview 更新互不取消；正式部署与 preview action 每次从最新远程状态开始，只使用非 force push，并在冲突时有限重试，避免一个 writer 覆盖另一个 writer 已发布的目录。
 

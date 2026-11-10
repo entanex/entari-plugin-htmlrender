@@ -36,7 +36,7 @@ make install-browser   # 仅需要真实浏览器测试时执行
 - 架构变更需同步更新 `docs/extensions/` 中的对应专题。
 - 对外 API 行为变化需同步更新 `docs/reference/`，并按任务影响更新 `docs/guides/`。
 - 依赖和锁文件通过 `uv` 更新，不直接手写依赖解析结果。
-- 项目支持 Python 3.10–3.14；公共代码不得只在单一 Python 版本上验证。
+- 项目支持 Python 3.11–3.14；公共代码不得只在单一 Python 版本上验证。
 
 ## 提交前检查
 
@@ -60,7 +60,7 @@ prek run actionlint --all-files --hook-stage=manual  # workflow 变更
 
 Prek hook 可能自动修改文件；必须检查 diff 并重跑到无新增修改且成功退出。增量开发可以使用 `prek run --files <path>...`，但不能代替 PR 前的 `--all-files`。stage、自动修复与排除规则见[工程协作流程](engineering-workflow.md#prek-gates)。
 
-CI 会在 Python 3.10–3.14 上运行 pytest/coverage 与 Entari 隔离加载矩阵。本地单一版本通过不能替代矩阵结果。
+CI 会在 Python 3.11–3.14 上运行 pytest/coverage 与 Entari 0.19.x 隔离加载矩阵。本地单一版本通过不能替代矩阵结果。
 
 ## Pull Request 要求
 

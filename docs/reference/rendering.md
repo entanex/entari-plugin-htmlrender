@@ -34,7 +34,23 @@ async def render_readme(
     )
 ```
 
-所有方法的 `raster`、`materialization_policy` 与 `timeout_seconds` 都是 kw-only。Markdown `str` 永远是 inline 内容；文件、包或远端文档必须传入对应`ResourceRef`，不会按字符串形状猜测来源。
+`rasterize_html()`、`rasterize_text()`、`rasterize_markdown()` 与 `rasterize_template()` 完整拥有 convenience preparation。需要检查、缓存或分步传递中立文档时，先使用 `service.preparation`，再调用：
+
+```python
+from entari_plugin_htmlrender import HtmlPreparer, HtmlRenderer, RasterOptions
+
+async def render_prepared(
+    preparation: HtmlPreparer,
+    renderer: HtmlRenderer,
+):
+    prepared = await preparation.prepare_markdown("# Prepared once")
+    return await renderer.rasterize_prepared(
+        prepared,
+        raster=RasterOptions(width=720),
+    )
+```
+
+所有方法的 `raster`、`materialization_policy` 与 `timeout_seconds` 都是 kw-only。Markdown `str` 永远是 inline 内容；文件、包或远端文档必须传入对应 `ResourceRef`，不会按字符串形状猜测来源。
 
 `supported_operations` 返回 `frozenset[RenderOperation]`，`supports(operation)`用于探测当前 composition。`RenderOperation` 同时描述输入领域与输出 artifact，例如`HTML_TO_IMAGE`、`TEMPLATE_TO_HTML` 与 `RASTER_SCENE_TO_IMAGE`；它不是 Python
 method name。
@@ -55,7 +71,11 @@ async def render_email(templates: TemplateRenderer) -> RenderedHtml:
     )
 ```
 
+模板调用支持可选的 `filters: Mapping[str, FilterCallable]` 与 `extensions: Sequence[ExtensionSpec]`；前者按名称注入 callable，后者接受导入路径或 Jinja Extension 类。两项在挂起前复制为快照，避免并发调用修改同一个配置对象。完整示例见[模板与资源](../guides/templates-and-resources.md#template-customization)。
+
 需要图片时调用 `HtmlRenderer.rasterize_template()`；不要把 template-to-HTML 与template-to-image 合并成一个按参数改变返回类型的方法。
+
+`service.preparation.render_template()` 返回同一 preparation pipeline 产生的原始 HTML `str`，供需要组合内部阶段的高级调用方使用；普通业务代码优先使用 `TemplateRenderer.render()` 获得 `RenderedHtml` artifact。
 
 ## Artifact
 

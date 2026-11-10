@@ -173,7 +173,7 @@ docs-build: ensure-uv ## Build docs site.
 	@echo "==> Building docs site"
 	$(ZENSICAL) build --strict
 
-docs-deploy: ensure-uv ## Deploy versioned docs locally (e.g. make docs-deploy VERSION=0.1.0).
+docs-deploy: ensure-uv ## Deploy versioned docs locally (e.g. make docs-deploy VERSION=0.2.0).
 	@echo "==> Deploying docs version $(VERSION)"
 	$(UV_RUN) mike deploy --update-aliases $(VERSION) latest
 

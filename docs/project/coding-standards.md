@@ -20,14 +20,14 @@ tags:
 
 ## 目录与文件组织
 
-- 目录按依赖层组织（`runtime` / `rendering` / `preparation` / `resources` / `adapters` / `host`），避免按“代码类型”堆目录；
+- 目录按依赖层组织（`runtime` / `rendering` / `preparation` / `resources` / `adapters` / `entari`），避免按“代码类型”堆目录；
 - 文件尽量保持“单一概念”，避免一个文件同时承担多个无关职责；
 - 测试目录按插件实现分类维护，不把浏览器相关 case 统一堆放。
 
 ## Python 与工具链
 
 - Python 版本与依赖以 `pyproject.toml` 为准。
-- 支持版本：Python 3.10–3.14。
+- 支持版本：Python 3.11–3.14。
 - 格式化：`ruff format`；CI 使用 `ruff format --check` 验证，不修改工作区。
 - Lint：`ruff check`
 - 类型检查：`basedpyright` + `ty`，并对 `py.typed` 公共面运行 package verifytypes
@@ -76,7 +76,7 @@ make test-ci
 - 并发与生命周期测试必须覆盖“资源释放”路径；
 - bugfix 先提供能在修复前失败的回归测试；新 Provider 同时覆盖 SDK、通用 executor 与 typed Capability；
 - 不依赖测试执行顺序、共享进程全局状态或外部网络；确需外部服务的 case 放入明确的 smoke 层；
-- 插件入口、元数据或依赖变化必须通过 Python 3.10–3.14 的 Entari 加载矩阵。
+- 插件入口、元数据或依赖变化必须通过 Python 3.11–3.14 的 Entari 加载矩阵。
 
 ## 验证分层
 
@@ -132,5 +132,5 @@ make test-ci
 
 任何新增组件都必须在窄屏下保持主叙事顺序，并通过 `make docs-build` 的 strict链接、anchor、引用和配置验证。
 
-当前 Mermaid runtime 固定为 `11.16.0`，来自 npm 发布包的`dist/mermaid.min.js`；原始 MIT 许可证位于[`docs/assets/licenses/mermaid-11.16.0.txt`](../../assets/licenses/mermaid-11.16.0.txt)。升级时使用 `npm pack mermaid@<version>` 提取发布产物，同时更新文件名、配置引用、许可证与 documentation contract 中的 SHA-256；不得改回 `mermaid@11` 这类 moving
+当前 Mermaid runtime 固定为 `11.16.0`，来自 npm 发布包的`dist/mermaid.min.js`；原始 MIT 许可证位于[`docs/assets/licenses/mermaid-11.16.0.txt`](../assets/licenses/mermaid-11.16.0.txt)。升级时使用 `npm pack mermaid@<version>` 提取发布产物，同时更新文件名、配置引用、许可证与 documentation contract 中的 SHA-256；不得改回 `mermaid@11` 这类 moving
 major CDN URL。

@@ -9,7 +9,7 @@ icon: lucide/monitor-cog
 ## 安装与最小配置
 
 ```bash
-uv add "entari-plugin-htmlrender[playwright]>=0.1.0,<0.2"
+uv add "entari-plugin-htmlrender[playwright]>=0.2.0,<0.3"
 ```
 
 ```yaml
@@ -116,7 +116,7 @@ uv run playwright install --with-deps chromium
 asset store 提供。可选 `filehost` extra 会安装 `py-machineid`，用于派生默认请求头守卫值：
 
 ```bash
-uv add "entari-plugin-htmlrender[playwright,filehost]>=0.1.0,<0.2"
+uv add "entari-plugin-htmlrender[playwright,filehost]>=0.2.0,<0.3"
 ```
 
 不安装该 extra 时 transport 仍可使用内置机器标识回退；对多副本或需要显式轮换的部署，直接配置 secret `resources.filehost.request_header_value`，不要依赖自动派生值。
@@ -141,6 +141,12 @@ filehost 运行参数由核心 Resource Service 管理，位于 `resources.fileh
 | `resources.filehost.request_header_salt` | 内置稳定值 |
 
 路径授权不在 Provider 配置中；统一使用`resources.local_access.allow_any_path` 与`resources.local_access.allowed_paths`。
+
+## Markdown 数学与 JavaScript
+
+Markdown 中的 `pymdownx.arithmatex(generic=True, smart_dollar=True)` 标记需要浏览器端 KaTeX 初始化脚本才能显示为排版公式。`$x$` 与 `\(x\)` 是行内公式，`$ x $` 保持原文；`$$...$$`、`\[...\]` 与独立的 `\begin{env}...\end{env}` 需要独占段落或进入块解析。Playwright 会执行页面 JavaScript，因此可以完成这层客户端排版；`rasterize_markdown()` 与先 `prepare_markdown()` 再 `rasterize_prepared()` 都沿用同一 Provider 执行边界。
+
+初始化脚本只处理 `.arithmatex[data-htmlrender-arithmatex]`，不对整个页面执行 dollar/slash auto-render。没有内部标记的原始 HTML `.arithmatex` 容器不会被脚本处理；代码 span 与 fenced code 中的 `$`、`\(` 或 `\[` 保持字面量。如果页面策略、资源物化或自定义 HTML 移除了公式脚本及样式，浏览器中可能仍显示 TeX 标记。排查公式输出时应同时检查脚本是否执行完成、所需 CSS 是否可用，以及内容是否在完成排版前已被截图。
 
 ## typed Capability
 

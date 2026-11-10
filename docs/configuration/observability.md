@@ -6,7 +6,7 @@ description: 直接 Sentry SDK 与 Prometheus client 集成
 # 可选依赖与可观测性
 
 ```bash
-uv add "entari-plugin-htmlrender[sentry,prometheus]>=0.1.0,<0.2"
+uv add "entari-plugin-htmlrender[sentry,prometheus]>=0.2.0,<0.3"
 ```
 
 ```yaml
@@ -20,6 +20,8 @@ plugins:
 完整配置路径是 `observability.sentry` 与 `observability.prometheus`，默认均为`false`。
 
 adapter 直接惰性导入 `sentry_sdk` 与 `prometheus_client`；不要求额外的框架集成插件。应用仍负责初始化 Sentry SDK、配置采样并暴露 Prometheus registry。缺少可选 SDK 时记录诊断并保持 no-op，不改变渲染契约。
+
+各 HTML Provider 共享 typed operation 计数、耗时与稳定错误分类。可用 `render.backend=playwright` 或 `render.backend=takumi` 区分来源。
 
 | 含义 | Prometheus | Sentry |
 | --- | --- | --- |

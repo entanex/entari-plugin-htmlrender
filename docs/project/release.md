@@ -32,7 +32,9 @@ make build-artifacts
 
 该 target 内部执行 `uv build --no-sources`、pinned `twine==7.0.0 check` 和仓库外隔离安装 smoke。`--no-sources` 很重要：发布构建不得因本地 workspace source 覆盖而得到一个无法从锁定依赖重现的产物。
 
-涉及 package resources 或 native extra 的版本还必须在仓库外、清空 `PYTHONPATH` 后安装真实产物。发布门禁要求 Python 3.10–3.14 验证 wheel，Python 3.12 至少验证一次 sdist；检查全部 package resources 非空且登记在 `RECORD`，验证 bare core 不安装任何 backend，执行 Entari load、Preparation 与 typed artifact smoke，并在 `[takumi]`、`[playwright,filehost]` 和 `[pillow,skia]` 的独立环境中确认锁定依赖与真实渲染。
+涉及 package resources 或 native extra 的版本还必须在仓库外、清空 `PYTHONPATH` 后安装真实产物。发布门禁要求 Python 3.11–3.14 验证 wheel，Python 3.12 至少验证一次 sdist；检查全部 package resources 非空且登记在 `RECORD`，验证 bare core 不安装任何 backend 或宿主框架插件依赖，执行 Entari load、Preparation 与 typed artifact smoke，在 wheel 环境中依次安装 `[takumi]` 与 `[pillow,skia]` 并执行真实渲染；`[playwright,filehost]` 的远程浏览器渲染由 Docker smoke 验证。
+
+分发验证还会实际安装 `[all]` 并检查全部已安装 distribution，确保任何可选能力及其传递依赖都不引入 NoneBot。wheel 与 sdist 的 metadata、归档内容也必须通过相同的依赖与已移除模块检查。
 
 ## 并行开发与 release cut
 

@@ -97,6 +97,7 @@ EXPECTED_ARCHITECTURE_TERMS = frozenset(
         "AssetPublisher",
         "CapabilityCatalog",
         "ExecutionLeaseProvider",
+        "HtmlPreparer",
         "HtmlRenderer",
         "LocalAccessPolicy",
         "ProviderBinding",
@@ -402,11 +403,17 @@ def _runtime_capability_properties() -> frozenset[str]:
 
 def test_first_party_capabilities_are_documented() -> None:
     properties = _runtime_capability_properties()
-    assert properties == {"playwright", "takumi", "available_names"}
+    assert properties == {
+        "playwright",
+        "takumi",
+        "pillow",
+        "skia",
+        "available_names",
+    }
     current_text = "\n".join(path.read_text("utf-8") for path in _documentation_files())
     missing = sorted(
         name
-        for name in ("playwright", "takumi")
+        for name in ("playwright", "takumi", "pillow", "skia")
         if re.search(rf"\bcapabilities\.{name}\b", current_text) is None
     )
     assert not missing, "First-party capabilities are undocumented: " + ", ".join(
@@ -437,6 +444,111 @@ def test_backend_runtime_dependency_boundaries_are_documented() -> None:
             provider_matrix,
             flags=re.MULTILINE,
         )
+
+
+def test_released_provider_surface_and_framework_boundary_are_documented() -> None:
+    readme = (ROOT / "README.md").read_text("utf-8")
+    navigation = (ROOT / "mkdocs.yml").read_text("utf-8")
+    provider_index = (
+        ROOT / "docs" / "configuration" / "providers" / "index.md"
+    ).read_text("utf-8")
+    provider_matrix = (ROOT / "docs" / "start" / "choosing-provider.md").read_text(
+        "utf-8"
+    )
+    release_notes = (
+        (ROOT / "CHANGELOG.md").read_text("utf-8").partition("## [v0.1.0]")[0]
+    )
+
+    assert "configuration/providers/playwright.md" in navigation
+    assert "configuration/providers/takumi.md" in navigation
+    assert not (ROOT / "docs" / "configuration" / "providers" / "htmlkit.md").exists()
+    for current_text in (readme, navigation, provider_index, provider_matrix):
+        assert "htmlkit" not in current_text.lower()
+    assert "NoneBot framework plugin dependency" in release_notes
+    assert "migration shim" in release_notes
+
+
+def test_markdown_math_pipeline_and_javascript_boundary_are_documented() -> None:
+    config = (ROOT / "mkdocs.yml").read_text("utf-8")
+    preparation = (ROOT / "docs" / "reference" / "preparation.md").read_text("utf-8")
+    rendering_guide = (ROOT / "docs" / "guides" / "rendering-content.md").read_text(
+        "utf-8"
+    )
+    playwright = (
+        ROOT / "docs" / "configuration" / "providers" / "playwright.md"
+    ).read_text("utf-8")
+    takumi = (ROOT / "docs" / "configuration" / "providers" / "takumi.md").read_text(
+        "utf-8"
+    )
+    provider_matrix = (ROOT / "docs" / "start" / "choosing-provider.md").read_text(
+        "utf-8"
+    )
+    migration = (ROOT / "docs" / "start" / "migration-v0.2.md").read_text("utf-8")
+    release_notes = (
+        (ROOT / "CHANGELOG.md").read_text("utf-8").partition("## [v0.1.0]")[0]
+    )
+
+    assert re.search(
+        r"(?m)^  - pymdownx\.arithmatex:\n      generic: true$",
+        config,
+    )
+    current_math_docs = (
+        f"{preparation}\n{rendering_guide}\n{playwright}\n{takumi}\n"
+        f"{provider_matrix}\n{migration}"
+    )
+    assert "`pymdownx.arithmatex`" in current_math_docs
+    for delimiter in (
+        "`$x$`",
+        r"`\(x\)`",
+        "`$$...$$`",
+        r"`\[...\]`",
+        r"`\begin{env}...\end{env}`",
+    ):
+        assert delimiter in current_math_docs
+    assert "`smart_dollar=True`" in preparation
+    assert "`$ x $`" in preparation
+    assert "`smart_dollar=True`" in migration
+    assert "`$ x $`" in migration
+    assert "`before $$x$$ after`" in preparation
+    assert "`before $$x$$ after`" in migration
+    assert "[data-htmlrender-arithmatex]" in preparation
+    assert "[data-htmlrender-arithmatex]" in playwright
+    assert "不处理没有该属性的原始 HTML `.arithmatex` 容器" in preparation
+    assert "Inline raw HTML 中的普通 Markdown 仍可能被解析" in preparation
+    assert "不执行页面全文 auto-render" in rendering_guide
+    assert "不对整个页面执行 dollar/slash auto-render" in playwright
+    assert "Playwright" in current_math_docs
+    assert "JavaScript" in current_math_docs
+    assert "不执行 JavaScript" in takumi
+    assert "不会进入 native rasterization" in takumi
+    assert "`DocumentRequirement.JAVASCRIPT`" in preparation
+    assert "`UnsupportedDocumentFeatureError`" in preparation
+    assert '`feature="javascript"`' in preparation
+    assert "`DocumentRequirement.JAVASCRIPT`" in migration
+    assert "`UnsupportedDocumentFeatureError`" in migration
+
+    for dependency in (
+        "AnyIO `>=4.13.0`",
+        "Markdown `>=3.11.3`",
+        "PyMdown Extensions `>=12.3`",
+    ):
+        assert dependency in release_notes
+
+    current_text = "\n".join(
+        [
+            *(path.read_text("utf-8") for path in _documentation_files()),
+            release_notes,
+        ]
+    ).lower()
+    obsolete_terms = tuple(
+        term
+        for term in ("mdx_math", "python-markdown-math", "mathtex-script")
+        if term in current_text
+    )
+    assert not obsolete_terms, (
+        "Current documentation still references the retired math pipeline: "
+        + ", ".join(obsolete_terms)
+    )
 
 
 def test_cache_and_scoped_resource_boundaries_are_documented() -> None:

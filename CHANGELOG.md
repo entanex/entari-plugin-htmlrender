@@ -6,13 +6,36 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 <!-- insertion marker -->
-## Unreleased
+## [v0.2.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0) - 2026-11-08
 
-<small>[Compare with latest](https://github.com/entanex/entari-plugin-htmlrender/compare/v0.1.0...HEAD)</small>
+<small>[Compare with v0.1.0](https://github.com/entanex/entari-plugin-htmlrender/compare/v0.1.0...v0.2.0)</small>
 
-### Bug Fixes
+### Added
 
+- add the plugin-scoped `HtmlPreparer` caller contract through `service.preparation`, with explicit `prepare_html`, `prepare_text`, `prepare_markdown`, and `prepare_template` stages feeding `rasterize_prepared()`.
+- expose complete managed Takumi compile, measure, SVG, node, animation, frame, and font operations through `lease_api()`, with lease and compiled-document ownership guards.
+- support simultaneous Pillow and Skia backends with typed capabilities and independent budgets.
+- expose independent template-variable and URL resolution with immutable, exact URL authorization mappings.
+- forward custom Jinja filters and extensions through template rendering and preparation.
+- inject `HtmlRenderer`, `TemplateRenderer`, `HtmlPreparer`, `ResourceAccess`, and `GraphicsRenderer` directly in Entari handlers and refresh them with the plugin lifecycle.
+
+### Changed
+
+- retain native Playwright and Takumi static types without eagerly importing optional engines.
+- use Python 3.11 built-in exception groups and string enums.
+- require Python `>=3.11,<4.0` and Entari `>=0.19.4,<0.20.0`, with release validation across Python 3.11–3.14.
+- switch Markdown math to `pymdownx.arithmatex` in generic mode with `smart_dollar=True`; `$x$` and `\(x\)` remain inline, while `$ x $` stays literal and `$$...$$` / `\[...\]` require standalone paragraph or block context for display math.
+- mark only parser-generated Arithmatex containers with `data-htmlrender-arithmatex`, inject KaTeX assets for browser rendering, and reject JavaScript-requiring formula documents through the Takumi source boundary.
+- raise core dependency floors to AnyIO `>=4.13.0`, Markdown `>=3.11.3`, and PyMdown Extensions `>=12.3`.
+- keep `HtmlRenderService` plugin-scoped through Entari DI and Launart stages, including cancellation-safe runtime drain and hosted-resource shutdown.
+- keep the 0.2.0 distribution on a framework-neutral boundary: it does not include a NoneBot framework plugin dependency, initialize another host framework, or ship a migration shim for one.
+- update the third-party provider example, documentation navigation, provider selection matrix, installation ranges, and versioned-docs examples for the 0.2 release line.
+
+### Fixed
+
+- preserve resource URL fragments and decode local URL paths before authorization, while keeping filehost request headers scoped to the exact fragment-free request URL.
 - harden release workflow dispatch ([d224199](https://github.com/entanex/entari-plugin-htmlrender/commit/d2241991fd2428fa259f685d72982428834766a1) by Tacrolimus).
+- strengthen distribution metadata and CI contracts for the Python/Entari support matrix and pinned native extras.
 
 <!-- insertion marker -->
 ## [v0.1.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.1.0) - 2026-08-14

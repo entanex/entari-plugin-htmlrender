@@ -12,7 +12,7 @@
 
 ## 准备环境
 
-项目支持 Python 3.10–3.14，使用 `uv` 管理环境，以 `Makefile` 作为开发入口：
+项目支持 Python 3.11–3.14，使用 `uv` 管理环境，以 `Makefile` 作为开发入口：
 
 ```bash
 make prepare
@@ -48,7 +48,7 @@ make remote-smoke        # 远程 Playwright / Docker 跨容器路径变更
 uvx prek run -a actionlint --hook-stage=manual  # workflow 变更
 ```
 
-CI 还会在 Python 3.10–3.14 上运行 pytest/coverage 与 Entari 插件加载矩阵。不要用跳过检查、放宽类型或屏蔽诊断来代替修复。
+CI 还会在 Python 3.11–3.14 上运行 pytest/coverage 与 Entari 0.19.x 插件加载矩阵。不要用跳过检查、放宽类型或屏蔽诊断来代替修复。
 
 ## Pull Request
 
