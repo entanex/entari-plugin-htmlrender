@@ -1,0 +1,133 @@
+name: Check Entari plugin loading
+description: Install a project from a non-editable local build in an isolated uv environment and verify its Entari lifecycle
+
+inputs:
+  python-version:
+    description: Python version installed and used by uv
+    required: false
+    default: "3.12"
+  module-name:
+    description: Import path of the Entari plugin module, without the __plugin__ suffix
+    required: true
+  project-name:
+    description: Distribution name; an empty value reads [project].name from the package
+    required: false
+    default: ""
+  package:
+    description: Local project path installed non-editably
+    required: false
+    default: "."
+  working-directory:
+    description: Directory containing the project passed to the checker
+    required: false
+    default: "."
+  extras:
+    description: Comma-separated project extras to install; all selects the declared all extra
+    required: false
+    default: ""
+  config-file:
+    description: JSON object supplied to the isolated Entari lifecycle probe
+    required: false
+    default: ""
+  timeout:
+    description: Timeout in seconds applied to isolated environment stages and the runner
+    required: false
+    default: "300"
+  result-file:
+    description: Absolute diagnostic JSON path; empty uses RUNNER_TEMP/entari-load-check/result.json
+    required: false
+    default: ""
+  uv-version:
+    description: Pinned uv version installed by setup-uv
+    required: false
+    default: "0.11.28"
+  uv-cache:
+    description: Whether setup-uv may restore and save its cache
+    required: false
+    default: "true"
+  cache-suffix:
+    description: Cache namespace separating compatibility profiles
+    required: false
+    default: entari-load-check
+
+outputs:
+  ok:
+    description: Whether installation, loading, and lifecycle verification succeeded
+    value: ${{ steps.check.outputs.ok }}
+  stage:
+    description: Last completed or failed checker stage
+    value: ${{ steps.check.outputs.stage }}
+  project-name:
+    description: Distribution name resolved from project metadata
+    value: ${{ steps.check.outputs.project-name }}
+  module-name:
+    description: Installed plugin module that was loaded
+    value: ${{ steps.check.outputs.module-name }}
+  python-version:
+    description: Python runtime reported by the isolated environment
+    value: ${{ steps.check.outputs.python-version }}
+  result-file:
+    description: Absolute path to the diagnostic JSON result
+    value: ${{ steps.check.outputs.result-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv and Python
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        version: ${{ inputs.uv-version }}
+        python-version: ${{ inputs.python-version }}
+        enable-cache: ${{ inputs.uv-cache }}
+        cache-suffix: ${{ inputs.cache-suffix }}
+        prune-cache: true
+
+    - name: Validate checker inputs
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_CONFIG_FILE: ${{ inputs.config-file }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${INPUT_CONFIG_FILE}" && ! -f "${INPUT_CONFIG_FILE}" ]]; then
+          echo "::error::Entari load-check config file does not exist."
+          exit 1
+        fi
+        test -f "${GITHUB_ACTION_PATH}/../../entari-load-check/check.py"
+        test -f "${GITHUB_ACTION_PATH}/../../entari-load-check/runner.py"
+
+    - name: Check isolated Entari integration
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_MODULE_NAME: ${{ inputs.module-name }}
+        INPUT_PROJECT_NAME: ${{ inputs.project-name }}
+        INPUT_PACKAGE: ${{ inputs.package }}
+        INPUT_EXTRAS: ${{ inputs.extras }}
+        INPUT_CONFIG_FILE: ${{ inputs.config-file }}
+        INPUT_PYTHON_VERSION: ${{ inputs.python-version }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_RESULT_FILE: ${{ inputs.result-file }}
+        DEFAULT_RESULT: ${{ runner.temp }}/entari-load-check/result.json
+      run: |
+        set -euo pipefail
+        CHECK_RESULT="${INPUT_RESULT_FILE:-${DEFAULT_RESULT}}"
+        mkdir -p "$(dirname "${CHECK_RESULT}")"
+        args=(
+          --python-version "${INPUT_PYTHON_VERSION}"
+          --module-name "${INPUT_MODULE_NAME}"
+          --package "${INPUT_PACKAGE}"
+          --project-name "${INPUT_PROJECT_NAME}"
+          --extras "${INPUT_EXTRAS}"
+          --timeout "${INPUT_TIMEOUT}"
+          --result-file "${CHECK_RESULT}"
+        )
+        if [[ -n "${INPUT_CONFIG_FILE}" ]]; then
+          args+=(--config-file "${INPUT_CONFIG_FILE}")
+        fi
+        python3 "${GITHUB_ACTION_PATH}/../../entari-load-check/check.py" "${args[@]}"
+
+branding:
+  icon: check-circle
+  color: green
