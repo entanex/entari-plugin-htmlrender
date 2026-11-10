@@ -9,6 +9,7 @@ import anyio
 import pytest
 
 from entari_plugin_htmlrender.adapters.takumi import (
+    TakumiAPIAdapter,
     TakumiConfig,
     TakumiSessionAdapter,
 )
@@ -25,7 +26,7 @@ from entari_plugin_htmlrender.adapters.takumi.errors import (
     TakumiUnsupportedError,
 )
 from entari_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
-from entari_plugin_htmlrender.capabilities import TAKUMI, TakumiCapability
+from entari_plugin_htmlrender.capabilities import TAKUMI, TakumiAPI, TakumiCapability
 from entari_plugin_htmlrender.errors import (
     InvalidRenderInputError,
     ProviderExecutionError,
@@ -39,7 +40,6 @@ from entari_plugin_htmlrender.runtime import RenderRuntime, RuntimeState
 from tests.adapters.takumi.helpers import resource_service
 
 if TYPE_CHECKING:
-    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
     from collections.abc import AsyncIterator
     from contextlib import AbstractAsyncContextManager
 
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from entari_plugin_htmlrender.adapters._lease import ExecutionLeaseProvider
     from entari_plugin_htmlrender.adapters.takumi.types import NativeRenderer
     from entari_plugin_htmlrender.graphics import GraphicsRenderer
+    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
     from entari_plugin_htmlrender.rendering.contracts import (
         HtmlRenderer,
         TemplateRenderer,
@@ -258,6 +259,77 @@ async def test_managed_lease_does_not_translate_caller_body_errors(
             raise TypeError("caller failure")
 
 
+async def test_advanced_api_lease_yields_the_complete_adapter_for_the_same_state(
+    operation_observer: RecordingOperationObserver,
+) -> None:
+    state = _state()
+    capability = _capability(state, operation_observer)
+
+    async with capability.lease_api() as api:
+        assert isinstance(api, TakumiAPIAdapter)
+        assert isinstance(api, TakumiAPI)
+        assert api._state is state
+
+
+async def test_retained_session_is_invalid_after_its_lease_exits(
+    operation_observer: RecordingOperationObserver,
+) -> None:
+    capability = _capability(_state(), operation_observer)
+    async with capability.lease_session() as session:
+        retained = session
+
+    with pytest.raises(RuntimeUnavailableError) as raised:
+        await retained.render_html("<div>retained</div>")
+
+    assert raised.value.state == "lease_expired"
+    assert raised.value.operation == "takumi.render_html"
+
+
+async def test_retained_advanced_api_is_invalid_after_its_lease_exits(
+    operation_observer: RecordingOperationObserver,
+) -> None:
+    capability = _capability(_state(), operation_observer)
+    async with capability.lease_api() as api:
+        retained = api
+
+    with pytest.raises(RuntimeUnavailableError) as raised:
+        await retained.render_node({"type": "container"})
+
+    assert raised.value.state == "lease_expired"
+    assert raised.value.operation == "takumi.api.render_node"
+
+
+async def test_advanced_api_lease_translates_runtime_validation_only(
+    mocker: MockerFixture,
+    operation_observer: RecordingOperationObserver,
+) -> None:
+    error = TakumiRuntimeError("invalid advanced runtime state")
+    mocker.patch.object(
+        capabilities_module,
+        "require_runtime_state",
+        side_effect=error,
+    )
+    capability = _capability(object(), operation_observer)
+
+    with pytest.raises(ProviderExecutionError) as raised:
+        async with capability.lease_api():
+            pytest.fail("invalid runtime state must not be yielded")
+
+    assert raised.value.__cause__ is error
+    assert raised.value.provider_id == "takumi"
+    assert raised.value.operation == "takumi.lease_api"
+
+
+async def test_advanced_api_lease_does_not_translate_caller_body_errors(
+    operation_observer: RecordingOperationObserver,
+) -> None:
+    capability = _capability(_state(), operation_observer)
+
+    with pytest.raises(TypeError, match="advanced caller failure"):
+        async with capability.lease_api():
+            raise TypeError("advanced caller failure")
+
+
 async def test_native_lease_preserves_raw_runtime_failure(
     mocker: MockerFixture,
     operation_observer: RecordingOperationObserver,
@@ -280,6 +352,7 @@ async def test_native_lease_preserves_raw_runtime_failure(
 @pytest.mark.parametrize(
     ("lease_kind", "operation"),
     [
+        ("api", "takumi.lease_api"),
         ("session", "takumi.lease_session"),
         ("native", "takumi.lease_native_renderer"),
     ],
@@ -310,6 +383,8 @@ async def test_retained_capability_reports_runtime_closing_and_closed(
     retained = runtime.capabilities.takumi
 
     def lease_context() -> AbstractAsyncContextManager[object]:
+        if lease_kind == "api":
+            return retained.lease_api()
         if lease_kind == "session":
             return retained.lease_session()
         return retained.lease_native_renderer()

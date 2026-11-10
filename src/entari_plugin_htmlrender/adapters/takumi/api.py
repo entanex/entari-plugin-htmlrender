@@ -15,6 +15,7 @@ from entari_plugin_htmlrender.capabilities.takumi import (
     TakumiCacheStats,
     TakumiRasterOptions,
     TakumiSvgOptions,
+    _TakumiLeaseGuard,
 )
 from entari_plugin_htmlrender.errors import (
     HtmlRenderError,
@@ -135,7 +136,7 @@ def _tracked(
                 ),
                 _translate_managed_error(error_operation),
             ):
-                session._state._ensure_open()
+                session._ensure_open(error_operation)
                 return await func(session, *args, **kwargs)
 
         return _wrapped
@@ -161,17 +162,36 @@ class TakumiSessionAdapter:
         repr=False,
         compare=False,
     )
+    _lease_guard: _TakumiLeaseGuard | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        if self._lease_guard is None:
+            object.__setattr__(
+                self,
+                "_lease_guard",
+                _TakumiLeaseGuard(self._state),
+            )
+
+    def _ensure_open(self, operation: str) -> None:
+        if self._lease_guard is None:
+            raise TakumiRuntimeError("Takumi session has no active lease guard.")
+        self._lease_guard.ensure_active(operation)
+        self._state._ensure_open()
 
     @property
     def registered_font_families(self) -> tuple[str, ...]:
         with _translate_managed_error("takumi.registered_font_families"):
-            self._state._ensure_open()
+            self._ensure_open("takumi.registered_font_families")
             return self._state.registered_font_families
 
     @property
     def compiled_cache_stats(self) -> TakumiCacheStats:
         with _translate_managed_error("takumi.compiled_cache_stats"):
-            self._state._ensure_open()
+            self._ensure_open("takumi.compiled_cache_stats")
             return self._state.compiled_cache_stats
 
     @staticmethod
