@@ -1,0 +1,217 @@
+name: Entari Compatibility
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  installed-load:
+    name: Installed load (py${{ matrix.python-version }}, ${{ matrix.profile.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        profile:
+          - name: core
+            extras: ""
+            config: '{"provider":null,"startup":"off"}'
+          - name: takumi
+            extras: takumi
+            config: '{"provider":"takumi","startup":"warmup","provider_config":{"max_concurrency":1}}'
+          - name: graphics
+            extras: pillow,skia
+            config: '{"provider":null,"startup":"off","graphics":{"backends":["pillow","skia"],"backend":"pillow"}}'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Profile prerequisites
+        id: paths
+        shell: bash
+        env:
+          PROFILE: ${{ matrix.profile.name }}
+          PROFILE_CONFIG: ${{ matrix.profile.config }}
+          CONFIG_FILE: ${{ runner.temp }}/entari-load-check-${{ matrix.profile.name }}.json
+        run: |
+          set -euo pipefail
+          config_file="${RUNNER_TEMP}/entari-load-check-${PROFILE}.json"
+          result_file="${RUNNER_TEMP}/entari-load-check-${PROFILE}-result.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          Path(os.environ["CONFIG_FILE"]).write_text(
+              json.dumps(json.loads(os.environ["PROFILE_CONFIG"])),
+              encoding="utf-8",
+          )
+          PY
+          echo "config-file=${config_file}" >> "${GITHUB_OUTPUT}"
+          echo "result-file=${result_file}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install Skia runtime libraries
+        if: ${{ matrix.profile.name == 'graphics' }}
+        uses: ./.github/actions/setup-skia-runtime
+
+      - name: Check installed Entari integration
+        uses: ./.github/actions/entari-load-check
+        with:
+          python-version: ${{ matrix.python-version }}
+          module-name: entari_plugin_htmlrender
+          project-name: entari-plugin-htmlrender
+          package: .
+          extras: ${{ matrix.profile.extras }}
+          config-file: ${{ steps.paths.outputs.config-file }}
+          result-file: ${{ steps.paths.outputs.result-file }}
+          timeout: "300"
+          cache-suffix: entari-compat-py${{ matrix.python-version }}-${{ matrix.profile.name }}
+
+      - name: Verify diagnostics and isolation
+        shell: bash
+        env:
+          EXPECTED_EXTRAS: ${{ matrix.profile.extras }}
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          CHECK_RESULT: ${{ steps.paths.outputs.result-file }}
+          CHECK_CONFIG: ${{ steps.paths.outputs.config-file }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["CHECK_RESULT"]).read_text("utf-8"))
+          expected_version = __import__("tomllib").loads(
+              Path("pyproject.toml").read_text("utf-8")
+          )["project"]["version"]
+          assert payload["ok"] is True
+          assert payload["stage"] == "complete"
+          assert payload["project_name"] == "entari-plugin-htmlrender"
+          assert payload["module_name"] == "entari_plugin_htmlrender"
+          assert payload["python_version"].startswith(os.environ["PYTHON_VERSION"] + ".")
+          assert payload["installed_version"] == expected_version
+          assert payload["config_present"] is True
+          config_file = Path(os.environ["CHECK_CONFIG"])
+          config_text = config_file.read_text("utf-8")
+          serialized = json.dumps(payload, sort_keys=True)
+          assert config_text not in serialized
+          names = set(payload["installed_environment"])
+          assert isinstance(payload["installed_environment"], dict)
+          assert all(
+              isinstance(name, str) and isinstance(version, str) and version
+              for name, version in payload["installed_environment"].items()
+          )
+          assert "arclet-entari" in names
+          expected = {item for item in os.environ["EXPECTED_EXTRAS"].split(",") if item}
+          if "takumi" in expected:
+              assert "takumi-py" in names
+          if "pillow" in expected:
+              assert "pillow" in names
+          if "skia" in expected:
+              assert "skia-python" in names
+          PY
+
+      - name: Upload diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: entari-load-py${{ matrix.python-version }}-${{ matrix.profile.name }}
+          path: ${{ steps.paths.outputs.result-file }}
+          if-no-files-found: warn
+          retention-days: 14
+
+  checker-tests:
+    name: Load-check tool tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up project
+        uses: ./.github/actions/setup-project
+        with:
+          python-version: "3.12"
+          dependency-scope: none
+
+      - name: Run checker and runner tests
+        run: uv run --no-project python3 -m unittest discover -s .github/entari-load-check -p 'test_*.py' -v
+
+  browser-integration:
+    name: Browser integration (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up project
+        uses: ./.github/actions/setup-project
+        with:
+          python-version: "3.12"
+          cache-suffix: entari-compat-browser
+          dependency-scope: all
+
+      - name: Install Chromium
+        env:
+          HTMLRENDER_TEST_PROFILE: local
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run real-browser integration
+        env:
+          HTMLRENDER_TEST_PROFILE: local
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
+        run: uv run pytest tests/adapters/playwright/test_browser_integration.py -q --no-cov
+
+  result:
+    name: Entari Compatibility Matrix
+    if: always()
+    needs:
+      - installed-load
+      - browser-integration
+      - checker-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every compatibility layer
+        shell: bash
+        env:
+          BROWSER_RESULT: ${{ needs.browser-integration.result }}
+          CHECKER_TESTS_RESULT: ${{ needs.checker-tests.result }}
+          INSTALLED_LOAD_RESULT: ${{ needs.installed-load.result }}
+        run: |
+          set -euo pipefail
+          failed=false
+          for result in \
+            "${INSTALLED_LOAD_RESULT}" \
+            "${BROWSER_RESULT}" \
+            "${CHECKER_TESTS_RESULT}"; do
+            if [[ "${result}" != "success" ]]; then
+              failed=true
+            fi
+          done
+          if [[ "${failed}" == "true" ]]; then
+            echo "::error::At least one Entari compatibility layer did not succeed."
+            exit 1
+          fi
+          echo "The installed-load and real-browser compatibility layers succeeded."
