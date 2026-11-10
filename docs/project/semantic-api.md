@@ -22,6 +22,31 @@ async def render_help(service: HtmlRenderService) -> RenderedImage:
     )
 ```
 
+需要把 preparation 与执行分开时，同一个 service 提供显式 `HtmlPreparer`：
+
+```python
+from entari_plugin_htmlrender import (
+    HtmlPreparer,
+    PreparedHtml,
+    RasterOptions,
+    RenderedImage,
+)
+from entari_plugin_htmlrender.entari import HtmlRenderService
+
+async def prepare_help(preparation: HtmlPreparer) -> PreparedHtml:
+    prepared = await preparation.prepare_markdown("# Hello, Entari")
+    return prepared
+
+async def rasterize_help(
+    service: HtmlRenderService,
+    prepared: PreparedHtml,
+) -> RenderedImage:
+    return await service.renderer.rasterize_prepared(
+        prepared,
+        raster=RasterOptions(width=720),
+    )
+```
+
 业务函数可以只依赖中立契约，不依赖 Entari 或 runtime 容器：
 
 ```python
@@ -105,10 +130,11 @@ Graphics backend 只在配置与 composition 中选择；业务调用不分支 P
 ## 公开契约
 
 - `HtmlRenderer` 只公开 output-explicit 的 `rasterize_*` 方法。
+- `HtmlPreparer` 使用 `prepare_*` 把 source 转成中立 `PreparedHtml`，并通过 `render_template()` 提供原始模板 HTML。
 - `TemplateRenderer` 只负责模板到 `RenderedHtml`。
 - `ResourceAccess` 使用 `ResourceRef`、`ResourceContent` 与 `PublishedResource` 分离定位、载荷与发布身份。
 - `GraphicsRenderer` 隐藏 Pillow/Skia selection。
-- `HtmlRenderService` 是显式 concrete Entari service；中立调用契约不包含 `startup()`、`probe()` 或 `aclose()`。
+- `HtmlRenderService` 是显式 concrete Entari service，暴露 `preparation`、`renderer`、`templates`、`resources`、`graphics` 与 `capabilities`；中立调用契约不包含 `startup()`、`probe()` 或 `aclose()`。
 - `RenderRuntime`、composition plan、bindings、admission gate、catalog、observer 与 discovery 都是 advanced/composition API，不进入根导出。
 
 ## 失败语义

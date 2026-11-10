@@ -38,6 +38,6 @@ observer、收窄的 `ProviderResourceAccess` 与可选 `AssetPublisher`。Provi
 echo = "htmlrender_echo_provider:PROVIDER"
 ```
 
-entry point 名必须等于 `provider.id`。`playwright`、`takumi` 是保留 ID；重复 ID、保留 ID 覆盖或加载对象不满足 runtime-checkable protocol 都会在 composition 失败。
+entry point 名必须等于 `provider.id`。`playwright` 与 `takumi` 是第一方保留 ID；重复 ID、保留 ID 覆盖或加载对象不满足 runtime-checkable protocol 都会在 composition 失败。
 
 `build_runtime_plan(config, provider_override=provider)` 只覆盖配置所选的这一个Provider，不接受候选 Provider sequence。完整最小实现见仓库的[`examples/echo-provider`](../../examples/echo-provider/)。

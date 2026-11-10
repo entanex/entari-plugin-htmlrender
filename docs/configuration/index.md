@@ -31,7 +31,7 @@ plugins:
       max_pixels: 16777216
       max_concurrency: 2
     graphics:
-      backend: pillow
+      backends: [pillow, skia]
     resources:
       local_access:
         allowed_paths: [assets, templates]
@@ -48,7 +48,7 @@ plugins:
 | `startup` | `off` | `off` 为首次 Provider operation lazy acquire；`warmup` / `probe` 由 Entari service eager 执行 |
 | `provider_config` | `{}` | 只交给所选 Provider 解析的配置 |
 | `html` | 见 [HTML 预算](html-rendering.md) | 跨 Provider 的输入、像素、输出与并发限制 |
-| `graphics` | `backend: null` | 可选的 Pillow/Skia `GraphicsRenderer` |
+| `graphics` | `backends: []` | 可并行启用的 Pillow/Skia `GraphicsRenderer`；首项为主入口 |
 | `resources` | 安全默认值 | 缓存、模板、遍历、本地/远程访问与 filehost |
 | `observability` | 全关闭 | Sentry SDK / Prometheus client adapter |
 

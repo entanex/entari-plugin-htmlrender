@@ -11,7 +11,7 @@ Takumi 在进程内执行 Rust 原生排版，不启动浏览器，不执行 Jav
 ## 安装与选择
 
 ```bash
-uv add "entari-plugin-htmlrender[takumi]>=0.1.0,<0.2"
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0,<0.3"
 ```
 
 ```yaml
@@ -95,11 +95,12 @@ async def cache_stats(takumi: TakumiCapability) -> tuple[int, int, int]:
 Takumi 支持静态 HTML、文本、模板和大多数 Markdown；下列需求会明确失败：
 
 - JavaScript、远程网络资源和页面导航；
+- `pymdownx.arithmatex` generic 模式产生的客户端 KaTeX 排版；
 - 无法在 Preparation 阶段物化的 `@import`、字体或图片；
 - Provider 无法表达的 conditional stylesheet；
 - 浏览器页面、User-Agent、header 与 selector 操作。
 
-`PreparedAsset` 直接把 bytes 交给 native renderer，不创建临时文件。
+含数学公式的 `prepare_markdown()` 仍可成功完成：它注入 KaTeX 脚本并把 `DocumentRequirement.JAVASCRIPT` 加入 `PreparedHtml`。Takumi 在自己的 source inspection 阶段检测到该要求后会抛出 `UnsupportedDocumentFeatureError`（`feature="javascript"`），不会进入 native rasterization，也不会把静态 TeX 标记画成图像。若要用 Takumi 输出公式，应先把公式排版为不含 JavaScript 的静态 HTML/SVG，再通过不包含公式脚本的 preparation 流程交给 Takumi。`PreparedAsset` 直接把 bytes 交给 native renderer，不创建临时文件。
 
 ## 平台约束
 
@@ -121,7 +122,9 @@ async def render_svg(takumi: TakumiCapability) -> str:
 
 `lease_session()` 绑定并持有当前有效 lease。调用方不得让 session 逃逸出上下文，也不应保存为进程级单例；已返回的 `bytes`、SVG 字符串与 cache stats snapshot 不受该限制。
 
-需要尚未进入稳定 API 的上游能力时，可通过 `lease_native_renderer()` 显式租用native renderer。该入口返回 `object`，调用方自行恢复上游 typing，并承担同步执行、并发、native panic、资源归一化与底层错误语义；详见[Capability 参考](../../reference/capabilities.md#takumi)。
+需要编译、测量、节点、动画或帧编码时，使用 `lease_api()` 获得完整 `TakumiAPI`；它将同步 native 工作调度到有界 worker，继续执行资源策略和稳定错误翻译。`compile_html()` 返回的 `TakumiCompiledDocument` 只可在创建它的 API lease 中使用；退出 lease 后，session、API 和 compiled document 都会拒绝后续调用。完整方法见[Capability 参考](../../reference/capabilities.md#takumi)。
+
+需要直接操作上游对象时，可通过 `lease_native_renderer()` 显式租用native renderer。该入口保留 `takumi_py.Renderer` 原生类型，调用方承担同步执行、并发、native panic、资源归一化与底层错误语义；详见[Capability 参考](../../reference/capabilities.md#takumi)。
 
 ## 选择建议
 

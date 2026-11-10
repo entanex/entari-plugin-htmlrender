@@ -13,7 +13,7 @@ entari_plugin_htmlrender/
 ├─ __init__.py          # curated caller contract/value/error facade
 ├─ capabilities/        # 第一方 Provider capability contract 与 typed key
 ├─ rendering/           # caller contracts、artifact、operation、advanced ports
-├─ preparation/         # 中立 PreparedHtml value 与纯 parse
+├─ preparation/         # HtmlPreparer、PreparedHtml value 与纯 parse
 ├─ resources/           # ResourceRef/content/access contracts
 ├─ graphics/            # RasterScene values 与 GraphicsRenderer
 ├─ runtime/             # advanced aggregate、use cases、bindings
@@ -33,7 +33,7 @@ entari_plugin_htmlrender/
 
 目录按依赖方向而非工具类型组织。核心 contracts 不导入 adapters/composition/Entari；新的跨层例外必须先修正抽象，不增加 architecture allowlist。
 
-Playwright 的安装、signal 与 process helper 由 adapter 内部拥有；仓库不保留按“通用工具”命名的顶层兼容目录。枚举也由其领域模块拥有：资源策略在`resources.config`，浏览器配置在 `adapters.playwright.config`，启动策略在`config`。
+Playwright 的安装、signal 与 process helper 由 adapter 内部拥有；仓库不保留按“通用工具”命名的顶层兼容目录。枚举也由其领域模块拥有：资源策略在 `resources.config`，浏览器配置在 `adapters.playwright.config`，启动策略在 `config`。第三方 Provider 必须通过公开 SDK 接入，不能扩大 Entari runtime 的依赖边界。
 
 ## 工作流入口
 

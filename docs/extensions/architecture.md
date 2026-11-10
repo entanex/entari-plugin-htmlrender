@@ -11,7 +11,7 @@ flowchart LR
     CONFIG --> PLAN["build_runtime_plan / RuntimePlan"]
     PLAN --> RUNTIME["RenderRuntime"]
     RUNTIME --> SERVICE["HtmlRenderService"]
-    SERVICE --> CALLERS["renderer / templates / resources / graphics / capabilities"]
+    SERVICE --> CALLERS["preparation / renderer / templates / resources / graphics / capabilities"]
     PLAN --> PROVIDER["RenderProvider"]
     PROVIDER --> HTML["Playwright / Takumi / third-party adapter"]
     PLAN --> GRAPHICS["Pillow / Skia GraphicsRenderer"]
@@ -21,15 +21,13 @@ flowchart LR
 
 ## Caller contracts
 
-普通业务代码只依赖 package root 的 `HtmlRenderer`、`TemplateRenderer` 与稳定 value
-objects，或者 `resources` / `graphics` 子模块的领域 contract。它通过构造器或Entari DI 接收这些对象，不接触 Provider、adapter、runtime controller 或 service
-locator。
+普通业务代码只依赖 package root 的 `HtmlPreparer`、`HtmlRenderer`、`TemplateRenderer` 与稳定 value objects，或者 `resources` / `graphics` 子模块的领域 contract。它通过构造器或 Entari DI 接收这些对象，不接触 Provider、adapter、runtime controller 或 service locator。
 
-`HtmlRenderService` 是 Entari concrete service，直接暴露 `renderer`、`templates`、`resources`、`graphics` 与 `capabilities`。它不把内部配置、runtime aggregate 或lifecycle controller 暴露给业务代码。
+`HtmlRenderService` 是 Entari concrete service，直接暴露 `preparation`、`renderer`、`templates`、`resources`、`graphics` 与 `capabilities`。它不把内部配置、runtime aggregate 或 lifecycle controller 暴露给业务代码。
 
 ## Core 与 composition
 
-`preparation`、`rendering`、`resources`、`graphics` 与 `runtime` 不导入 Entari。`parse_html` 是 markup 唯一解析点；有 I/O 的 prepare use cases 留在 runtime 内部，普通 caller 不依赖 preparer facade。
+`preparation`、`rendering`、`resources`、`graphics` 与 `runtime` 不导入 Entari。`parse_html` 是 markup 唯一解析点；`HtmlPreparer.prepare_*()` 在 runtime admission boundary 内组合 template、worker 与 resource access，产出中立 `PreparedHtml`。convenience raster methods 复用同一 preparation pipeline，分离调用则通过 `rasterize_prepared()` 执行。
 
 框架无关的 `composition.build_runtime_plan()` 只解析配置、选择一个 Provider 并固定resource strategy，不执行外部 I/O。测试或 embedding 可通过 kw-only
 `provider_override=` 注入这一个 Provider。`RuntimePlan` 是 one-shot ownership value：`build_runtime()` 恰好调用一次；再次构建应创建新 plan。Provider 拥有的 parsed config 不复制，计划持有的 filehost server/store 与生成的唯一 runtime 同寿命。`RenderRuntime` 聚合 caller services 与 `OPEN` / `CLOSING` / `CLOSED` lifecycle controller。
@@ -38,8 +36,7 @@ locator。
 
 `RenderProvider` 通过 `parse_config()`、`check_availability()`、`resource_strategy()` 与 `compose()` 穿越边界，并返回 `ProviderBinding`。availability与 compose 不执行 I/O；`startup()` 或首个已获准 Provider operation 才可 lazy acquire资源。Provider 不读取 Entari 配置，不构造 observer/filehost，也不访问 host service。
 
-Playwright 与 Takumi 实现 `PreparedHtmlExecutor`。Pillow/Skia 实现独立的`GraphicsRenderer`，不作为 HTML Provider capability，也不扩张 HTML Provider
-contract。需要 native 对象时，调用者进入对应 capability 的显式 lease。
+Playwright 与 Takumi 实现 `PreparedHtmlExecutor`。Pillow/Skia 实现独立的 `GraphicsRenderer`，不作为 HTML Provider capability，也不扩张 HTML Provider contract。需要 native 对象时，调用者进入对应 capability 的显式 lease。
 
 ## Entari integration
 

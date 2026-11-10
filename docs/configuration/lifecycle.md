@@ -33,4 +33,4 @@ Entari sideload remove 与插件热卸载同样进入 cleanup。关闭失败保�
 
 Provider discovery、availability 与 compose 不执行 I/O。`startup: off` 不会永久禁用Provider；第一个已获准 Provider operation 可以 lazy acquire runtime resource。
 
-`HtmlRenderService` 不向业务代码暴露 `startup()`、`probe()` 或 `aclose()`。handler由 DI 获得 service 后，直接依赖 `service.renderer`、`service.templates`、`service.resources`、`service.graphics` 或 `service.capabilities`。不要读取内部runtime，也不要在 handler 中重建或替换 service 持有的 composition。
+`HtmlRenderService` 不向业务代码暴露 `startup()`、`probe()` 或 `aclose()`。handler 由 DI 获得 service 后，直接依赖 `service.preparation`、`service.renderer`、`service.templates`、`service.resources`、`service.graphics` 或 `service.capabilities`。不要读取内部 runtime，也不要在 handler 中重建或替换 service 持有的 composition。

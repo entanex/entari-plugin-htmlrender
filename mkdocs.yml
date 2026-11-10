@@ -158,6 +158,7 @@ nav:
       - 入门路径: start/index.md
       - 快速开始: start/quickstart.md
       - 选择 Provider: start/choosing-provider.md
+      - 升级到 0.2: start/migration-v0.2.md
   - 使用指南:
       - 指南总览: guides/index.md
       - 渲染内容: guides/rendering-content.md

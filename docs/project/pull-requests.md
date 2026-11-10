@@ -57,7 +57,7 @@ PR 描述至少包含：
 所有与改动相关的 checks 都应成功或明确标记为不适用：
 
 - `CI`：Ruff format/check、`ty`、`basedpyright`、包构建、远程浏览器 smoke 与 Entari load；
-- `Coverage`：Python 3.10–3.14 的 x64 / arm64 测试矩阵；
+- `Coverage`：Python 3.11–3.14 的 x64 / arm64 测试矩阵；
 - `Prek`：仓库级 hooks；
 - 文档相关 PR：`Docs PR Preview Build` 严格构建成功，并确认预览评论中的页面可访问。
 
