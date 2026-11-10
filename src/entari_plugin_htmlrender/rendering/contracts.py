@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping  # noqa: TC003
+from collections.abc import Mapping, Sequence  # noqa: TC003
 from typing import Protocol, runtime_checkable
 
 from entari_plugin_htmlrender.preparation.models import (
@@ -14,6 +14,10 @@ from entari_plugin_htmlrender.resources.config import (  # noqa: TC001
     ResourceMaterializationPolicy,
 )
 from entari_plugin_htmlrender.resources.models import ResourceRef  # noqa: TC001
+from entari_plugin_htmlrender.resources.templating import (  # noqa: TC001 -- public hints
+    ExtensionSpec,
+    FilterCallable,
+)
 
 from .artifacts import RenderedHtml, RenderedImage  # noqa: TC001
 from .models import RenderOperation  # noqa: TC001
@@ -65,6 +69,8 @@ class HtmlRenderer(Protocol):
         template: TemplateRef,
         variables: Mapping[str, object] | None = None,
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         raster: RasterOptions = _DEFAULT_RASTER_OPTIONS,
         materialization_policy: ResourceMaterializationPolicy | None = None,
         timeout_seconds: float | None = None,
@@ -89,6 +95,8 @@ class TemplateRenderer(Protocol):
         template: TemplateRef,
         variables: Mapping[str, object] | None = None,
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         timeout_seconds: float | None = None,
     ) -> RenderedHtml: ...
 

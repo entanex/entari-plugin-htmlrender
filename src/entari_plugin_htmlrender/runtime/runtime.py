@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, final
 
 import anyio
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from entari_plugin_htmlrender.graphics.ports import GraphicsRenderer
+    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
     from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
     from entari_plugin_htmlrender.rendering.contracts import (
         HtmlRenderer,
@@ -28,9 +29,10 @@ if TYPE_CHECKING:
 
 from .capabilities import RuntimeCapabilities
 from .facades import _AdmittedResourceAccess
+from .preparation import _AdmittedHtmlPreparer
 
 
-class RuntimeState(str, Enum):
+class RuntimeState(StrEnum):
     """Observable lifecycle state of one composed render runtime."""
 
     OPEN = "open"
@@ -42,7 +44,7 @@ class RuntimeState(str, Enum):
 class RenderRuntime:
     """Advanced composition aggregate owned by one host lifetime.
 
-    Ordinary business code receives one of ``renderer``, ``templates``,
+    Ordinary business code receives one of ``renderer``, ``preparation``, ``templates``,
     ``resources``, ``graphics``, or ``capabilities`` instead of this lifecycle
     controller.
     """
@@ -51,6 +53,7 @@ class RenderRuntime:
         self,
         *,
         renderer: HtmlRenderer,
+        preparer: HtmlPreparer,
         templates: TemplateRenderer,
         resources: ResourceAccess,
         graphics: GraphicsRenderer,
@@ -61,6 +64,7 @@ class RenderRuntime:
     ) -> None:
         self._renderer = renderer
         self._templates = templates
+        self._preparation = _AdmittedHtmlPreparer(preparer, operation_admission)
         self._resources = _AdmittedResourceAccess(resources, operation_admission)
         self._graphics = graphics
         self._capabilities = RuntimeCapabilities(
@@ -80,6 +84,10 @@ class RenderRuntime:
     @property
     def templates(self) -> TemplateRenderer:
         return self._templates
+
+    @property
+    def preparation(self) -> HtmlPreparer:
+        return self._preparation
 
     @property
     def resources(self) -> ResourceAccess:

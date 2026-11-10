@@ -19,6 +19,7 @@ from .models import (
     RemoteResourceRef,
     ResourceContent,
     ResourceRef,
+    ResourceResolution,
     ResourceRevision,
 )
 from .ports import (
@@ -50,6 +51,7 @@ __all__ = [
     "ResourcePublishError",
     "ResourceRef",
     "ResourceRemoteResponseError",
+    "ResourceResolution",
     "ResourceRevision",
     "ResourceTimeoutError",
     "ResourceTooLargeError",

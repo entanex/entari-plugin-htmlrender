@@ -6,7 +6,7 @@ from hashlib import sha256
 import os
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import NewType, TypeAlias
+from typing import Generic, NewType, TypeAlias, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 from entari_plugin_htmlrender.errors import InvalidRenderInputError
@@ -14,6 +14,7 @@ from entari_plugin_htmlrender.errors import InvalidRenderInputError
 from .headers import validate_request_header_name, validate_request_header_value
 
 PublicationLeaseId = NewType("PublicationLeaseId", str)
+T = TypeVar("T")
 
 
 def _invalid_value(
@@ -126,6 +127,69 @@ class PublishedResource:
             self,
             "request_headers",
             MappingProxyType(headers),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceResolution(Generic[T]):
+    """A resolved value with exact request authorization for rewritten URLs.
+
+    ``request_headers_by_url`` is keyed by the final HTTP request URL, without
+    a fragment and with its query preserved. Consumers must apply each header
+    set only to that exact URL, rather than inferring access from the host or
+    a path prefix.
+    """
+
+    value: T
+    request_headers_by_url: Mapping[str, Mapping[str, str]] = field(
+        default_factory=dict
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.request_headers_by_url, Mapping):
+            raise _invalid_value(
+                "Resolved request headers must be a URL-keyed mapping.",
+                operation="create_resource_resolution",
+                field="request_headers_by_url",
+            )
+        try:
+            entries = dict(self.request_headers_by_url)
+        except Exception as error:
+            raise _invalid_value(
+                "Resolved request headers could not be copied.",
+                operation="create_resource_resolution",
+                field="request_headers_by_url",
+                source=error,
+            ) from error
+
+        if any(not isinstance(url, str) for url in entries):
+            raise _invalid_value(
+                "Resolved request authorization requires string URLs.",
+                operation="create_resource_resolution",
+                field="request_headers_by_url",
+            )
+        frozen_headers: dict[str, Mapping[str, str]] = {}
+        for url, headers in sorted(entries.items()):
+            try:
+                published = PublishedResource(url, headers)
+                if "#" in url:
+                    raise _invalid_value(
+                        "Request authorization URLs must not contain fragments.",
+                        operation="create_resource_resolution",
+                        field="request_headers_by_url",
+                    )
+            except InvalidRenderInputError as error:
+                raise _invalid_value(
+                    "Resolved request authorization is not a valid URL/header entry.",
+                    operation="create_resource_resolution",
+                    field="request_headers_by_url",
+                    source=error,
+                ) from error
+            frozen_headers[url] = published.request_headers
+        object.__setattr__(
+            self,
+            "request_headers_by_url",
+            MappingProxyType(frozen_headers),
         )
 
 
@@ -373,5 +437,6 @@ __all__ = [
     "RemoteResourceRef",
     "ResourceContent",
     "ResourceRef",
+    "ResourceResolution",
     "ResourceRevision",
 ]

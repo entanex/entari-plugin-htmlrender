@@ -48,6 +48,7 @@ from entari_plugin_htmlrender.preparation.models import (
     RasterOptions as RasterOptions,
 )
 from entari_plugin_htmlrender.preparation.models import TemplateRef as TemplateRef
+from entari_plugin_htmlrender.preparation.service import HtmlPreparer as HtmlPreparer
 from entari_plugin_htmlrender.raster import RasterImageFormat as RasterImageFormat
 from entari_plugin_htmlrender.rendering.artifacts import (
     RenderedHtml as RenderedHtml,
@@ -77,6 +78,7 @@ __all__ = [
     "CapabilityUnavailableError",
     "DocumentBase",
     "DocumentRequirement",
+    "HtmlPreparer",
     "HtmlRenderError",
     "HtmlRenderer",
     "InvalidRenderInputError",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from html.parser import HTMLParser
 import math
 from pathlib import Path
 import threading
@@ -27,8 +28,47 @@ from entari_plugin_htmlrender.resources.models import FileResourceRef
 if TYPE_CHECKING:
     from typing import Any, Literal
 
+    from entari_plugin_htmlrender.preparation.markdown_render import MarkdownRender
     from entari_plugin_htmlrender.preparation.models import PreparedHtml
     from entari_plugin_htmlrender.preparation.service import DefaultHtmlPreparer
+
+
+class _StartTagCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        self.tags.append((tag, dict(attrs)))
+
+
+def _start_tags(markup: str) -> list[tuple[str, dict[str, str | None]]]:
+    collector = _StartTagCollector()
+    collector.feed(markup)
+    collector.close()
+    return collector.tags
+
+
+def _math_containers(
+    markup: str,
+) -> list[tuple[str, dict[str, str | None]]]:
+    return [
+        (tag, attrs)
+        for tag, attrs in _start_tags(markup)
+        if "data-htmlrender-arithmatex" in attrs
+    ]
+
+
+def _math_runtimes(markup: str) -> list[str]:
+    return [
+        attrs["data-htmlrender-math-runtime"] or ""
+        for tag, attrs in _start_tags(markup)
+        if tag == "script" and "data-htmlrender-math-runtime" in attrs
+    ]
 
 
 def test_parse_html_preserves_document_and_extracts_css() -> None:
@@ -249,6 +289,110 @@ async def test_prepare_markdown_reads_source_and_marks_math(
     assert DocumentRequirement.JAVASCRIPT in prepared.requirements
 
 
+async def test_prepare_markdown_normalizes_common_math_delimiters(
+    preparer: DefaultHtmlPreparer,
+) -> None:
+    prepared = await preparer.prepare_markdown(
+        r"""
+Inline $x^2$ and \(y^2\).
+
+$$z^2$$
+
+\[w^2\]
+"""
+    )
+
+    containers = _math_containers(prepared.html)
+    assert [tag for tag, _attrs in containers] == ["span", "span", "div", "div"]
+    assert all(attrs["class"] == "arithmatex" for _tag, attrs in containers)
+    assert _math_runtimes(prepared.html) == ["katex", "mhchem", "arithmatex"]
+    assert "@font-face" in prepared.html
+    assert "math/tex" not in prepared.html
+    assert "mathtex-script-type" not in prepared.html
+    assert DocumentRequirement.JAVASCRIPT in prepared.requirements
+
+
+async def test_prepare_markdown_does_not_detect_math_in_literal_content(
+    preparer: DefaultHtmlPreparer,
+) -> None:
+    prepared = await preparer.prepare_markdown(
+        r"""
+Inline code `$x^2$`, `\(y^2\)`, `$ spaced $`, and source text math/tex.
+
+Escaped \$5 and \$10 remain currency.
+
+```text
+$x^2$
+$$y^2$$
+\ce{not chemistry}
+class="arithmatex"
+```
+
+<span class="arithmatex">literal math/tex</span>
+
+<div class="arithmatex">\[literal\]</div>
+"""
+    )
+
+    assert _math_containers(prepared.html) == []
+    assert _math_runtimes(prepared.html) == []
+    assert "@font-face" not in prepared.html
+    assert DocumentRequirement.JAVASCRIPT not in prepared.requirements
+    assert "$ spaced $" in prepared.html
+    assert "class=&quot;arithmatex&quot;" in prepared.html
+
+
+async def test_prepare_markdown_preserves_mhchem_in_generic_container(
+    preparer: DefaultHtmlPreparer,
+) -> None:
+    prepared = await preparer.prepare_markdown(r"Inline $\ce{2H2 + O2 -> 2H2O}$.")
+
+    assert r"\ce{2H2 + O2 -&gt; 2H2O}" in prepared.html
+    assert [tag for tag, _attrs in _math_containers(prepared.html)] == ["span"]
+    assert _math_runtimes(prepared.html) == ["katex", "mhchem", "arithmatex"]
+
+
+async def test_prepare_markdown_escapes_math_content_for_text_content(
+    preparer: DefaultHtmlPreparer,
+) -> None:
+    prepared = await preparer.prepare_markdown(
+        r"Inline $a < b & c > d$ and $</script>$."
+    )
+
+    scripts = [tag for tag, _attrs in _start_tags(prepared.html) if tag == "script"]
+    assert len(scripts) == 3
+    assert r"\(a &lt; b &amp; c &gt; d\)" in prepared.html
+    assert r"\(&lt;/script&gt;\)" in prepared.html
+
+
+async def test_prepare_markdown_preserves_non_math_extensions(
+    preparer: DefaultHtmlPreparer,
+) -> None:
+    prepared = await preparer.prepare_markdown(
+        """- [x] done
+- [ ] todo
+
+~~removed~~
+
+| A | B |
+| - | - |
+| x | y |
+
+```python
+print("ok")
+```
+"""
+    )
+
+    assert '<ul class="task-list">' in prepared.html
+    assert "checked" in prepared.html
+    assert "<del>removed</del>" in prepared.html
+    assert "<table>" in prepared.html
+    assert '<div class="codehilite">' in prepared.html
+    assert '<span class="nb">print</span>' in prepared.html
+    assert DocumentRequirement.JAVASCRIPT not in prepared.requirements
+
+
 async def test_cpu_bound_preparation_runs_outside_the_event_loop(
     preparer: DefaultHtmlPreparer,
     monkeypatch: pytest.MonkeyPatch,
@@ -259,18 +403,18 @@ async def test_cpu_bound_preparation_runs_outside_the_event_loop(
     parser_threads: list[int] = []
     markdown_threads: list[int] = []
     original_parse_html = service.parse_html
-    original_markdown = service.markdown.markdown
+    original_markdown = service.render_markdown
 
     def recording_parse_html(*args: Any, **kwargs: Any) -> PreparedHtml:
         parser_threads.append(threading.get_ident())
         return original_parse_html(*args, **kwargs)
 
-    def recording_markdown(*args: Any, **kwargs: Any) -> str:
+    def recording_markdown(*args: Any, **kwargs: Any) -> MarkdownRender:
         markdown_threads.append(threading.get_ident())
         return original_markdown(*args, **kwargs)
 
     monkeypatch.setattr(service, "parse_html", recording_parse_html)
-    monkeypatch.setattr(service.markdown, "markdown", recording_markdown)
+    monkeypatch.setattr(service, "render_markdown", recording_markdown)
 
     await preparer.prepare_html("<p>hello</p>")
     await preparer.prepare_markdown("# Title")

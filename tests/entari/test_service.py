@@ -4,7 +4,6 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from exceptiongroup import BaseExceptionGroup
 from launart import Launart, Service
 import pytest
 
@@ -26,6 +25,7 @@ class _Runtime:
     close_entered: asyncio.Event | None = None
     close_release: asyncio.Event | None = None
     renderer: object = field(default_factory=object)
+    preparation: object = field(default_factory=object)
     templates: object = field(default_factory=object)
     resources: object = field(default_factory=object)
     graphics: object = field(default_factory=object)
@@ -129,6 +129,7 @@ def test_service_exposes_only_caller_facing_services() -> None:
     service, runtime = _service("off")
 
     assert service.renderer is runtime.renderer
+    assert service.preparation is runtime.preparation
     assert service.templates is runtime.templates
     assert service.resources is runtime.resources
     assert service.graphics is runtime.graphics
@@ -136,6 +137,16 @@ def test_service_exposes_only_caller_facing_services() -> None:
     assert not hasattr(service, "resolve_runtime")
     assert not hasattr(service, "settings")
     assert not hasattr(service, "aclose")
+
+
+def test_service_is_resolvable_by_concrete_type() -> None:
+    service, _ = _service("off")
+    manager = Launart()
+    manager.add_component(_launart_service(service))
+
+    service_type = cast("type[Service]", HtmlRenderService)
+
+    assert manager.get_component(service_type) is service
 
 
 async def test_launart_owns_warmup_and_probe_lifecycle() -> None:

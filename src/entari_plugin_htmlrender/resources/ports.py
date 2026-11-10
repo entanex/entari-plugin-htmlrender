@@ -12,6 +12,7 @@ from .models import (
     PublishedResource,
     ResourceContent,
     ResourceRef,
+    ResourceResolution,
     ResourceRevision,
 )
 from .templating import ExtensionSpec, FilterCallable, TemplateSource
@@ -162,7 +163,7 @@ class ResourceMaterializer(Protocol):
 
 
 class ResourceAccess(Protocol):
-    """Minimal caller contract for fetching and scoped publication."""
+    """Caller contract for resource access and explicit local staging."""
 
     async def fetch(
         self,
@@ -193,6 +194,33 @@ class ResourceAccess(Protocol):
         *,
         suffix: str | None = None,
     ) -> AbstractAsyncContextManager[PublishedResource]: ...
+
+    async def resolve_template_vars(
+        self,
+        variables: Mapping[str, object],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[dict[str, object]]: ...
+
+    async def to_resource_url(
+        self,
+        value: str | Path | bytes,
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[str]: ...
+
+    async def resolve_url_tokens(
+        self,
+        values: Sequence[str],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[list[str]]: ...
 
 
 class PreparationResourceAccess(

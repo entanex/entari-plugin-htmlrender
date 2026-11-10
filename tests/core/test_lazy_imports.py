@@ -28,6 +28,7 @@ def test_public_library_import_is_host_neutral_and_lazy() -> None:
             "PIL",
             "aiohttp",
             "arclet.entari",
+            "nonebot",
             "playwright",
             "prometheus_client",
             "sentry_sdk",
@@ -113,9 +114,17 @@ def test_first_party_provider_modules_do_not_load_native_engines() -> None:
             "takumi_py",
             "entari_plugin_htmlrender.adapters.playwright.render",
         }
-        unexpected = forbidden & set(sys.modules)
+        unexpected = {
+            name
+            for name in sys.modules
+            if name in forbidden
+            or name == "nonebot"
+            or name.startswith("nonebot.")
+        }
         if unexpected:
-            raise SystemExit(f"provider import loaded native engines: {sorted(unexpected)}")
+            raise SystemExit(
+                f"provider import loaded forbidden modules: {sorted(unexpected)}"
+            )
         """
     )
 

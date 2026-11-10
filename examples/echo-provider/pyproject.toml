@@ -3,9 +3,9 @@ name = "htmlrender-echo-provider"
 version = "0.1.0"
 description = "Minimal third-party render engine validating the htmlrender provider SDK"
 authors = [{ name = "Tacrolimus", email = "balconyjh@gmail.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11,<4.0"
 dependencies = [
-    "entari-plugin-htmlrender>=0.1.0,<0.2.0",
+    "entari-plugin-htmlrender>=0.2.0,<0.3.0",
 ]
 
 [project.entry-points."entari_plugin_htmlrender.providers.v2"]

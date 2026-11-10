@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import anyio
 import anyio.lowlevel
-from exceptiongroup import ExceptionGroup
 import pytest
 
 from entari_plugin_htmlrender.errors import (
@@ -22,13 +22,15 @@ from entari_plugin_htmlrender.rendering import (
 from entari_plugin_htmlrender.resources import (
     FileResourceRef,
     ResourceContent,
+    ResourceResolution,
 )
 from entari_plugin_htmlrender.runtime import RenderRuntime, RuntimeState
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping, Sequence
 
     from entari_plugin_htmlrender.graphics import GraphicsRenderer
+    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
     from entari_plugin_htmlrender.rendering.contracts import (
         HtmlRenderer,
         TemplateRenderer,
@@ -38,7 +40,10 @@ if TYPE_CHECKING:
         PublishedResource,
         ResourceRef,
     )
-    from entari_plugin_htmlrender.resources.ports import ResourceAccess
+    from entari_plugin_htmlrender.resources.ports import (
+        ResourceAccess,
+        ResourceMaterializer,
+    )
 
 
 _RENDERER = cast("HtmlRenderer", object())
@@ -72,6 +77,7 @@ class _FakeLifecycle:
 @dataclass
 class _FakeResources:
     fetch_calls: int = 0
+    resolve_calls: int = 0
     started: anyio.Event | None = None
     release: anyio.Event | None = None
 
@@ -110,6 +116,44 @@ class _FakeResources:
             errors,
         )
 
+    async def resolve_template_vars(
+        self,
+        variables: Mapping[str, object],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[dict[str, object]]:
+        del template_base, strict, materializer
+        self.resolve_calls += 1
+        if self.started is not None:
+            self.started.set()
+        if self.release is not None:
+            await self.release.wait()
+        return ResourceResolution(dict(variables))
+
+    async def to_resource_url(
+        self,
+        value: str | Path | bytes,
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[str]:
+        del template_base, strict, materializer
+        return ResourceResolution(value if isinstance(value, str) else str(value))
+
+    async def resolve_url_tokens(
+        self,
+        values: Sequence[str],
+        *,
+        template_base: str | Path | None = None,
+        strict: bool | None = None,
+        materializer: str | ResourceMaterializer | None = None,
+    ) -> ResourceResolution[list[str]]:
+        del template_base, strict, materializer
+        return ResourceResolution(list(values))
+
     @asynccontextmanager
     async def publish(
         self,
@@ -130,6 +174,7 @@ def _runtime(
 ) -> RenderRuntime:
     admission = OperationAdmissionGate()
     return RenderRuntime(
+        preparer=cast("HtmlPreparer", object()),
         renderer=_RENDERER,
         templates=_TEMPLATES,
         resources=cast("ResourceAccess", resources or _FakeResources()),
@@ -251,6 +296,36 @@ async def test_close_drains_admitted_resource_operation() -> None:
     assert runtime.state is RuntimeState.CLOSED
 
 
+async def test_close_drains_public_resource_resolution() -> None:
+    resources = _FakeResources(started=anyio.Event(), release=anyio.Event())
+    lifecycle = _FakeLifecycle()
+    runtime = _runtime(lifecycle, resources=resources)
+    close_finished = anyio.Event()
+
+    async def resolve() -> None:
+        await runtime.resources.resolve_template_vars({"value": "text"})
+
+    async def close() -> None:
+        await runtime.aclose()
+        close_finished.set()
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(resolve)
+        assert resources.started is not None
+        await resources.started.wait()
+        task_group.start_soon(close)
+        await _wait_for_state(runtime, RuntimeState.CLOSING)
+
+        assert lifecycle.aclose_calls == 0
+        assert not close_finished.is_set()
+        assert resources.release is not None
+        resources.release.set()
+        await close_finished.wait()
+
+    assert resources.resolve_calls == 1
+    assert lifecycle.aclose_calls == 1
+
+
 async def test_close_rejects_resource_facade_retained_by_caller() -> None:
     resources = _FakeResources()
     runtime = _runtime(_FakeLifecycle(), resources=resources)
@@ -262,6 +337,9 @@ async def test_close_rejects_resource_facade_retained_by_caller() -> None:
         await public_resources.fetch(FileResourceRef(Path("asset.txt")))
     assert captured.value.operation == "resource.fetch"
     assert resources.fetch_calls == 0
+    with pytest.raises(RuntimeUnavailableError) as resolution_error:
+        await public_resources.to_resource_url(b"value")
+    assert resolution_error.value.operation == "resource.to_resource_url"
 
 
 async def test_lifecycle_exception_group_is_preserved_as_cause() -> None:
@@ -284,8 +362,16 @@ def test_runtime_exposes_only_caller_services() -> None:
     assert runtime.templates is _TEMPLATES
     assert runtime.graphics is _GRAPHICS
     assert runtime.resources is runtime.resources
-    assert not hasattr(runtime, "preparation")
+    assert runtime.preparation is runtime.preparation
     assert not hasattr(runtime, "extensions")
+
+
+def test_runtime_resource_helpers_do_not_expose_publisher_leases() -> None:
+    resources = _runtime(_FakeLifecycle()).resources
+
+    assert "lease_id" not in signature(resources.resolve_template_vars).parameters
+    assert "lease_id" not in signature(resources.to_resource_url).parameters
+    assert "lease_id" not in signature(resources.resolve_url_tokens).parameters
 
 
 def test_runtime_capabilities_default_empty_and_support_typed_lookup() -> None:

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypeAlias
 from urllib.parse import urlsplit
@@ -26,7 +26,7 @@ def normalize_public_base_url(value: str) -> str:
     return value if value.endswith("/") else f"{value}/"
 
 
-class ResourceMaterializationPolicy(str, Enum):
+class ResourceMaterializationPolicy(StrEnum):
     """Whether document-local resources are resolved before execution."""
 
     OFF = "off"
@@ -34,7 +34,7 @@ class ResourceMaterializationPolicy(str, Enum):
     STRICT = "strict"
 
 
-class RemoteLocalResourcePolicy(str, Enum):
+class RemoteLocalResourcePolicy(StrEnum):
     """Transport used for local resources consumed by a remote provider."""
 
     MEMORY = "memory"
@@ -43,7 +43,7 @@ class RemoteLocalResourcePolicy(str, Enum):
     ERROR = "error"
 
 
-class LocalLocalResourcePolicy(str, Enum):
+class LocalLocalResourcePolicy(StrEnum):
     """Transport used for local resources consumed by a local provider."""
 
     FILE = "file"

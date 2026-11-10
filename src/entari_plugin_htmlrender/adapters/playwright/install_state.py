@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 import json
@@ -384,7 +384,7 @@ def record_playwright_runtime_state(config: PlaywrightConfig) -> None:
         configured_engine=config.engine,
     )
 
-    timestamp = datetime.now(tz=timezone.utc).isoformat()
+    timestamp = datetime.now(tz=UTC).isoformat()
     history[timestamp] = current
 
     if len(history) > _MAX_RUNTIME_STATE_ENTRIES:

@@ -29,7 +29,6 @@ import uuid
 
 import anyio
 from anyio.to_thread import run_sync
-from exceptiongroup import BaseExceptionGroup
 
 from entari_plugin_htmlrender._logging import logger
 from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError

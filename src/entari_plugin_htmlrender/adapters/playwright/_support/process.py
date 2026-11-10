@@ -8,7 +8,6 @@ import subprocess
 from typing import TYPE_CHECKING, final
 
 import anyio
-from exceptiongroup import BaseExceptionGroup
 
 from .signal import (
     WINDOWS,
@@ -95,7 +94,7 @@ class ProcessSupervisor:
         for process in tuple(self._processes.values()):
             try:
                 await terminate_process(process)
-            except BaseException as error:  # noqa: PERF203 -- best-effort teardown
+            except BaseException as error:
                 errors.append(error)
         if errors:
             raise BaseExceptionGroup("Failed to close supervised subprocesses.", errors)

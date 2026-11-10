@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 import math
 import os
 from pathlib import Path, PurePosixPath
@@ -34,7 +34,7 @@ def _invalid_value(
     )
 
 
-class DocumentRequirement(str, Enum):
+class DocumentRequirement(StrEnum):
     """Execution features required by prepared content."""
 
     JAVASCRIPT = "javascript"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar
 from typing_extensions import Self
@@ -19,7 +19,7 @@ from entari_plugin_htmlrender.resources.headers import (
 )
 
 
-class RuntimeStartupPolicy(str, Enum):
+class RuntimeStartupPolicy(StrEnum):
     """Provider runtime initialization policy."""
 
     OFF = "off"

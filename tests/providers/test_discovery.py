@@ -93,6 +93,7 @@ def test_explicit_override_wins_even_for_reserved_ids() -> None:
 
 def test_only_first_party_provider_ids_are_reserved() -> None:
     assert {"playwright", "takumi"} == RESERVED_PROVIDER_IDS
+    assert "htmlkit" not in RESERVED_PROVIDER_IDS
 
 
 @pytest.mark.parametrize("provider_id", ["", " ", "Upper", "bad/id", "-bad"])
@@ -245,17 +246,26 @@ def test_invalid_entry_point_object_rejected(mocker: MockerFixture) -> None:
         discovery.resolve_provider(ProviderId("bogus"))
 
 
+@pytest.mark.parametrize("provider_id", ["playwright", "takumi"])
 def test_reserved_id_cannot_be_hijacked_by_entry_points(
     mocker: MockerFixture,
+    provider_id: str,
 ) -> None:
     mocker.patch.object(
         discovery,
         "entry_points",
-        return_value=[_entry_point("takumi", FakeProvider("takumi"))],
+        return_value=[_entry_point(provider_id, FakeProvider(provider_id))],
     )
 
     with pytest.raises(ProviderConflictError, match="reserved"):
-        discovery.resolve_provider(ProviderId("takumi"))
+        discovery.resolve_provider(ProviderId(provider_id))
+
+
+def test_htmlkit_is_not_a_builtin_provider(mocker: MockerFixture) -> None:
+    mocker.patch.object(discovery, "entry_points", return_value=[])
+
+    with pytest.raises(ProviderNotFoundError, match="'htmlkit'"):
+        discovery.resolve_provider(ProviderId("htmlkit"))
 
 
 @pytest.fixture

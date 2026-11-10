@@ -97,6 +97,7 @@ def build_runtime(
     if capabilities is not None:
         catalog = catalog.merged(capabilities)
     return RenderRuntime(
+        preparer=preparer,
         renderer=_DefaultHtmlRenderer(
             bindings,
             operation_admission=admission,

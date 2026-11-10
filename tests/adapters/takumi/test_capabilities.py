@@ -39,6 +39,7 @@ from entari_plugin_htmlrender.runtime import RenderRuntime, RuntimeState
 from tests.adapters.takumi.helpers import resource_service
 
 if TYPE_CHECKING:
+    from entari_plugin_htmlrender.preparation.service import HtmlPreparer
     from collections.abc import AsyncIterator
     from contextlib import AbstractAsyncContextManager
 
@@ -296,6 +297,7 @@ async def test_retained_capability_reports_runtime_closing_and_closed(
     )
     lifecycle = _BlockingLifecycle()
     runtime = RenderRuntime(
+        preparer=cast("HtmlPreparer", object()),
         renderer=cast("HtmlRenderer", object()),
         templates=cast("TemplateRenderer", object()),
         resources=cast("ResourceAccess", object()),

@@ -6,7 +6,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, final
 
 import anyio
-from exceptiongroup import BaseExceptionGroup
 
 from entari_plugin_htmlrender.adapters.observability import (
     TelemetryCacheObserver,
@@ -212,7 +211,7 @@ class _ComposedLifecycle:
             for operation in operations:
                 try:
                     await operation()
-                except BaseException as error:  # noqa: PERF203
+                except BaseException as error:
                     errors.append(error)
         return errors
 

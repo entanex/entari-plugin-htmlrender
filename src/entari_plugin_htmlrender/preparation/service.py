@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import (  # noqa: TC003 -- runtime public annotations
+    Mapping,
+    Sequence,
+)
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, final
-
-import markdown
+from typing import TYPE_CHECKING, Protocol, final, runtime_checkable
 
 from entari_plugin_htmlrender.resources.config import ResourceMaterializationPolicy
 from entari_plugin_htmlrender.resources.models import (
@@ -13,15 +15,18 @@ from entari_plugin_htmlrender.resources.models import (
     ResourceRef,
 )
 from entari_plugin_htmlrender.resources.source import PackageResourceSource
+from entari_plugin_htmlrender.resources.templating import (  # noqa: TC001 -- public hints
+    ExtensionSpec,
+    FilterCallable,
+)
 
 from .html import parse_html
+from .markdown_render import render_markdown
 from .materialize import materialize_local_assets
 from .models import PreparedHtml, PreparedStylesheet, TemplateRef
 from .template_assets import stage_template_variables
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from entari_plugin_htmlrender.resources.ports import (
         PreparationResourceAccess,
         TemplateCompiler,
@@ -36,7 +41,10 @@ MARKDOWN_TEMPLATES = PackageResourceSource(
 )
 
 
+@runtime_checkable
 class HtmlPreparer(Protocol):
+    """Prepare reusable HTML documents independently of a rendering provider."""
+
     async def prepare_html(
         self, html: str, *, base_url: str | None = None
     ) -> PreparedHtml: ...
@@ -61,6 +69,8 @@ class HtmlPreparer(Protocol):
         template: TemplateRef,
         variables: Mapping[str, object],
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml: ...
 
@@ -68,6 +78,9 @@ class HtmlPreparer(Protocol):
         self,
         template: TemplateRef,
         variables: Mapping[str, object],
+        *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
     ) -> str: ...
 
 
@@ -153,32 +166,22 @@ class DefaultHtmlPreparer:
                 self._resource_base_url,
                 source,
             )
-        rendered = await self._worker.run_sync(
-            markdown.markdown,
+        markdown_render = await self._worker.run_sync(
+            render_markdown,
             markdown_text,
-            extensions=[
-                "pymdownx.tasklist",
-                "tables",
-                "fenced_code",
-                "codehilite",
-                "mdx_math",
-                "pymdownx.tilde",
-            ],
-            extension_configs={"mdx_math": {"enable_dollar_delimiter": True}},
         )
         extra = ""
-        if "math/tex" in rendered:
+        if markdown_render.has_math:
             katex_css = await self._builtin("markdown/katex/katex.min.b64_fonts.css")
             katex_js = await self._builtin("markdown/katex/katex.min.js")
             mhchem_js = await self._builtin("markdown/katex/mhchem.min.js")
-            mathtex_js = await self._builtin(
-                "markdown/katex/mathtex-script-type.min.js"
-            )
+            arithmatex_js = await self._builtin("markdown/katex/arithmatex.js")
             extra = (
                 f'<style type="text/css">{katex_css}</style>'
-                f"<script defer>{katex_js}</script>"
-                f"<script defer>{mhchem_js}</script>"
-                f"<script defer>{mathtex_js}</script>"
+                f'<script defer data-htmlrender-math-runtime="katex">{katex_js}</script>'
+                f'<script defer data-htmlrender-math-runtime="mhchem">{mhchem_js}</script>'
+                f'<script defer data-htmlrender-math-runtime="arithmatex">'
+                f"{arithmatex_js}</script>"
             )
         css = (
             await self._resources.fetch_text(stylesheet)
@@ -189,7 +192,7 @@ class DefaultHtmlPreparer:
         html = await self._templates.render(
             MARKDOWN_TEMPLATES,
             "markdown.html",
-            {"md": rendered, "css": "", "extra": extra},
+            {"md": markdown_render.html, "css": "", "extra": extra},
             immutable=True,
         )
         stylesheet_base = (
@@ -219,6 +222,8 @@ class DefaultHtmlPreparer:
         template: TemplateRef,
         variables: Mapping[str, object],
         *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
         materialization_policy: ResourceMaterializationPolicy | None = None,
     ) -> PreparedHtml:
         template_root = await self._worker.run_sync(
@@ -241,6 +246,8 @@ class DefaultHtmlPreparer:
             template_root,
             template.name,
             staged,
+            filters=filters,
+            extensions=extensions,
         )
         base = await self._worker.run_sync(
             self._path_uri,
@@ -258,6 +265,9 @@ class DefaultHtmlPreparer:
         self,
         template: TemplateRef,
         variables: Mapping[str, object],
+        *,
+        filters: Mapping[str, FilterCallable] | None = None,
+        extensions: Sequence[ExtensionSpec] = (),
     ) -> str:
         template_root = await self._worker.run_sync(
             self._resources.authorize_local,
@@ -267,6 +277,8 @@ class DefaultHtmlPreparer:
             template_root,
             template.name,
             variables,
+            filters=filters,
+            extensions=extensions,
         )
 
 
