@@ -24,7 +24,7 @@ from entari_plugin_htmlrender.capabilities import (
     TakumiCompiledDocument,
     TakumiSession,
 )
-from entari_plugin_htmlrender.graphics import GraphicsRenderer
+from entari_plugin_htmlrender.graphics import DrawingRenderer, GraphicsRenderer
 from entari_plugin_htmlrender.resources import ResourceResolution
 
 if TYPE_CHECKING:
@@ -115,6 +115,8 @@ async def _probe(runtime: RenderRuntime) -> None:
     assert_type(runtime.capabilities.pillow, GraphicsRenderer)
     assert_type(runtime.capabilities.skia, GraphicsRenderer)
     assert_type(runtime.graphics, GraphicsRenderer)
+    assert_type(runtime.drawings, DrawingRenderer)
+    assert_type(runtime.drawings.names, frozenset[str])
 
     variables = assert_type(
         await runtime.resources.resolve_template_vars({"asset": b"image"}),

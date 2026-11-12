@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.util import find_spec
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, cast, final
 
 from entari_plugin_htmlrender.errors import (
     CapabilityUnavailableError,
@@ -15,6 +15,11 @@ from entari_plugin_htmlrender.graphics import (
     PILLOW_RASTER_SCENE_RENDERER,
     SKIA_RASTER_SCENE_RENDERER,
 )
+from entari_plugin_htmlrender.graphics.drawing_loader import (
+    DrawingRegistry,
+    DrawingSpec,
+)
+from entari_plugin_htmlrender.graphics.drawings import DrawingService
 from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
 from entari_plugin_htmlrender.graphics.models import (
     DEFAULT_RASTER_ENCODE_OPTIONS,
@@ -26,6 +31,10 @@ from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 if TYPE_CHECKING:
     from entari_plugin_htmlrender.config import GraphicsSettings
+    from entari_plugin_htmlrender.graphics.drawings import (
+        DrawingRegistryFactory,
+        _DrawingBackend,
+    )
     from entari_plugin_htmlrender.graphics.models import GraphicsBackendName
     from entari_plugin_htmlrender.graphics.ports import GraphicsRenderer
     from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
@@ -84,6 +93,7 @@ class GraphicsComposition:
 
     primary: GraphicsRenderer
     capabilities: CapabilityCatalog
+    drawings: DrawingService
 
 
 def _missing_module_reason(module: str, extra: str) -> str | None:
@@ -176,11 +186,16 @@ def build_graphics_composition(
     worker: WorkerExecutor,
     observer: OperationObserver,
     operation_admission: OperationAdmissionGate,
+    drawing_registry_factory: DrawingRegistryFactory | None = None,
 ) -> GraphicsComposition:
     """Compose independent configured backends behind one runtime gate."""
     selected = settings.backends
     if not selected and settings.backend is not None:
         selected = (settings.backend,)
+    enabled: dict[GraphicsBackendName, None] = dict.fromkeys(selected)
+    for drawing in settings.drawings.values():
+        enabled[drawing.backend] = None
+    selected = tuple(enabled)
     primary_backend = settings.backend
     if primary_backend is None and selected:
         primary_backend = selected[0]
@@ -213,7 +228,32 @@ def build_graphics_composition(
         )
     else:
         primary = built[primary_backend][0]
-    return GraphicsComposition(primary=primary, capabilities=catalog)
+    registry = (drawing_registry_factory or DrawingRegistry)(
+        {
+            name: DrawingSpec(
+                backend=spec.backend,
+                path=spec.path.expanduser().absolute()
+                if spec.path is not None
+                else None,
+                module=spec.module,
+                function=spec.function,
+                reload=spec.reload,
+            )
+            for name, spec in settings.drawings.items()
+        },
+        worker=worker,
+    )
+    drawings = DrawingService(
+        registry,
+        {
+            backend: cast("_DrawingBackend", renderer)
+            for backend, (renderer, available) in built.items()
+            if available
+        },
+        operation_admission=operation_admission,
+        max_pixels=settings.max_pixels,
+    )
+    return GraphicsComposition(primary=primary, capabilities=catalog, drawings=drawings)
 
 
 __all__ = ["GraphicsComposition", "build_graphics_composition"]

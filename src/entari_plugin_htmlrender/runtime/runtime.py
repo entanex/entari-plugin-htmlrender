@@ -12,6 +12,10 @@ from entari_plugin_htmlrender.errors import (
     ProviderLifecycleError,
     RuntimeUnavailableError,
 )
+from entari_plugin_htmlrender.graphics.drawings import (
+    DrawingRenderer,
+    _UnavailableDrawingRenderer,
+)
 from entari_plugin_htmlrender.rendering.capabilities import CapabilityCatalog
 
 if TYPE_CHECKING:
@@ -45,7 +49,7 @@ class RenderRuntime:
     """Advanced composition aggregate owned by one host lifetime.
 
     Ordinary business code receives one of ``renderer``, ``preparation``, ``templates``,
-    ``resources``, ``graphics``, or ``capabilities`` instead of this lifecycle
+    ``resources``, ``graphics``, ``drawings``, or ``capabilities`` instead of this lifecycle
     controller.
     """
 
@@ -61,12 +65,18 @@ class RenderRuntime:
         operation_admission: OperationAdmissionGate,
         capabilities: CapabilityCatalog | None = None,
         provider_id: str | None = None,
+        drawings: DrawingRenderer | None = None,
     ) -> None:
         self._renderer = renderer
         self._templates = templates
         self._preparation = _AdmittedHtmlPreparer(preparer, operation_admission)
         self._resources = _AdmittedResourceAccess(resources, operation_admission)
         self._graphics = graphics
+        self._drawings = (
+            drawings
+            if drawings is not None
+            else _UnavailableDrawingRenderer(operation_admission)
+        )
         self._capabilities = RuntimeCapabilities(
             capabilities if capabilities is not None else CapabilityCatalog()
         )
@@ -96,6 +106,10 @@ class RenderRuntime:
     @property
     def graphics(self) -> GraphicsRenderer:
         return self._graphics
+
+    @property
+    def drawings(self) -> DrawingRenderer:
+        return self._drawings
 
     @property
     def capabilities(self) -> RuntimeCapabilities:

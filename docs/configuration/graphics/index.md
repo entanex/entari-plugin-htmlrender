@@ -29,6 +29,7 @@ plugins:
 | --- | ---: |
 | `graphics.backend` | `null` |
 | `graphics.backends` | `[]` |
+| `graphics.drawings` | `{}` |
 | `graphics.max_pixels` | `16777216` |
 | `graphics.max_concurrency` | `2` |
 | `graphics.max_commands` | `100000` |

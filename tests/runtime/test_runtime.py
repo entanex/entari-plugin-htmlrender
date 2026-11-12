@@ -205,6 +205,18 @@ async def test_startup_is_concurrency_safe_and_idempotent() -> None:
     assert runtime.state is RuntimeState.OPEN
 
 
+async def test_runtime_without_drawings_keeps_a_stable_unavailable_interface() -> None:
+    runtime = _runtime(_FakeLifecycle())
+    assert runtime.drawings.names == frozenset()
+    with pytest.raises(CapabilityUnavailableError):
+        await runtime.drawings.render("card", width=2, height=2)
+    with pytest.raises(CapabilityUnavailableError):
+        await runtime.drawings.reload("card")
+    await runtime.aclose()
+    with pytest.raises(RuntimeUnavailableError):
+        await runtime.drawings.render("card", width=2, height=2)
+
+
 async def test_startup_failure_is_structured_and_allows_retry() -> None:
     lifecycle = _FakeLifecycle(startup_failures=[RuntimeError("boom")])
     runtime = _runtime(lifecycle)
