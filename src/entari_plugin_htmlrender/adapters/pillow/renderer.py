@@ -2,24 +2,70 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import BytesIO
 from typing import TYPE_CHECKING, final
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from entari_plugin_htmlrender.graphics.execution import rasterize_with_backend
+from entari_plugin_htmlrender.graphics.errors import DrawingBackendExecutionError
+from entari_plugin_htmlrender.graphics.execution import (
+    draw_with_backend,
+    rasterize_with_backend,
+    run_drawing_callback,
+)
 from entari_plugin_htmlrender.graphics.models import (
     DEFAULT_RASTER_ENCODE_OPTIONS,
     RasterEncodeOptions,
 )
 from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from entari_plugin_htmlrender.graphics.drawing_models import (
+        DrawingCanvas,
+        DrawingFunction,
+    )
     from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
     from entari_plugin_htmlrender.graphics.models import RasterScene
     from entari_plugin_htmlrender.rendering.admission import OperationAdmissionGate
     from entari_plugin_htmlrender.rendering.ports import OperationObserver
     from entari_plugin_htmlrender.resources.ports import WorkerExecutor
+
+
+@dataclass(frozen=True, slots=True)
+class PillowCanvas:
+    """Pillow native image and draw handles for one synchronous callback."""
+
+    image: Image.Image
+    draw: ImageDraw.ImageDraw
+    width: int
+    height: int
+
+
+def _encode(image: Image.Image, output: RasterEncodeOptions) -> RenderedImage:
+    stream = BytesIO()
+    if output.format == "png":
+        image.save(stream, format="PNG")
+    else:
+        with Image.new(
+            "RGBA",
+            image.size,
+            output.jpeg_matte.as_tuple(),
+        ) as matte:
+            matte.alpha_composite(image)
+            with matte.convert("RGB") as opaque:
+                opaque.save(
+                    stream,
+                    format="JPEG",
+                    quality=output.jpeg_quality,
+                )
+    return RenderedImage.from_bytes(
+        stream.getvalue(),
+        expected_format=output.format,
+    )
 
 
 def _rasterize_sync(
@@ -41,27 +87,37 @@ def _rasterize_sync(
                 command.color.as_tuple(),
             ) as source:
                 image.alpha_composite(source, dest=(rect.x, rect.y))
+        return _encode(image, output)
 
-        stream = BytesIO()
-        if output.format == "png":
-            image.save(stream, format="PNG")
-        else:
-            with Image.new(
-                "RGBA",
-                image.size,
-                output.jpeg_matte.as_tuple(),
-            ) as matte:
-                matte.alpha_composite(image)
-                with matte.convert("RGB") as opaque:
-                    opaque.save(
-                        stream,
-                        format="JPEG",
-                        quality=output.jpeg_quality,
-                    )
-        return RenderedImage.from_bytes(
-            stream.getvalue(),
-            expected_format=output.format,
+
+def _draw_sync(
+    callback: DrawingFunction,
+    data: Mapping[str, object],
+    canvas: DrawingCanvas,
+    output: RasterEncodeOptions,
+) -> RenderedImage:
+    with Image.new(
+        "RGBA",
+        (canvas.width, canvas.height),
+        canvas.background.as_tuple(),
+    ) as image:
+        draw = ImageDraw.Draw(image)
+        context = PillowCanvas(
+            image=image,
+            draw=draw,
+            width=canvas.width,
+            height=canvas.height,
         )
+        run_drawing_callback("pillow", callback, context, data)
+        if image.size != (canvas.width, canvas.height):
+            raise DrawingBackendExecutionError(
+                "pillow",
+                f"callback changed the canvas from "
+                f"{canvas.width}x{canvas.height} to "
+                f"{image.width}x{image.height}; callbacks must preserve "
+                "the configured dimensions",
+            )
+        return _encode(image, output)
 
 
 @final
@@ -98,5 +154,43 @@ class PillowRasterSceneRenderer:
             budget=self._budget,
         )
 
+    async def draw(
+        self,
+        callback: DrawingFunction,
+        data: Mapping[str, object],
+        *,
+        canvas: DrawingCanvas,
+        output: RasterEncodeOptions = DEFAULT_RASTER_ENCODE_OPTIONS,
+    ) -> RenderedImage:
+        async with self._operation_admission.operation(
+            RenderOperation.DRAWING_TO_IMAGE.value
+        ):
+            return await self._draw_admitted(
+                callback,
+                data,
+                canvas=canvas,
+                output=output,
+            )
 
-__all__ = ["PillowRasterSceneRenderer"]
+    async def _draw_admitted(
+        self,
+        callback: DrawingFunction,
+        data: Mapping[str, object],
+        *,
+        canvas: DrawingCanvas,
+        output: RasterEncodeOptions = DEFAULT_RASTER_ENCODE_OPTIONS,
+    ) -> RenderedImage:
+        return await draw_with_backend(
+            "pillow",
+            callback,
+            data,
+            canvas,
+            output,
+            _draw_sync,
+            worker=self._worker,
+            observer=self._observer,
+            budget=self._budget,
+        )
+
+
+__all__ = ["PillowCanvas", "PillowRasterSceneRenderer"]

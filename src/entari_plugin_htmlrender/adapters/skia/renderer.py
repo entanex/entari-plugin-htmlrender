@@ -5,17 +5,30 @@
 
 from __future__ import annotations
 
-from importlib import import_module
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast, final
 
-from entari_plugin_htmlrender.graphics.execution import rasterize_with_backend
+import skia  # ty: ignore[unresolved-import] -- native extension has no Python source
+
+from entari_plugin_htmlrender.graphics.execution import (
+    draw_with_backend,
+    rasterize_with_backend,
+    run_drawing_callback,
+)
 from entari_plugin_htmlrender.graphics.models import (
     DEFAULT_RASTER_ENCODE_OPTIONS,
     RasterEncodeOptions,
 )
 from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
+from entari_plugin_htmlrender.rendering.models import RenderOperation
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from entari_plugin_htmlrender.graphics.drawing_models import (
+        DrawingCanvas,
+        DrawingFunction,
+    )
     from entari_plugin_htmlrender.graphics.execution import RasterWorkBudget
     from entari_plugin_htmlrender.graphics.models import (
         RasterScene,
@@ -43,7 +56,46 @@ class _SkiaPaint(Protocol):
 class _SkiaCanvas(Protocol):
     def clear(self, color: int) -> None: ...
 
+    def drawColor(self, color: int, mode: object) -> None: ...
+
+    def drawPaint(self, paint: _SkiaPaint) -> None: ...
+
+    def drawLine(
+        self,
+        x0: float,
+        y0: float,
+        x1: float,
+        y1: float,
+        paint: _SkiaPaint,
+    ) -> None: ...
+
     def drawRect(self, rect: object, paint: _SkiaPaint) -> None: ...
+
+    def drawRoundRect(
+        self,
+        rect: object,
+        rx: float,
+        ry: float,
+        paint: _SkiaPaint,
+    ) -> None: ...
+
+    def drawCircle(
+        self,
+        cx: float,
+        cy: float,
+        radius: float,
+        paint: _SkiaPaint,
+    ) -> None: ...
+
+    def drawPath(self, path: object, paint: _SkiaPaint) -> None: ...
+
+    def drawTextBlob(
+        self,
+        blob: object,
+        x: float,
+        y: float,
+        paint: _SkiaPaint,
+    ) -> None: ...
 
     def drawImage(
         self,
@@ -128,7 +180,17 @@ class _SkiaModule(Protocol):
     def ColorSetARGB(self, alpha: int, red: int, green: int, blue: int) -> int: ...
 
 
-_skia = cast("_SkiaModule", import_module("skia"))
+_skia = cast("_SkiaModule", skia)
+
+
+@dataclass(frozen=True, slots=True)
+class SkiaCanvas:
+    """Skia native canvas and surface handles for one synchronous callback."""
+
+    canvas: skia.Canvas
+    surface: skia.Surface
+    width: int
+    height: int
 
 
 def _skia_color(color: RGBAColor) -> int:
@@ -160,6 +222,16 @@ def _encode(image: _SkiaImage, output: RasterEncodeOptions) -> bytes:
     if data is None:
         raise RuntimeError(f"Skia could not encode {output.format.upper()}.")
     return bytes(data)
+
+
+def _encode_image(
+    image: _SkiaImage,
+    output: RasterEncodeOptions,
+) -> RenderedImage:
+    return RenderedImage.from_bytes(
+        _encode(image, output),
+        expected_format=output.format,
+    )
 
 
 def _rasterize_sync(
@@ -198,10 +270,42 @@ def _rasterize_sync(
         )
         image = matte_surface.makeImageSnapshot()
 
-    return RenderedImage.from_bytes(
-        _encode(image, output),
-        expected_format=output.format,
+    return _encode_image(image, output)
+
+
+def _draw_sync(
+    callback: DrawingFunction,
+    data: Mapping[str, object],
+    drawing: DrawingCanvas,
+    output: RasterEncodeOptions,
+) -> RenderedImage:
+    surface = _surface(drawing.width, drawing.height)
+    canvas = surface.getCanvas()
+    canvas.clear(_skia_color(drawing.background))
+    context = SkiaCanvas(
+        canvas=cast("skia.Canvas", canvas),
+        surface=cast("skia.Surface", surface),
+        width=drawing.width,
+        height=drawing.height,
     )
+    run_drawing_callback("skia", callback, context, data)
+
+    image = surface.makeImageSnapshot()
+    if output.format == "jpeg":
+        matte_surface = _surface(drawing.width, drawing.height)
+        matte_canvas = matte_surface.getCanvas()
+        matte_canvas.clear(_skia_color(output.jpeg_matte))
+        matte_paint = _skia.Paint(AntiAlias=False)
+        matte_paint.setBlendMode(_skia.BlendMode.kSrcOver)
+        matte_canvas.drawImage(
+            image,
+            0,
+            0,
+            _skia.SamplingOptions(),
+            matte_paint,
+        )
+        image = matte_surface.makeImageSnapshot()
+    return _encode_image(image, output)
 
 
 @final
@@ -238,5 +342,43 @@ class SkiaRasterSceneRenderer:
             budget=self._budget,
         )
 
+    async def draw(
+        self,
+        callback: DrawingFunction,
+        data: Mapping[str, object],
+        *,
+        canvas: DrawingCanvas,
+        output: RasterEncodeOptions = DEFAULT_RASTER_ENCODE_OPTIONS,
+    ) -> RenderedImage:
+        async with self._operation_admission.operation(
+            RenderOperation.DRAWING_TO_IMAGE.value
+        ):
+            return await self._draw_admitted(
+                callback,
+                data,
+                canvas=canvas,
+                output=output,
+            )
 
-__all__ = ["SkiaRasterSceneRenderer"]
+    async def _draw_admitted(
+        self,
+        callback: DrawingFunction,
+        data: Mapping[str, object],
+        *,
+        canvas: DrawingCanvas,
+        output: RasterEncodeOptions = DEFAULT_RASTER_ENCODE_OPTIONS,
+    ) -> RenderedImage:
+        return await draw_with_backend(
+            "skia",
+            callback,
+            data,
+            canvas,
+            output,
+            _draw_sync,
+            worker=self._worker,
+            observer=self._observer,
+            budget=self._budget,
+        )
+
+
+__all__ = ["SkiaCanvas", "SkiaRasterSceneRenderer"]
