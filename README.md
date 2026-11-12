@@ -1,20 +1,31 @@
 # entari-plugin-htmlrender
 
-Entari 的 provider-neutral HTML、Markdown、模板与栅格场景渲染库。
-
-普通调用收口为五个显式 contract：`HtmlPreparer` 把内容准备为中立 `PreparedHtml`，`HtmlRenderer` rasterize 内容，`TemplateRenderer` render 模板 HTML，`ResourceAccess` fetch/publish 资源，`GraphicsRenderer` rasterize `RasterScene`。Entari 只负责组合并拥有 `HtmlRenderService` 的生命周期；业务代码不查找默认 runtime。
+把 HTML、Markdown 和 Jinja2 模板渲染成图片的 Entari 插件。支持 Playwright、Takumi，也提供 Pillow 和 Skia 绘图接口。
 
 ## 安装
 
-项目支持 Python `>=3.11,<4.0` 与 Entari `>=0.19.4,<0.20.0`。按实际能力选择 extra：
+需要 Python `>=3.11,<4.0`、Entari `>=0.19.4,<0.20.0`。
+
+一般使用 Playwright，安装后还需要下载浏览器：
 
 ```bash
 uv add "entari-plugin-htmlrender[playwright]>=0.2.0,<0.3"
 uv run playwright install chromium
-# 或选择：takumi / pillow / skia / filehost / sentry / prometheus
 ```
 
-Entari 配置中的插件短名为 `htmlrender`，字段直接对应 `HtmlRenderConfig`：
+在 Debian / Ubuntu 或基于它们的容器中，可以用 `uv run playwright install --with-deps chromium` 一并安装系统依赖。
+
+如果使用 Takumi：
+
+```bash
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0,<0.3"
+```
+
+Pillow、Skia 按需安装，对应的可选依赖是 `pillow`、`skia`。只安装基础包不会安装渲染后端。
+
+## 配置
+
+在 Entari 配置中启用 `htmlrender`：
 
 ```yaml
 plugins:
@@ -23,82 +34,55 @@ plugins:
     startup: probe
     provider_config:
       engine: chromium
-    graphics:
-      backend: pillow
 ```
 
-`provider` 可为 `playwright`、`takumi`、第三方 Provider ID 或 `null`。Pillow/Skia 实现独立的 Graphics contract，不属于 HTML Provider。
+`startup: probe` 会在启动时检查后端是否可用。使用 Takumi 时，将 `provider` 改为 `takumi`，并移除 Playwright 专用的 `provider_config`。
 
-## 常用 API
+## 使用
 
-在 Entari handler 中通过 concrete `HtmlRenderService` 类型参数取得 DI 注入的 service：
+在 Entari 事件处理函数的参数中声明 `renderer: HtmlRenderer`，即可取得渲染接口。下面是一个生成 Markdown 图片的例子，省略了事件注册部分：
 
 ```python
-from entari_plugin_htmlrender import (
-    RasterOptions,
-    RenderedImage,
-)
-from entari_plugin_htmlrender.entari import HtmlRenderService
+from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
 
 
-async def build_card(service: HtmlRenderService) -> RenderedImage:
-    return await service.renderer.rasterize_markdown(
-        "# Hello, Entari",
+async def build_card(renderer: HtmlRenderer) -> RenderedImage:
+    return await renderer.rasterize_markdown(
+        "# Hello, Entari\n\n这是一张用 Markdown 生成的图片。",
         raster=RasterOptions(width=720),
     )
 ```
 
-Entari handler 也可直接注入所需 contract；同一个签名可用于框架无关的业务函数：
+返回值是 `RenderedImage`，用 `bytes(image)` 获取图片数据，再交给消息发送接口。
 
-```python
-from entari_plugin_htmlrender import HtmlRenderer, RenderedImage
+HTML、纯文本和模板分别使用 `rasterize_html()`、`rasterize_text()`、`rasterize_template()`，参数和示例见[渲染内容](docs/guides/rendering-content.md)。
 
+本地模板、图片和字体的读取路径需要加入 `resources.local_access.allowed_paths`，配置方式见[模板与资源](docs/guides/templates-and-resources.md)。插件负责启动和关闭后端；不要把注入的对象长期保存在全局变量中，热重载后它们会被替换。
 
-async def render_badge(renderer: HtmlRenderer) -> RenderedImage:
-    return await renderer.rasterize_html("<b>ready</b>")
-```
+## 后端与限制
 
-### Markdown 数学
+- **Playwright**：使用浏览器排版，支持 JavaScript、Markdown 公式和网页截图，也可以连接远程浏览器。需要安装浏览器及其系统依赖。
+- **Takumi**：不需要浏览器，适合静态内容渲染。HTML、CSS 的支持范围有限，不执行 JavaScript，也不支持网页导航和 CSS 选择器截图。中文等字符需要额外配置字体；安装时也要留意 `takumi-py` 对目标平台的支持。
+- **Pillow / Skia**：用 Python 函数绘图，支持按名称加载 `.py` 文件或模块。在 Entari 中由插件系统管理模块引用和可选热重载，也保留 `RasterScene` 场景接口。不解析 HTML 或 Markdown，配置见[Python 绘图](docs/configuration/graphics/index.md)。
 
-Markdown 使用 `pymdownx.arithmatex` 的 `generic` 模式，并启用 `smart_dollar=True`。行内美元语法 `$x$` 要求美元紧贴内容，`\(x\)` 也是受支持的行内写法；`$ x $` 保留为原文。`$$...$$`、`\[...\]` 与独立的 `\begin{env}...\end{env}` 使用块级语义；`$$` 公式应独占段落，不要写成 `before $$x$$ after`。
+### 数学公式
 
-Preparation 只给 Markdown treeprocessor 实际生成的公式容器添加内部 `data-htmlrender-arithmatex` 标记，公开样式仍是 `.arithmatex`。KaTeX 初始化脚本只处理带该标记的解析器结果，不会扫描没有标记的原始 HTML `.arithmatex` 容器。公式 preparation 会同时注入 KaTeX 脚本并设置 `DocumentRequirement.JAVASCRIPT`：Playwright 可以执行，Takumi rasterization 会以 `UnsupportedDocumentFeatureError` 拒绝该文档。
+Markdown 公式通过 KaTeX 渲染，目前需要选择 **Playwright**。行内公式可写为 `$x$` 或 `\(x\)`；块级公式使用独占段落的 `$$...$$` 或 `\[...\]`。`$ x $` 会保留为普通文本。
 
-需要分别保留 preparation 与执行时，使用 `service.preparation` 和 `rasterize_prepared()`：
+**Takumi 目前不能直接渲染 Markdown 数学公式。** 这条渲染流程依赖 JavaScript，使用 Takumi 渲染含公式的 Markdown 会抛出 `UnsupportedDocumentFeatureError`。插件尚未提供将公式自动转换成静态 SVG 或图片的功能。
 
-```python
-from entari_plugin_htmlrender import RasterOptions
-from entari_plugin_htmlrender.entari import HtmlRenderService
-
-
-async def prepare_and_render(service: HtmlRenderService):
-    prepared = await service.preparation.prepare_markdown("# Hello")
-    return await service.renderer.rasterize_prepared(
-        prepared,
-        raster=RasterOptions(width=720),
-    )
-```
-
-`HtmlRenderService` 直接暴露 `.preparation`、`.renderer`、`.templates`、`.resources`、`.graphics` 与 `.capabilities`。Playwright/Takumi 原生对象只通过 `service.capabilities` 的显式 lease 使用；`service.graphics` 使用配置的默认图形后端，也可同时启用 `graphics.backends: [pillow, skia]` 并通过 `service.capabilities.pillow` / `.skia` 调用。Takumi 的 `lease_api()` 提供编译、测量、SVG、节点、动画与字体等完整高级操作。
-
-## 生命周期
-
-插件通过 Entari `add_service` 注册 `HtmlRenderService`，并把它绑定到当前插件作用域。Launart 在 `preparing` 阶段启动所需 filehost 并按 `startup` 策略启动或探测 Provider；在 `cleanup` 阶段停止接纳新操作、排空在途操作、关闭 runtime，最后关闭 filehost。热卸载复用同一边界，业务代码不调用 service 的内部启动或关闭方法。
-
-## 兼容性
-
-`0.2.0` 是首条面向 Entari `0.19.x` 的发布线，最低 Python 为 3.11。从 `0.1.0` 升级时，应同时升级 Python 与 Entari；`0.1.0` 的安装命令和文档继续保留在对应历史版本中。发布面不包含 NoneBot 框架插件依赖，也不提供其他宿主框架的迁移 shim。插件保持 caller contracts 与 Entari DI 边界：handler 接收一次 plugin lifetime 内的 `HtmlRenderService`，框架无关业务函数继续依赖最小 contract，不读取进程级全局 runtime。
+其他差异见[后端选择](docs/start/choosing-provider.md)，Takumi 的详细说明见 [Takumi 配置](docs/configuration/providers/takumi.md)。
 
 ## 文档与示例
 
-- [Entari 0.2 能力概览与升级](docs/start/migration-v0.2.md)
 - [完整文档](https://entanex.github.io/entari-plugin-htmlrender/)
-- [`examples/template_render`](examples/template_render)：Entari DI 与模板 rasterization
-- [`examples/remote_browser`](examples/remote_browser)：远程 Playwright capability
-- [`examples/takumi_capability`](examples/takumi_capability)：Takumi managed session
-- [`examples/graphics_render`](examples/graphics_render)：`GraphicsRenderer` 与 `RasterScene`
-- [`examples/echo-provider`](examples/echo-provider)：第三方 Provider v2 entry point
+- [从 0.1 升级到 0.2](docs/start/migration-v0.2.md)
+- [本地模板渲染](examples/template_render)
+- [连接远程浏览器](examples/remote_browser)
+- [Takumi 高级接口](examples/takumi_capability)
+- [Pillow / Skia 绘图](examples/graphics_render)
+- [编写第三方渲染后端](examples/echo-provider)
 
 ## License
 
-项目使用 MIT License。启用第三方 Provider 或 native backend 前，请同时检查其依赖与分发许可。
+[MIT](LICENSE)
