@@ -19,6 +19,7 @@ from creart import it
 from launart import Launart, Service
 
 from entari_plugin_htmlrender.graphics import GraphicsRenderer
+from entari_plugin_htmlrender.graphics.drawings import DrawingRenderer
 from entari_plugin_htmlrender.preparation.service import HtmlPreparer
 from entari_plugin_htmlrender.rendering.contracts import (
     HtmlRenderer,
@@ -126,6 +127,8 @@ class _ContractProvider(Provider[Any]):
             return component.resources
         if self.contract is GraphicsRenderer:
             return component.graphics
+        if self.contract is DrawingRenderer:
+            return component.drawings
         raise RuntimeError(f"Unsupported HTMLRender contract: {self.contract!r}")
 
     def __repr__(self) -> str:
@@ -141,6 +144,7 @@ class HtmlRenderContractProviderFactory(ProviderFactory):
         HtmlPreparer,
         ResourceAccess,
         GraphicsRenderer,
+        DrawingRenderer,
     )
 
     def validate(self, param: Param) -> Provider[Any] | None:

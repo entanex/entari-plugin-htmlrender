@@ -11,6 +11,7 @@ from launart.status import Phase  # noqa: TC002 -- public annotation contract
 from entari_plugin_htmlrender._logging import logger
 from entari_plugin_htmlrender.config import HtmlRenderConfig, RuntimeStartupPolicy
 from entari_plugin_htmlrender.graphics import GraphicsRenderer  # noqa: TC001
+from entari_plugin_htmlrender.graphics.drawings import DrawingRenderer  # noqa: TC001
 from entari_plugin_htmlrender.preparation.service import HtmlPreparer  # noqa: TC001
 from entari_plugin_htmlrender.rendering.contracts import (  # noqa: TC001
     HtmlRenderer,
@@ -91,6 +92,10 @@ class HtmlRenderService(_ServiceBase):
     @property
     def graphics(self) -> GraphicsRenderer:
         return self._runtime.graphics
+
+    @property
+    def drawings(self) -> DrawingRenderer:
+        return self._runtime.drawings
 
     @property
     def capabilities(self) -> RuntimeCapabilities:

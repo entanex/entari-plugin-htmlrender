@@ -165,7 +165,7 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
         from entari_plugin_htmlrender.entari.providers import (
             HtmlRenderContractProviderFactory,
         )
-        from entari_plugin_htmlrender.graphics import GraphicsRenderer
+        from entari_plugin_htmlrender.graphics import DrawingRenderer, GraphicsRenderer
         from entari_plugin_htmlrender.resources import ResourceAccess
 
         class HostService(Service):
@@ -200,6 +200,7 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
                 preparation: HtmlPreparer,
                 resources: ResourceAccess,
                 graphics: GraphicsRenderer,
+                drawings: DrawingRenderer,
             ):
                 injected.update(
                     renderer=renderer,
@@ -207,6 +208,7 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
                     preparation=preparation,
                     resources=resources,
                     graphics=graphics,
+                    drawings=drawings,
                 )
 
             return consume
@@ -218,6 +220,7 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
                 "preparation": service.preparation,
                 "resources": service.resources,
                 "graphics": service.graphics,
+                "drawings": service.drawings,
             }
 
         def contract_provider_count():
