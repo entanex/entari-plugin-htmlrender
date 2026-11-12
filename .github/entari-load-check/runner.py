@@ -323,11 +323,12 @@ async def _resolve_contracts(
         "preparation": service.preparation,  # type: ignore[attr-defined]
         "resources": service.resources,  # type: ignore[attr-defined]
         "graphics": service.graphics,  # type: ignore[attr-defined]
+        "drawings": service.drawings,  # type: ignore[attr-defined]
     }
     if injected != expected:
         raise ProbeFailure(
             "di",
-            "Letoderea did not inject the five contracts from the active service",
+            "Letoderea did not inject the contracts from the active service",
         )
     return dict.fromkeys(expected, True)
 
@@ -496,6 +497,7 @@ async def _run_probe(
             HtmlRenderService,
         )
         from entari_plugin_htmlrender.graphics import (  # noqa: PLC0415
+            DrawingRenderer,
             GraphicsRenderer,
         )
         from entari_plugin_htmlrender.preparation.service import (  # noqa: PLC0415
@@ -518,6 +520,7 @@ async def _run_probe(
             preparation: HtmlPreparer,
             resources: ResourceAccess,
             graphics: GraphicsRenderer,
+            drawings: DrawingRenderer,
         ) -> None:
             injected.update(
                 renderer=renderer,
@@ -525,6 +528,7 @@ async def _run_probe(
                 preparation=preparation,
                 resources=resources,
                 graphics=graphics,
+                drawings=drawings,
             )
 
         consume = on(DiProbe)(handle_contracts)
@@ -577,6 +581,7 @@ async def _run_probe(
             "preparation": True,
             "resources": True,
             "graphics": True,
+            "drawings": True,
         }
 
         result["stage"] = "reload"
