@@ -32,7 +32,27 @@ class RasterBackendExecutionError(GraphicsError):
         )
 
 
+class DrawingBackendExecutionError(GraphicsError):
+    """A backend-native Python drawing failed during draw or encoding."""
+
+    def __init__(
+        self,
+        backend: GraphicsBackendName,
+        detail: str,
+        *,
+        source: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            f"Graphics backend {backend!r} failed: {detail}",
+            backend=backend,
+            operation="drawing_to_image",
+            retryable=False,
+            source=source,
+        )
+
+
 __all__ = [
+    "DrawingBackendExecutionError",
     "GraphicsBackendUnavailableError",
     "GraphicsError",
     "RasterBackendExecutionError",

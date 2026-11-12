@@ -242,6 +242,7 @@ def test_render_operation_identity_is_output_explicit() -> None:
         "template_to_image",
         "prepared_html_to_image",
         "raster_scene_to_image",
+        "drawing_to_image",
         "template_to_html",
     }
     assert all("rasterize" not in operation.value for operation in RenderOperation)

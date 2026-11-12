@@ -19,6 +19,7 @@ class RenderOperation(StrEnum):
     TEMPLATE_TO_IMAGE = "template_to_image"
     PREPARED_HTML_TO_IMAGE = "prepared_html_to_image"
     RASTER_SCENE_TO_IMAGE = "raster_scene_to_image"
+    DRAWING_TO_IMAGE = "drawing_to_image"
     TEMPLATE_TO_HTML = "template_to_html"
 
 
