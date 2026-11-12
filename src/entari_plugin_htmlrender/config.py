@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import keyword
 from pathlib import Path
 from typing import ClassVar
 from typing_extensions import Self
@@ -148,14 +149,59 @@ class ObservabilitySettings(_StrictRenderModel):
     prometheus: bool = Field(default=False)
 
 
+class PythonDrawingSettings(_StrictRenderModel):
+    """One explicitly configured, trusted Python drawing entry point."""
+
+    backend: GraphicsBackendName
+    path: Path | None = None
+    module: str | None = None
+    function: str = "draw"
+    reload: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def _python_path(cls, value: Path | None) -> Path | None:
+        if value is not None and value.suffix != ".py":
+            raise ValueError("drawing path must name a .py file")
+        return value
+
+    @field_validator("module", "function")
+    @classmethod
+    def _python_name(cls, value: str | None) -> str | None:
+        if value is not None and not all(
+            part.isidentifier() and not keyword.iskeyword(part)
+            for part in value.split(".")
+        ):
+            raise ValueError("drawing module and function must be Python names")
+        return value
+
+    @model_validator(mode="after")
+    def _one_source(self) -> Self:
+        if (self.path is None) == (self.module is None):
+            raise ValueError("drawing requires exactly one of path or module")
+        if "." in self.function:
+            raise ValueError("drawing function must be a module-level name")
+        return self
+
+
 class GraphicsSettings(_StrictRenderModel):
     """Selection and budgets for backend-neutral graphics renderers."""
 
     backend: GraphicsBackendName | None = None
     backends: tuple[GraphicsBackendName, ...] = ()
+    drawings: dict[str, PythonDrawingSettings] = Field(default_factory=dict)
     max_pixels: int = Field(default=16 * 1024 * 1024, gt=0)
     max_concurrency: int = Field(default=2, gt=0)
     max_commands: int = Field(default=100_000, gt=0)
+
+    @field_validator("drawings")
+    @classmethod
+    def _drawing_names(
+        cls, value: dict[str, PythonDrawingSettings]
+    ) -> dict[str, PythonDrawingSettings]:
+        if any(not name or name != name.strip() for name in value):
+            raise ValueError("drawing names must be non-empty without outer whitespace")
+        return value
 
     @field_validator("backends")
     @classmethod
@@ -242,6 +288,7 @@ __all__ = [
     "HtmlRenderSettings",
     "LocalAccessSettings",
     "ObservabilitySettings",
+    "PythonDrawingSettings",
     "RemoteAccessSettings",
     "ResourceSettings",
     "RuntimeStartupPolicy",

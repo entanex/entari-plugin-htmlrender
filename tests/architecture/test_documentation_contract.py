@@ -45,6 +45,7 @@ EXPECTED_CONFIG_PATHS = frozenset(
     {
         "graphics.backend",
         "graphics.backends",
+        "graphics.drawings",
         "graphics.max_commands",
         "graphics.max_concurrency",
         "graphics.max_pixels",

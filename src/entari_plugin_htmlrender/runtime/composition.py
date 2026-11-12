@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from entari_plugin_htmlrender.errors import ProviderConfigurationError
+from entari_plugin_htmlrender.graphics.drawings import DrawingRenderer  # noqa: TC001
 
 # Public composition annotations remain available to runtime introspection.
 from entari_plugin_htmlrender.graphics.ports import GraphicsRenderer  # noqa: TC001
@@ -84,6 +85,7 @@ def build_runtime(
     operation_admission: OperationAdmissionGate | None = None,
     capabilities: CapabilityCatalog | None = None,
     html_render_budget: HtmlRenderBudget | None = None,
+    drawings: DrawingRenderer | None = None,
 ) -> RenderRuntime:
     """Assemble one host-neutral runtime without acquiring external resources."""
     admission = operation_admission or OperationAdmissionGate()
@@ -110,6 +112,7 @@ def build_runtime(
         ),
         resources=resources,
         graphics=graphics,
+        drawings=drawings,
         lifecycle=binding.lifecycle,
         capabilities=catalog,
         operation_admission=admission,

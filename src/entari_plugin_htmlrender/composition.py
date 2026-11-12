@@ -70,6 +70,10 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
+    from entari_plugin_htmlrender.graphics.drawings import (
+        DrawingRegistryFactory,
+        DrawingService,
+    )
     from entari_plugin_htmlrender.preparation.models import PreparedHtml, RasterOptions
     from entari_plugin_htmlrender.rendering.artifacts import RenderedImage
     from entari_plugin_htmlrender.rendering.models import RenderOperation
@@ -193,6 +197,7 @@ class _ComposedLifecycle:
         templates: JinjaTemplateCompiler,
         publisher: AssetPublisher | None,
         remote_transport: RemoteTransportExecutor,
+        drawings: DrawingService | None = None,
     ) -> None:
         self._provider_id = provider_id
         self._provider = provider
@@ -200,6 +205,7 @@ class _ComposedLifecycle:
         self._templates = templates
         self._publisher = publisher
         self._remote_transport = remote_transport
+        self._drawings = drawings
         self._poisoned = False
 
     @staticmethod
@@ -268,6 +274,8 @@ class _ComposedLifecycle:
             self._resources.clear,
             self._remote_transport.aclose,
         ]
+        if self._drawings is not None:
+            operations.insert(0, self._drawings.aclose)
         if self._publisher is not None:
             operations.extend((self._publisher.clear, self._publisher.aclose))
         errors = await self._cleanup(*operations)
@@ -330,7 +338,9 @@ class RuntimePlan:
     def _inputs_for_build(self) -> tuple[HtmlRenderConfig, object]:
         return self._config.model_copy(deep=True), self._provider_config
 
-    def build_runtime(self) -> RenderRuntime:
+    def build_runtime(
+        self, *, drawing_registry_factory: DrawingRegistryFactory | None = None
+    ) -> RenderRuntime:
         """Consume this plan to build one graph without external I/O."""
         if self._consumed:
             raise InvalidRenderInputError(
@@ -339,7 +349,9 @@ class RuntimePlan:
                 field="plan",
             )
         self._consumed = True
-        return _build_runtime_for(self)
+        return _build_runtime_for(
+            self, drawing_registry_factory=drawing_registry_factory
+        )
 
     @property
     def asset_publisher_settings(self) -> AssetPublisherSettings | None:
@@ -503,7 +515,9 @@ def build_runtime_plan(
     )
 
 
-def _build_runtime_for(plan: RuntimePlan) -> RenderRuntime:
+def _build_runtime_for(
+    plan: RuntimePlan, *, drawing_registry_factory: DrawingRegistryFactory | None = None
+) -> RenderRuntime:
     config, parsed_provider_config = plan._inputs_for_build()
     operation_observer, cache_observer = _select_observers(config)
     cache_settings = _cache_settings(config)
@@ -514,6 +528,7 @@ def _build_runtime_for(plan: RuntimePlan) -> RenderRuntime:
         worker=worker,
         observer=operation_observer,
         operation_admission=operation_admission,
+        drawing_registry_factory=drawing_registry_factory,
     )
 
     local = config.resources.local_access
@@ -702,6 +717,7 @@ def _build_runtime_for(plan: RuntimePlan) -> RenderRuntime:
         templates=templates,
         publisher=publisher,
         remote_transport=remote_transport,
+        drawings=graphics_composition.drawings,
     )
     return build_runtime(
         binding=replace(binding, lifecycle=lifecycle),
@@ -709,6 +725,7 @@ def _build_runtime_for(plan: RuntimePlan) -> RenderRuntime:
         preparer=preparer,
         resources=resources,
         graphics=graphics_composition.primary,
+        drawings=graphics_composition.drawings,
         operation_admission=operation_admission,
         capabilities=graphics_composition.capabilities,
         html_render_budget=HtmlRenderBudget(
