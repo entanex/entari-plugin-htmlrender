@@ -639,6 +639,62 @@ async def test_close_rejects_lease_waiting_for_refresh(
     assert find_plugin("direct_admission") is None
 
 
+async def test_refresh_does_not_adopt_unrelated_plugin_loaded_while_paused(
+    pool: EntariDrawingPool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    drawing_root = tmp_path / "drawing"
+    unrelated_root = tmp_path / "unrelated"
+    path = _write(
+        drawing_root,
+        "direct_owned.py",
+        "import asyncio\n"
+        "from arclet.entari.plugin import collect_disposes\n"
+        "started = asyncio.Event()\n"
+        "released = asyncio.Event()\n"
+        "async def dispose():\n"
+        "    started.set()\n"
+        "    await released.wait()\n"
+        "collect_disposes(dispose)\n"
+        "def draw(canvas, data):\n    data['value'] = 1\n",
+    )
+    _write(
+        unrelated_root,
+        "direct_unrelated.py",
+        "def draw(canvas, data):\n    data['value'] = 2\n",
+    )
+    unrelated_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.syspath_prepend(str(unrelated_root))
+    worker = _Worker()
+    registry = pool.registry(
+        {"drawing": DrawingSpec("pillow", path=path, reload=True)}, worker=worker
+    )
+    plugin = find_plugin("direct_owned")
+    assert plugin is not None
+    started: asyncio.Event = plugin.module.started
+    released: asyncio.Event = plugin.module.released
+    path.write_text(
+        "def draw(canvas, data):\n    data['value'] = 3\n", encoding="utf-8"
+    )
+    reloading = asyncio.create_task(registry.reload("drawing"))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        assert load_plugin("direct_unrelated")
+    finally:
+        released.set()
+    await asyncio.wait_for(reloading, timeout=2)
+    assert await _value(registry, "drawing") == 3
+    assert find_plugin("direct_unrelated") is not None
+
+    try:
+        await registry.aclose()
+        assert find_plugin("direct_owned") is None
+        unrelated = find_plugin("direct_unrelated")
+        assert unrelated is not None
+        assert unrelated.available
+    finally:
+        await unload_plugin_async("direct_unrelated")
+
+
 async def test_close_retries_failed_unload_without_losing_bookkeeping(
     pool: EntariDrawingPool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

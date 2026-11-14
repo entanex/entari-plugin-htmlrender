@@ -273,25 +273,24 @@ class EntariDrawingPool:
         self,
         registry: EntariDrawingRegistry,
         before: set[str],
-        *,
-        dependencies_only: bool = False,
     ) -> None:
         roots = _plugin_roots()
         relevant = registry._dependencies()
-        created = set(roots.values()) - before
-        if dependencies_only:
-            created.intersection_update(roots.get(name, name) for name in relevant)
+        relevant_roots = {roots.get(name, name) for name in relevant}
+        source_roots = {
+            roots.get(source.name, source.name) for source in registry._sources.values()
+        }
+        # A before/after snapshot alone cannot distinguish our imports from an
+        # unrelated plugin loaded while a reload awaits. Only roots reachable
+        # from the canonical drawing sources (or the newly created source root
+        # itself, when the source is a top-level module) belong to this registry.
+        created = (set(roots.values()) - before) & (relevant_roots | source_roots)
         for root in created:
             self._owned.setdefault(root, _OwnedPlugin())
-        for name in relevant:
-            root = roots.get(name, name)
+        for root in relevant_roots:
             if root in self._owned:
                 self._owned[root].users.add(registry)
                 registry._claimed.add(root)
-        # Include newly created package roots, even when they have no import edges.
-        for root in created:
-            self._owned[root].users.add(registry)
-            registry._claimed.add(root)
 
     def _release_candidates(
         self, registry: EntariDrawingRegistry | None = None
@@ -668,7 +667,7 @@ class EntariDrawingRegistry:
         try:
             yield callback
         finally:
-            self._pool._claim(self, before, dependencies_only=True)
+            self._pool._claim(self, before)
             self._active -= 1
             if self._active == 0:
                 self._drained.set()
