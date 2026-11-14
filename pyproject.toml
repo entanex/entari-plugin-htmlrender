@@ -26,7 +26,7 @@ sentry = [
 prometheus = [
     "prometheus-client>=0.20.0",
 ]
-takumi = ["takumi-py==0.2.0"]
+takumi = ["takumi-py==0.4.0"]
 playwright = [
     "playwright>=1.60.0",
 ]
@@ -38,7 +38,7 @@ all = [
     "py-machineid>=0.8.0",
     "sentry-sdk>=2.0.0",
     "skia-python>=144.0.post2",
-    "takumi-py==0.2.0",
+    "takumi-py==0.4.0",
 ]
 pillow = [
     "pillow>=12.0.0",

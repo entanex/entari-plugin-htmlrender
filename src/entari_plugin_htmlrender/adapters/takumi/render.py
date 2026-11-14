@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .config import TakumiConfig
     from .runtime import TakumiRuntimeState
 
-_SUPPORTED_TAKUMI_VERSION = "0.2.0"
+_SUPPORTED_TAKUMI_VERSION = "0.4.0"
 OBSERVATION_ATTRIBUTES: dict[str, str] = {"render.backend": TAKUMI_PROVIDER_ID}
 
 
@@ -78,7 +78,7 @@ def takumi_availability() -> ProviderAvailability:
     try:
         if find_spec("takumi_py") is None:
             return ProviderUnavailable(
-                reason="Optional dependency `takumi-py==0.2.0` is not installed.",
+                reason="Optional dependency `takumi-py==0.4.0` is not installed.",
             )
     except (ImportError, ValueError) as error:
         return ProviderUnavailable(
