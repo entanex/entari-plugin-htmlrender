@@ -4,6 +4,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+import posixpath
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +27,7 @@ from entari_plugin_htmlrender.resources.templating import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from contextlib import AbstractContextManager
 
     from entari_plugin_htmlrender.resources.observation import CacheObserver
@@ -59,6 +60,36 @@ class _Key:
 class _Entry:
     environment: jinja2.Environment
     load_lock: AbstractContextManager[bool] = field(default_factory=threading.Lock)
+
+
+class _AuthorizedFileSystemLoader(jinja2.FileSystemLoader):
+    def __init__(self, root: Path, local_access: LocalAccessPolicy) -> None:
+        super().__init__(root)
+        self._root = root
+        self._local_access = local_access
+
+    def get_source(
+        self, environment: jinja2.Environment, template: str
+    ) -> tuple[str, str, Callable[[], bool]]:
+        # Keep Jinja's logical-name validation and cross-platform path joining,
+        # then authorize each concrete file, including include/extends/import.
+        requested = Path(
+            posixpath.join(
+                str(self._root), *jinja2.loaders.split_template_path(template)
+            )
+        )
+        authorized = self._local_access.authorize(requested)
+        source, filename, is_current = jinja2.FileSystemLoader(
+            authorized.parent, encoding=self.encoding
+        ).get_source(environment, authorized.name)
+
+        def uptodate() -> bool:
+            # A symlink may be retargeted without changing the old target's mtime.
+            return (
+                self._local_access.authorize(requested) == authorized and is_current()
+            )
+
+        return source, filename, uptodate
 
 
 class JinjaTemplateCompiler:
@@ -160,7 +191,7 @@ class JinjaTemplateCompiler:
             if isinstance(source, PackageResourceSource):
                 loader = jinja2.PackageLoader(source.package, source.root)
             else:
-                loader = jinja2.FileSystemLoader(source.root)
+                loader = _AuthorizedFileSystemLoader(source.root, self._local_access)
             environment = jinja2.Environment(
                 loader=loader,
                 extensions=tuple(extensions),

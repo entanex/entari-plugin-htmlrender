@@ -14,6 +14,7 @@ from entari_plugin_htmlrender.composition import build_runtime_plan
 from entari_plugin_htmlrender.config import HtmlRenderConfig
 from entari_plugin_htmlrender.errors import (
     InvalidRenderInputError,
+    ResourceAccessDeniedError,
     RuntimeUnavailableError,
 )
 from entari_plugin_htmlrender.resources import FileResourceRef
@@ -160,6 +161,54 @@ async def test_preparation_reuses_authorized_file_resources(tmp_path: Path) -> N
     try:
         result = await runtime.preparation.prepare_markdown(FileResourceRef(source))
         assert "<h1>From a file</h1>" in result.html
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.parametrize(
+    "wrapper",
+    [
+        None,
+        '{% include "fragment.html" %}',
+        '{% extends "fragment.html" %}',
+        '{% from "fragment.html" import value %}{{ value() }}',
+    ],
+    ids=["direct", "include", "extends", "import"],
+)
+async def test_template_reads_enforce_allowlist_after_symlink_retarget(
+    tmp_path: Path, wrapper: str | None
+) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    for directory, text in ((allowed, "inside"), (outside, "secret")):
+        directory.mkdir()
+        (directory / "content.html").write_text(
+            "{% macro value() %}" + text + "{% endmacro %}"
+            "{% block body %}" + text + "{% endblock %}",
+            encoding="utf-8",
+        )
+    link = allowed / "fragment.html"
+    link.symlink_to(outside / "content.html")
+    template_name = "fragment.html"
+    if wrapper is not None:
+        template_name = "card.html"
+        (allowed / template_name).write_text(wrapper, encoding="utf-8")
+    template = TemplateRef(allowed, template_name)
+    runtime = build_runtime_plan(
+        HtmlRenderConfig.model_validate(
+            {"resources": {"local_access": {"allowed_paths": [allowed]}}}
+        )
+    ).build_runtime()
+    try:
+        with pytest.raises(ResourceAccessDeniedError):
+            await runtime.preparation.render_template(template, {})
+        link.unlink()
+        link.symlink_to(allowed / "content.html")
+        assert await runtime.preparation.render_template(template, {}) == "inside"
+        link.unlink()
+        link.symlink_to(outside / "content.html")
+        with pytest.raises(ResourceAccessDeniedError):
+            await runtime.preparation.render_template(template, {})
     finally:
         await runtime.aclose()
 
