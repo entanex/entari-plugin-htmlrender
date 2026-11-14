@@ -1,15 +1,23 @@
 ---
 title: Playwright 配置
-description: 本地/远程浏览器连接、资源 transport 与 typed Capability
+description: 远程浏览器连接、计划弃用的本地模式、资源 transport 与 typed Capability
 icon: lucide/monitor-cog
 ---
 
 # Playwright 配置
 
-## 安装与最小配置
+静态 HTML、文本、模板和不需要浏览器能力的 Markdown 应优先评估 [Takumi](takumi.md)。需要执行 JavaScript、导航网页、操作浏览器页面或使用 selector 时，再选择 Playwright。
+
+!!! warning "本地启动与浏览器安装计划在近期弃用"
+
+    本插件的 Playwright 后端将在不久的将来弃用本地浏览器安装、管理与启动，后续仅保留 `connect_ws` 与 `connect_cdp` 远程连接。当前版本仍支持不配置远程 endpoint 时在 Bot 环境直接启动浏览器，也继续支持现有的本地安装配置；具体移除版本和时间尚未确定。
+
+    Bot 环境无论使用远程还是本地模式都需要 `playwright` Python extra。这个 extra 与 Bot 环境中的浏览器安装是两件事；远程模式不在 Bot 环境执行 `playwright install`，浏览器二进制及其系统依赖由远程服务提供。
+
+## Python client 与远程最小配置
 
 ```bash
-uv add "entari-plugin-htmlrender[playwright]>=0.2.0,<0.3"
+uv add "entari-plugin-htmlrender[playwright]>=0.2.0"
 ```
 
 ```yaml
@@ -26,16 +34,19 @@ plugins:
 
 ## 部署优先级 { #deployment-priority }
 
-1. **首选：Docker 远程 Playwright。** 在独立容器中部署版本匹配的 Playwright browser service，Bot 通过 `connect_ws.endpoint` 连接。浏览器二进制、Linux 系统依赖、sandbox 与进程生命周期都留在服务容器内；Bot 宿主机只需要 `playwright` extra。生产环境默认采用这一形态，具体拓扑见[远程 Playwright 部署](../remote-playwright.md)。
-2. **第二选项：Bot 宿主机本地 Playwright。** 不配置 `connect_ws` / `connect_cdp`，由 Bot 直接启动浏览器。它适合本地开发、单机部署或无法增加独立服务的环境，但宿主机必须承担浏览器下载、系统动态库、权限和进程清理。
+1. **无需浏览器时优先 Takumi。** Takumi 在进程内完成受支持的静态渲染，不启动浏览器，也不要求 Bot 环境安装 Playwright 浏览器；能力边界见 [Takumi 配置](takumi.md)。
+2. **需要浏览器时首选远程 Playwright。** 在独立容器中部署版本匹配的 Playwright browser service，Bot 通过 `connect_ws.endpoint` 连接。浏览器二进制、Linux 系统依赖、sandbox 与进程生命周期都留在服务容器内；Bot 环境只需要 `playwright` extra。生产环境采用这一形态，具体拓扑见[远程 Playwright 部署](../remote-playwright.md)。
+3. **现有本地部署仍可使用。** 不配置 `connect_ws` / `connect_cdp`，由 Bot 直接启动浏览器。宿主机负责浏览器下载、系统动态库、权限和进程清理；该路径计划在近期弃用。
 
 CDP 用于接入已有 Chromium，不是一般部署的首选替代；它不支持 Firefox 或 WebKit，协议能力也不同于版本匹配的 Playwright WS 服务。
 
-## 浏览器运行环境 { #browser-runtime-requirements }
+## 本地浏览器运行环境 { #browser-runtime-requirements }
 
-`playwright` extra 只安装 Playwright Python client。每个 Playwright 版本都要求特定版本的浏览器二进制；升级依赖或更新 lockfile 后，需要用同一个 Python 环境重新执行浏览器安装。上游的[浏览器安装说明](https://playwright.dev/python/docs/browsers/)也把 Python package、浏览器二进制和 Linux 系统依赖视为三个独立层次。
+以下步骤只适用于仍在当前版本中受支持、但计划弃用的 Bot 本地启动与安装路径。配置了 `connect_ws` 或 `connect_cdp` 时，不要在 Bot 环境安装浏览器。
 
-采用第二选项时，在 macOS 或 Windows 安装选中的浏览器：
+`playwright` extra 只安装 Playwright Python client。本地模式下，每个 Playwright 版本都要求特定版本的浏览器二进制；升级依赖或更新 lockfile 后，需要用同一个 Python 环境重新执行浏览器安装。上游的[浏览器安装说明](https://playwright.dev/python/docs/browsers/)也把 Python package、浏览器二进制和 Linux 系统依赖视为三个独立层次。
+
+仍使用本地模式时，在 macOS 或 Windows 安装选中的浏览器：
 
 ```bash
 uv run playwright install chromium
@@ -76,7 +87,7 @@ uv run playwright install --with-deps chromium
 
 使用 Playwright 官方容器镜像时，镜像已经包含浏览器与系统依赖，但不包含项目的 Python package；镜像 tag 必须与 lockfile 最终解析到的 Playwright 版本匹配。官方浏览器不支持 Alpine/musl 上的 Firefox 与 WebKit，容器部署应使用受支持的 glibc 基础镜像。详见上游的 [Docker 说明](https://playwright.dev/python/docs/docker/)。
 
-推荐的 Docker/WS 远程模式下，Bot 进程仍需 `playwright` extra，但不需要本地浏览器二进制及其系统依赖；这些要求由远程服务承担。WS 服务与 client 必须精确锁定到同一 Playwright 版本。连接前虽有版本风险门禁，但它在相邻 minor、部分 patch 差异或无法探测远端版本时仍会继续，不能代替版本锁定；CDP 则完全不执行该版本比较。详细行为与服务端检查表见[远程 Playwright 部署](../remote-playwright.md#ws-version-gate-and-startup-probe)。
+远程模式下，Bot 进程仍需 `playwright` extra，但不需要执行 `playwright install`，也不需要本地浏览器二进制及其系统依赖；这些要求由远程服务承担。WS 服务与 client 必须精确锁定到同一 Playwright 版本。连接前虽有版本风险门禁，但它在相邻 minor、部分 patch 差异或无法探测远端版本时仍会继续，不能代替版本锁定；CDP 则完全不执行该版本比较。详细行为与服务端检查表见[远程 Playwright 部署](../remote-playwright.md#ws-version-gate-and-startup-probe)。
 
 下表所有字段均位于 `provider_config`：
 
@@ -121,7 +132,7 @@ uv run playwright install --with-deps chromium
 `filehost` 是需要真实 HTTP URL 时的兼容 transport，由 htmlrender 内置的 hosted asset store 提供。可选 `filehost` extra 会安装 `py-machineid`，用于派生默认请求头守卫值：
 
 ```bash
-uv add "entari-plugin-htmlrender[playwright,filehost]>=0.2.0,<0.3"
+uv add "entari-plugin-htmlrender[playwright,filehost]>=0.2.0"
 ```
 
 不安装该 extra 时 transport 仍可使用内置机器标识回退；对多副本或需要显式轮换的部署，直接配置 secret `resources.filehost.request_header_value`，不要依赖自动派生值。

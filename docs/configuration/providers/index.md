@@ -1,6 +1,6 @@
 ---
 title: HTML Provider
-description: Playwright、Takumi 与第三方 Provider 的选择和配置入口
+description: Takumi、远程 Playwright 与第三方 Provider 的选择和配置入口
 ---
 
 # HTML Provider
@@ -9,19 +9,21 @@ Provider 消费 `PreparedHtml` 并产生 typed artifact。一次 runtime 只选�
 
 | Provider | 状态 | 适用场景 |
 | --- | --- | --- |
-| [Playwright](playwright.md) | 稳定 | 浏览器布局、JavaScript、导航、selector 与页面原生能力 |
-| [Takumi](takumi.md) | 稳定 | 无浏览器静态渲染，以及 node/SVG/animation 专属能力 |
+| [Takumi](takumi.md) | 推荐用于静态内容 | HTML、Markdown、文本和模板图片，以及节点、SVG、动画与字体接口 |
+| [Playwright](playwright.md) | 推荐使用远程连接 | 浏览器布局、JavaScript、Markdown 公式、导航、selector 与页面原生能力 |
 | 第三方 Provider | 由 Provider 决定 | 通过 `entari_plugin_htmlrender.providers.v2` entry point 发现 |
 
 ```yaml
 plugins:
   htmlrender:
-    provider: playwright
+    provider: takumi
     startup: probe
     provider_config: {}
 ```
 
 `provider` 可为 `playwright`、`takumi`、第三方 Provider ID 或 `null`。为 `null` 时 service 仍提供 `HtmlPreparer`、`TemplateRenderer`、`ResourceAccess` 与配置的 `GraphicsRenderer`，但 `HtmlRenderer` 的图片 operation 不可用。
+
+本地 Playwright 浏览器安装、管理与启动将在不久的将来弃用，后续仅保留 remote support；当前本地模式仍可使用，尚未确定移除版本或日期。新部署与迁移步骤见[远程 Playwright](../remote-playwright.md)。
 
 ## 下一步
 

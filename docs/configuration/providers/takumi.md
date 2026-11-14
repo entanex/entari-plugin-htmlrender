@@ -1,17 +1,26 @@
 ---
 title: Takumi 配置
-description: Takumi 原生 Provider 的静态渲染、字体和 typed Capability
+description: 用 Takumi 渲染静态内容，配置字体并调用 SVG、测量和动画接口
 icon: lucide/gauge
 ---
 
 # Takumi 配置与能力
 
-Takumi 在进程内执行 Rust 原生排版，不启动浏览器，不执行 JavaScript，也不访问网络。插件要求 `takumi-py>=0.4.0`，不设上限。
+Takumi 是推荐的静态内容渲染后端，适合卡片、帮助菜单、文本和 Jinja2 模板图片。它在进程内执行 Rust 原生排版，不需要安装或运行浏览器，也不执行 JavaScript。插件要求 `takumi-py>=0.4.0`，不设上限。
+
+日常使用 `HtmlRenderer` 渲染图片；SVG、布局测量、节点、动画和动态字体等专属能力通过 `TakumiCapability` 调用。Takumi 不负责联网，也不会自动下载 HTML 中的远程引用。本地图片可按路径白名单物化；远程资源需要显式读取，字体需要配置或注册，CSS 需要内联或显式传入。
+
+| 需求 | 使用方式 |
+| --- | --- |
+| HTML、Markdown、文本和 Jinja2 模板转图片 | `HtmlRenderer.rasterize_*()` |
+| SVG 输出、动态注册字体 | `TakumiCapability.lease_session()` |
+| 编译复用、布局测量、节点渲染、动画与帧编码 | `TakumiCapability.lease_api()` |
+| JavaScript、网页导航、选择器截图、Markdown 数学公式 | 使用[远程 Playwright](../remote-playwright.md) |
 
 ## 安装与选择
 
 ```bash
-uv add "entari-plugin-htmlrender[takumi]>=0.2.0,<0.3"
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
 ```
 
 ```yaml
@@ -22,6 +31,24 @@ plugins:
     provider_config:
       max_concurrency: 4
 ```
+
+这份配置使用默认字体，适合先运行英文示例。中文等字符需要添加相应字体；有匹配平台 wheel 时无需 Rust 工具链，也无需执行 `playwright install`。字体示例与平台要求见下文。
+
+```python
+from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
+
+async def render_card(renderer: HtmlRenderer) -> RenderedImage:
+    return await renderer.rasterize_markdown(
+        "# Hello, Takumi\n\nRendered without a browser.",
+        raster=RasterOptions(width=720),
+    )
+```
+
+Entari 会注入当前插件作用域内的 `HtmlRenderer`。返回值可用 `bytes(image)` 取得编码后的图片数据，`image.width` 与 `image.height` 表示实际尺寸。完整接入流程见[快速开始](../../start/quickstart.md)。
+
+!!! warning "HTML/CSS 与公式限制"
+
+    Takumi 不是完整浏览器，HTML/CSS 支持范围有限，现有浏览器模板需要检查排版结果。插件当前的 Markdown 数学公式依赖 KaTeX JavaScript，Takumi 会抛出 `UnsupportedDocumentFeatureError`；不会自动把公式转为静态 SVG 或图片。
 
 ## 配置
 
@@ -56,7 +83,9 @@ plugins:
 | `subset_of` | `null` | 兼容入口；转发为字体族 `name`，并优先于同项 `name` |
 | `cache_policy` | `null` | `immutable` / `revalidate`；为空时继承 `font_cache_policy` |
 
-字体示例：
+## 字体 { #fonts }
+
+Takumi 默认字体不能覆盖所有字符。渲染中文时，应随部署提供覆盖中文的字体，并同时配置字体文件、字体族和本地路径白名单。下面以 Noto Sans SC 为例，文件需要自行准备：
 
 ```yaml
 plugins:
@@ -75,7 +104,7 @@ plugins:
       font_families: [Noto Sans SC, sans-serif]
 ```
 
-只有随镜像不可变的字体才应使用 `immutable`。运行中的 native renderer不会热替换已注册字体；文件变化后需重建 composition。字体路径同样受`resources.local_access.allowed_paths` 约束。
+只有随镜像不可变的字体才应使用 `immutable`。运行中的 native renderer 不会热替换已注册字体；文件变化后需重建 composition。字体路径同样受 `resources.local_access.allowed_paths` 约束。
 
 同一字体族的多个子集应使用相同 `name`，并分别为每个文件声明 `unicode_range`。Takumi 会按字符选择覆盖该码位的子集，而不是把子集拆成不同字体族：
 
@@ -113,21 +142,36 @@ async def cache_stats(takumi: TakumiCapability) -> tuple[int, int, int]:
 
 统计只描述插件 compiled cache。公共 API 不提供 compiled cache clear；需要释放 native compiled object 或重建 native resource cache 时，由 Entari 关闭并重新加载 service。字体可通过下述 managed API 单独释放。完整调优流程见[缓存组件与调优](../../guides/cache-lifecycle.md)。
 
+## 资源输入
+
+资源访问策略负责授权，不会把浏览器资源加载语义自动补到 Takumi 中：
+
+| 资源 | 支持的输入方式 |
+| --- | --- |
+| 本地图片 | 有文件基准路径的相对引用或 `file:` URL，路径在白名单内，并启用资源物化 |
+| 远程图片 | 先用 `ResourceAccess.fetch_bytes(RemoteResourceRef(...))` 读取，再作为模板字节变量、`PreparedAsset` 或 Takumi `images` 参数传入 |
+| CSS | HTML 内的 `<style>`、`PreparedStylesheet` 或能力接口的 `stylesheets` 字符串；文本和 Markdown 也可通过 `stylesheet` 参数显式读取资源 |
+| 字体 | `provider_config.fonts` 中的本地文件，或通过 Takumi 能力接口注册字体；不使用 CSS `@font-face` |
+
+仅在 HTML 或 CSS 中写入 HTTP(S) 图片地址不会自动触发远程读取。资源未准备好时，严格模式会报错；其他资源策略也不会替你下载图片。远程读取仍受主机名和 IP 白名单约束，见[资源与访问策略](../resources.md)。
+
 ## 能力边界
 
-Takumi 支持静态 HTML、文本、模板和大多数 Markdown；下列需求会明确失败：
+Takumi 可渲染不依赖浏览器脚本的静态 HTML、文本、模板和 Markdown，但 HTML/CSS 支持不等同于 Chromium。以下需求不受支持：
 
-- JavaScript、远程网络资源和页面导航；
+- JavaScript、页面导航和渲染过程中临时发起的网络请求；
 - `pymdownx.arithmatex` generic 模式产生的客户端 KaTeX 排版；
-- 无法在 Preparation 阶段物化的 `@import`、字体或图片；
+- `<link rel="stylesheet">`、CSS `@import` 与 `@font-face`，即使对应文件已物化也不支持；
 - Provider 无法表达的 conditional stylesheet；
 - 浏览器页面、User-Agent、header 与 selector 操作。
 
+Jinja2 模板可以用 `<style>{% include "style.css" %}</style>` 在模板阶段内联 CSS；被包含的文件仍须位于允许的模板路径内。已有浏览器模板中的样式链接需要改写，不能只切换 `provider`。
+
 含数学公式的 `prepare_markdown()` 仍可成功完成：它注入 KaTeX 脚本并把 `DocumentRequirement.JAVASCRIPT` 加入 `PreparedHtml`。Takumi 在自己的 source inspection 阶段检测到该要求后会抛出 `UnsupportedDocumentFeatureError`（`feature="javascript"`），不会进入 native rasterization，也不会把静态 TeX 标记画成图像。若要用 Takumi 输出公式，应先把公式排版为不含 JavaScript 的静态 HTML/SVG，再通过不包含公式脚本的 preparation 流程交给 Takumi。`PreparedAsset` 直接把 bytes 交给 native renderer，不创建临时文件。
 
-上游 `dev` 分支新增的 `Document`、`RasterImage` 与 `MathJax` API 尚未包含在 PyPI 0.4.0。插件当前不公开这些预览接口，Markdown 公式仍需选择 Playwright。
+插件当前未接入上游 `Document`、`RasterImage` 与 MathJax API。`TakumiCompiledDocument` 是本插件的受管理包装，不等同于上游 `Document`；升级 `takumi-py` 不会自动改变本插件的 Markdown 公式管线。需要直接渲染 Markdown 公式时，使用远程 Playwright。
 
-## 平台约束
+## 平台约束 { #platform-requirements }
 
 基线版本 `takumi-py` 0.4.0 提供 CPython 3.11+ ABI3 wheel：
 
@@ -143,7 +187,7 @@ Takumi 自带的 Latin fallback 不能覆盖业务所需字符集。需要中文
 
 ## typed Capability
 
-SVG 与动态字体管理是 Takumi 专属 managed capability：
+SVG 与动态字体管理是 Takumi 专属 managed capability。Entari handler 先注入 `HtmlRenderService`，再从 `service.capabilities.takumi` 获取能力；`TakumiCapability` 本身不属于插件直接注册的 DI 参数类型。下面的业务函数由 handler 传入该能力对象：
 
 ```python
 from entari_plugin_htmlrender.capabilities import TakumiCapability
@@ -176,10 +220,10 @@ async def use_cached_font(takumi: TakumiCapability, font_bytes: bytes) -> str:
 
 需要编译、测量、节点、动画、帧编码或动态字体缓存时，使用 `lease_api()` 获得完整 `TakumiAPI`。动画的 WebP/APNG `fps` 不得超过 90，GIF 不得超过 50。`compile_html()` 返回的 `TakumiCompiledDocument` 只可在创建它的 API lease 中使用；退出 lease 后，session、API 和 compiled document 都会拒绝后续调用。完整方法见[Capability 参考](../../reference/capabilities.md#takumi)。
 
-需要直接操作上游对象时，可通过 `lease_native_renderer()` 显式租用native renderer。该入口保留 `takumi_py.Renderer` 原生类型，调用方承担同步执行、并发、native panic、资源归一化与底层错误语义；详见[Capability 参考](../../reference/capabilities.md#takumi)。
+需要直接操作上游对象时，可通过 `lease_native_renderer()` 显式租用 native renderer。该入口保留 `takumi_py.Renderer` 原生类型，调用方承担同步执行、并发、native panic、资源归一化与底层错误语义；详见[Capability 参考](../../reference/capabilities.md#takumi)。
 
 ## 选择建议
 
-需要脚本、网页导航或浏览器布局语义时选择 Playwright；内容完全受控、希望避免浏览器进程，或需要 Takumi SVG/字体/native 能力时选择 Takumi。
+静态内容优先考虑 Takumi；需要脚本、网页导航、Markdown 公式或浏览器布局语义时，选择[远程 Playwright](../remote-playwright.md)。本地 Playwright 浏览器安装、管理与启动计划在不久的将来弃用，后续仅保留 remote support；当前本地模式仍可使用，尚未确定移除版本或日期。
 
 启用或再分发 Takumi 前，请自行检查 `takumi-py` 当前版本的许可与平台 wheel；这里不构成法律意见。

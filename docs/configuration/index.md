@@ -23,10 +23,8 @@ Entari 插件短名为 `htmlrender`。`plugins.htmlrender` 的值直接交给`en
 ```yaml
 plugins:
   htmlrender:
-    provider: playwright
+    provider: takumi
     startup: probe
-    provider_config:
-      engine: chromium
     html:
       max_pixels: 16777216
       max_concurrency: 2
@@ -41,6 +39,8 @@ plugins:
       sentry: false
       prometheus: true
 ```
+
+示例用 Takumi 处理静态内容，其他可选后端与可观测性能力需安装对应 extra。中文字体配置见 [Takumi](providers/takumi.md#fonts)。需要浏览器能力时，推荐[远程 Playwright](remote-playwright.md)；本地浏览器安装、管理与启动计划在不久的将来弃用，后续仅保留 remote support，当前本地模式仍可使用。
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |

@@ -10,7 +10,7 @@ icon: lucide/list-checks
 
 ## 首次接入
 
-1. [快速开始](../start/quickstart.md)：使用默认推荐的 Playwright 完成第一张图片。
+1. [快速开始](../start/quickstart.md)：使用 Takumi 完成第一张静态图片，无需安装浏览器。
 2. [选择 Provider](../start/choosing-provider.md)：比较 HTML Provider 与 Graphics backend 的能力和环境约束。
 3. [渲染内容](rendering-content.md)：接入 HTML、Markdown、文本或 Jinja 模板。
 4. 按需查阅[配置与部署](../configuration/index.md)，不要预先阅读全部配置字段。

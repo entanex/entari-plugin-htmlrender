@@ -5,7 +5,17 @@ description: 通过 CDP 或 Playwright WebSocket 使用独立浏览器服务
 
 # 远程 Playwright
 
-生产环境可把浏览器二进制、系统图形库与进程生命周期放进独立容器。客户端与服务端Playwright 版本应匹配；CDP 只支持 Chromium，Playwright WebSocket 可支持更多引擎。
+不需要 JavaScript、导航或浏览器页面能力时，优先使用 [Takumi](providers/takumi.md)。需要这些能力时，远程 Playwright 是目标部署形态：浏览器二进制、系统图形库与进程生命周期位于独立服务。客户端与服务端 Playwright 版本应匹配；CDP 只支持 Chromium，Playwright WebSocket 可支持更多引擎。
+
+## 依赖与计划弃用
+
+远程连接仍要求 Bot 环境安装 Playwright Python client：
+
+```bash
+uv add "entari-plugin-htmlrender[playwright]>=0.2.0"
+```
+
+配置 `connect_ws` 或 `connect_cdp` 后，Bot 环境不需要执行 `playwright install`，也不需要安装浏览器二进制及其系统依赖；远程服务必须提供匹配的浏览器。本插件的 Playwright 后端在不久的将来将仅保留这两种远程连接。当前版本仍支持 Bot 本地浏览器安装、管理与启动，但该路径计划弃用，具体移除版本和时间尚未确定；现有本地细节见 [Playwright 配置](providers/playwright.md#browser-runtime-requirements)。
 
 ## CDP
 

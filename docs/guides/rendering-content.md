@@ -71,6 +71,6 @@ async def render_profile(renderer: HtmlRenderer, username: str):
     )
 ```
 
-模板目录须列入 `resources.local_access.allowed_paths`；相对 stylesheet 与图片由 preparation/resource pipeline 处理。
+模板目录须列入 `resources.local_access.allowed_paths`；本地图片还需满足路径授权并启用资源物化。使用 Takumi 时，样式应内联或显式传入，不能依赖 `<link rel="stylesheet">`、CSS `@import` 或 `@font-face`；模板示例见[模板与资源](templates-and-resources.md)。
 
 导航/selector 使用 [Playwright capability](browser-automation.md)，Takumi SVG/字体使用 `TakumiCapability`，无 HTML 的像素绘制使用 [RasterScene](raster-scenes.md)。仓库示例只返回 artifact/bytes，不绑定消息 adapter。
