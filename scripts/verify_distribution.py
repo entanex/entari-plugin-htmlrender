@@ -287,6 +287,20 @@ async def main() -> None:
         )
         check(bytes(artifact).startswith(b"\x89PNG\r\n\x1a\n"), "Text smoke failed")
         check(artifact.width == 180, "Text smoke returned an unexpected width")
+        async with capability.lease_api() as api:
+            check(
+                await api.cached_fonts("memory:missing-font") is None,
+                "A fresh Takumi runtime unexpectedly reported a cached font",
+            )
+            check(
+                await api.unregister_font("HTMLRender Missing Font") is False,
+                "Unregistering an unknown font must return False",
+            )
+            await api.clear_fonts()
+            check(
+                api.registered_font_families == (),
+                "Font release left stale managed registration metadata",
+            )
     finally:
         await runtime.aclose()
 
