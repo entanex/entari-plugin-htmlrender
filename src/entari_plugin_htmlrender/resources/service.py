@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import codecs
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
@@ -198,12 +198,15 @@ class ResourceService:
         strategy: ResourceStrategy,
         publisher: AssetPublisher | None = None,
         traversal_budget: ResourceTraversalBudget | None = None,
+        published_fetcher: Callable[[PublishedResource], Awaitable[ResourceContent]]
+        | None = None,
     ) -> None:
         budget = traversal_budget or ResourceTraversalBudget()
         self._fetcher = fetcher
         self._local_access = local_access
         self._strategy = strategy
         self._publisher = publisher
+        self._published_fetcher = published_fetcher
         self._traversal_budget = budget
         self._scalar_slots = anyio.Semaphore(budget.max_concurrency)
 
@@ -254,6 +257,32 @@ class ResourceService:
                 "The configured resource fetcher failed.",
                 reference=resource,
                 operation="fetch",
+                source=error,
+            ) from error
+
+    async def fetch_published(self, resource: PublishedResource) -> ResourceContent:
+        """Fetch one publication through the injected uncached, guarded transport."""
+        if not isinstance(resource, PublishedResource):
+            raise InvalidRenderInputError(
+                "fetch_published() requires a PublishedResource capability.",
+                operation="fetch_published",
+                field="resource",
+            )
+        if self._published_fetcher is None:
+            raise ResourceFetchError(
+                "No guarded publication transport is configured.",
+                reference=resource.url,
+                operation="fetch_published",
+            )
+        try:
+            return await self._published_fetcher(resource)
+        except ResourceError:
+            raise
+        except Exception as error:
+            raise ResourceFetchError(
+                "The publication transport failed.",
+                reference=resource.url,
+                operation="fetch_published",
                 source=error,
             ) from error
 

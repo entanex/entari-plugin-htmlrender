@@ -21,6 +21,7 @@ from entari_plugin_htmlrender.adapters.resources import (
     RemoteTransportExecutor,
     build_resource_fetcher,
 )
+from entari_plugin_htmlrender.adapters.resources.remote import fetch_remote
 from entari_plugin_htmlrender.adapters.templates import JinjaTemplateCompiler
 from entari_plugin_htmlrender.errors import (
     InvalidRenderInputError,
@@ -59,6 +60,7 @@ from entari_plugin_htmlrender.resources.config import (
     ResourceMaterializationPolicy,
     ResourceStrategy,
 )
+from entari_plugin_htmlrender.resources.models import RemoteResourceRef
 from entari_plugin_htmlrender.resources.service import ResourceService
 from entari_plugin_htmlrender.runtime.composition import build_runtime
 from entari_plugin_htmlrender.runtime.runtime import RenderRuntime  # noqa: TC001
@@ -81,7 +83,11 @@ if TYPE_CHECKING:
         OperationObserver,
         RuntimeLifecycle,
     )
-    from entari_plugin_htmlrender.resources.models import ResourceRef
+    from entari_plugin_htmlrender.resources.models import (
+        PublishedResource,
+        ResourceContent,
+        ResourceRef,
+    )
     from entari_plugin_htmlrender.resources.observation import CacheObserver
     from entari_plugin_htmlrender.resources.ports import AssetPublisher
 
@@ -175,6 +181,14 @@ class _ProviderResourceView:
     def authorize_local(self, path: Path) -> Path:
         return self._delegate.authorize_local(path)
 
+    async def fetch(
+        self,
+        resource: ResourceRef,
+        *,
+        refresh: bool = False,
+    ) -> ResourceContent:
+        return await self._delegate.fetch(resource, refresh=refresh)
+
     async def fetch_bytes(
         self,
         resource: ResourceRef,
@@ -182,6 +196,9 @@ class _ProviderResourceView:
         refresh: bool = False,
     ) -> bytes:
         return await self._delegate.fetch_bytes(resource, refresh=refresh)
+
+    async def fetch_published(self, resource: PublishedResource) -> ResourceContent:
+        return await self._delegate.fetch_published(resource)
 
 
 @final
@@ -397,7 +414,7 @@ def _cache_settings(config: HtmlRenderConfig) -> ResourceCacheSettings:
 def _remote_access_settings(config: HtmlRenderConfig) -> RemoteAccessSettings:
     remote = config.resources.remote_access
     return RemoteAccessSettings(
-        allow_private_networks=remote.allow_private_networks,
+        allow_private_networks=tuple(remote.allow_private_networks),
         allow_hosts=tuple(remote.allow_hosts),
         deny_hosts=tuple(remote.deny_hosts),
         max_redirects=remote.max_redirects,
@@ -569,11 +586,22 @@ def _build_runtime_for(
             store=store,
         )
 
+    async def fetch_published(resource: PublishedResource) -> ResourceContent:
+        return await fetch_remote(
+            RemoteResourceRef(resource.url),
+            policy=remote_access,
+            transport=remote_transport,
+            max_resource_bytes=cache_settings.max_resource_bytes,
+            request_timeout_seconds=remote_settings.request_timeout_seconds,
+            request_headers=resource.request_headers,
+        )
+
     resources = ResourceService(
         fetcher=fetcher,
         local_access=local_access,
         strategy=strategy,
         publisher=publisher,
+        published_fetcher=fetch_published,
         traversal_budget=ResourceTraversalBudget(
             max_nodes=config.resources.traversal.max_nodes,
             max_depth=config.resources.traversal.max_depth,

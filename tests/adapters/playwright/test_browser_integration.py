@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, ClassVar, Iterator
 
 from PIL import Image
 import pytest
@@ -12,14 +14,24 @@ import pytest
 from entari_plugin_htmlrender import RasterOptions, TemplateRef
 from entari_plugin_htmlrender.composition import build_runtime_plan
 from entari_plugin_htmlrender.config import HtmlRenderConfig
-from entari_plugin_htmlrender.errors import RuntimeUnavailableError
+from entari_plugin_htmlrender.errors import (
+    ResourceAccessDeniedError,
+    RuntimeUnavailableError,
+)
 
 if TYPE_CHECKING:
     from playwright.async_api import ConsoleMessage
     from playwright.async_api import Error as PlaywrightError
 
+    from entari_plugin_htmlrender.runtime import RenderRuntime
+
 pytestmark = pytest.mark.requires_browser
 _BROWSERS = Path(__file__).resolve().parents[3] / ".artifacts" / "playwright-browsers"
+_PIXEL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000d49444154789c6360f8cf0000000500019d6cbc960000000049454e"
+    "44ae426082"
+)
 _MATH_MARKDOWN = r"""
 # Browser math
 
@@ -46,6 +58,124 @@ Invalid $\unknowncommand{bad}$ remains plain text.
 
 <span class="arithmatex" id="raw-arithmatex">not generated math</span>
 """
+
+
+class _NetworkHandler(BaseHTTPRequestHandler):
+    requests: ClassVar[list[str]] = []
+    user_agents: ClassVar[list[str | None]] = []
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        del format, args
+
+    def do_GET(self) -> None:
+        self.requests.append(self.path)
+        self.user_agents.append(self.headers.get("User-Agent"))
+        if self.path == "/style.css":
+            self.send_response(302)
+            self.send_header("Location", "/assets/style.css")
+            self.end_headers()
+        elif self.path == "/assets/style.css":
+            body = b"html { background-image: url('pixel.png') }"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/css")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/assets/pixel.png":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(_PIXEL_PNG)))
+            self.end_headers()
+            self.wfile.write(_PIXEL_PNG)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self) -> None:
+        self.requests.append(self.path)
+        self.send_response(204)
+        self.end_headers()
+
+
+@pytest.fixture
+def network_server() -> Iterator[str]:
+    _NetworkHandler.requests = []
+    _NetworkHandler.user_agents = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _NetworkHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def _managed_runtime(
+    *,
+    allow_loopback: bool,
+) -> RenderRuntime:
+    private_networks = ["127.0.0.0/8"] if allow_loopback else []
+    return build_runtime_plan(
+        HtmlRenderConfig.model_validate(
+            {
+                "provider": "playwright",
+                "provider_config": {
+                    "storage_path": _BROWSERS,
+                    "skip_browser_install": True,
+                    "materialization_policy": "off",
+                },
+                "resources": {
+                    "remote_access": {
+                        "allow_private_networks": private_networks,
+                    }
+                },
+            }
+        )
+    ).build_runtime()
+
+
+async def test_managed_chromium_enforces_loopback_allowlist_and_redirect_base(
+    network_server: str,
+) -> None:
+    raster = RasterOptions(width=32, height=32, device_pixel_ratio=1.0)
+    denied = _managed_runtime(allow_loopback=False)
+    try:
+        await denied.startup()
+        with pytest.raises(ResourceAccessDeniedError):
+            await denied.renderer.rasterize_html(
+                f'<img src="{network_server}/assets/pixel.png">',
+                raster=raster,
+            )
+        assert _NetworkHandler.requests == []
+        assert _NetworkHandler.user_agents == []
+
+        with pytest.raises(ResourceAccessDeniedError):
+            await denied.renderer.rasterize_html(
+                f'<script>window.open("{network_server}/assets/pixel.png")</script>',
+                raster=raster,
+            )
+        assert _NetworkHandler.requests == []
+        assert _NetworkHandler.user_agents == []
+    finally:
+        await denied.aclose()
+
+    allowed = _managed_runtime(allow_loopback=True)
+    try:
+        await allowed.startup()
+        image = await allowed.renderer.rasterize_html(
+            f'<link rel="stylesheet" href="{network_server}/style.css">',
+            raster=raster,
+        )
+        assert image.format == "png"
+        assert _NetworkHandler.requests[0] == "/style.css"
+        assert "/assets/style.css" in _NetworkHandler.requests
+        assert _NetworkHandler.requests[-1] == "/assets/pixel.png"
+        assert _NetworkHandler.user_agents
+        assert all(user_agent is None for user_agent in _NetworkHandler.user_agents)
+    finally:
+        await allowed.aclose()
 
 
 async def test_chromium_renders_preparation_and_customized_templates(

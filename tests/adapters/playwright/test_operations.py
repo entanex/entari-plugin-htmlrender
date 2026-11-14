@@ -36,6 +36,7 @@ def _published(url: str, headers: dict[str, str] | None = None) -> PublishedReso
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from playwright.async_api import Route, WebSocketRoute
     from pytest_mock import MockerFixture
 
     from entari_plugin_htmlrender.adapters.playwright.render import PlaywrightLease
@@ -90,10 +91,17 @@ def _resources(
 
 
 def _route(mocker: MockerFixture, url: str) -> SimpleNamespace:
+    return _route_with_method(mocker, url, "GET")
+
+
+def _route_with_method(
+    mocker: MockerFixture,
+    url: str,
+    method: str,
+) -> SimpleNamespace:
     return SimpleNamespace(
-        request=SimpleNamespace(url=url, headers={"user-agent": "pw"}),
-        continue_=mocker.AsyncMock(),
-        fetch=mocker.AsyncMock(return_value="api-response"),
+        request=SimpleNamespace(url=url, method=method),
+        abort=mocker.AsyncMock(),
         fulfill=mocker.AsyncMock(),
     )
 
@@ -220,7 +228,12 @@ async def test_remote_prepared_render_routes_local_assets_without_file_navigatio
     injected = page.set_content.await_args.args[0]
     assert "file://" not in injected
     assert "https://htmlrender.invalid/.htmlrender/assets/" in injected
-    page.route.assert_awaited_once()
+    page.context.route.assert_awaited_once_with("**/*", mocker.ANY)
+    page.route.assert_awaited_once_with(
+        "https://htmlrender.invalid/.htmlrender/assets/**",
+        mocker.ANY,
+    )
+    page.context.route_web_socket.assert_awaited_once_with("**/*", mocker.ANY)
 
 
 @pytest.mark.anyio
@@ -498,7 +511,7 @@ async def test_resolve_mode_off_bypasses_filehost_without_a_publisher(
     plan = execute.await_args.args[0]
     assert plan.base_href == "file:///shared/card/"
     assert plan.asset_routes == ()
-    assert execute.await_args.kwargs["local_resource_policy"] == "passthrough"
+    assert execute.await_args.kwargs["filehost_authorization"] == {}
 
 
 @pytest.mark.anyio
@@ -723,7 +736,7 @@ async def test_resource_url_token_authorization_matches_playwright_request_witho
     tmp_path: Path,
 ) -> None:
     from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
-        install_filehost_request_route,
+        ManagedRequestGuard,
     )
 
     asset = tmp_path / "asset one.svg"
@@ -757,87 +770,276 @@ async def test_resource_url_token_authorization_matches_playwright_request_witho
     assert publication is not None
     assert publication.args[0].data == payload
 
-    page = mocker.AsyncMock()
-    await install_filehost_request_route(
-        page,
+    exact = _route(mocker, normalized)
+    resources.fetch_published = mocker.AsyncMock(
+        return_value=SimpleNamespace(
+            data=payload,
+            media_type="image/svg+xml",
+            final_url=None,
+        )
+    )
+    resources.fetch = mocker.AsyncMock()
+    guard = ManagedRequestGuard(
+        resources,
         authorization=resolution.request_headers_by_url,
     )
 
-    page.route.assert_awaited_once()
-    route_handler = page.route.await_args.args[1]
-    exact = _route(mocker, normalized)
-    await route_handler(exact)
-    exact.continue_.assert_not_awaited()
-    exact_headers = exact.fetch.await_args.kwargs["headers"]
-    assert exact_headers["X-HTMLRender-Filehost-Request"] == "unit-token"
-    assert exact_headers["user-agent"] == "pw"
-    assert exact.fetch.await_args.kwargs["max_redirects"] == 0
-    exact.fulfill.assert_awaited_once_with(response="api-response")
+    await guard._handle_route(cast("Route", exact))
+    captured = resources.fetch_published.await_args
+    assert captured is not None
+    published_capability = captured.args[0]
+    assert published_capability.url == normalized
+    assert published_capability.request_headers == {
+        "X-HTMLRender-Filehost-Request": "unit-token"
+    }
+    resources.fetch.assert_not_awaited()
+    exact.fulfill.assert_awaited_once_with(
+        status=200,
+        body=payload,
+        content_type="image/svg+xml",
+        headers={"access-control-allow-origin": "*"},
+    )
 
     other_query = _route(
         mocker,
         "https://assets.example/asset.svg?theme=light",
     )
-    await route_handler(other_query)
-    other_query.fetch.assert_not_awaited()
-    other_query.continue_.assert_awaited_once_with()
-
-    other_url = _route(
-        mocker,
-        "https://assets.example/other.svg?theme=dark",
+    resources.fetch.return_value = SimpleNamespace(
+        data=b"other",
+        media_type=None,
+        final_url=None,
     )
-    await route_handler(other_url)
-    other_url.fetch.assert_not_awaited()
-    other_url.continue_.assert_awaited_once_with()
+    await guard._handle_route(cast("Route", other_query))
+    captured = resources.fetch.await_args
+    assert captured is not None
+    fallback = captured.args[0]
+    assert fallback.url == "https://assets.example/asset.svg?theme=light"
+    other_query.fulfill.assert_awaited_once_with(
+        status=200,
+        body=b"other",
+        content_type="application/octet-stream",
+        headers={"access-control-allow-origin": "*"},
+    )
+
+    exact.abort.assert_not_awaited()
 
 
 @pytest.mark.anyio
-async def test_install_filehost_request_route_injects_only_on_exact_published_url(
+async def test_managed_request_guard_rewrites_redirected_css_against_final_url(
     mocker: MockerFixture,
 ) -> None:
     from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
-        install_filehost_request_route as _install_filehost_request_route,
+        ManagedRequestGuard,
     )
 
-    page = mocker.AsyncMock()
-    published = "http://render:9012/filehost/abc?v=1"
-    await _install_filehost_request_route(
-        page,
-        authorization={published: {"X-HTMLRender-Filehost-Request": "unit-token"}},
+    resources = mocker.Mock()
+    resources.fetch = mocker.AsyncMock(
+        return_value=SimpleNamespace(
+            data=b"body { background: url('pixel.png') }",
+            media_type="text/css",
+            final_url="https://example.com/assets/style.css",
+        )
+    )
+    resources.fetch_published = mocker.AsyncMock()
+    guard = ManagedRequestGuard(resources, authorization={})
+    route = _route(mocker, "https://example.com/style.css")
+
+    await guard._handle_route(cast("Route", route))
+
+    route.fulfill.assert_awaited_once_with(
+        status=200,
+        body=b"body { background: url('https://example.com/assets/pixel.png') }",
+        content_type="text/css",
+        headers={"access-control-allow-origin": "*"},
+    )
+    route.abort.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_managed_request_guard_applies_presets_and_publication_override(
+    mocker: MockerFixture,
+) -> None:
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+        ManagedRequestGuard,
     )
 
-    page.route.assert_awaited_once()
-    route_handler = page.route.await_args.args[1]
-
-    # Exact published URL (port/fragment normalized) is fetched with the header
-    # and NO redirect following, then fulfilled directly.
-    exact = _route(mocker, "http://render:9012/filehost/abc?v=1#frag")
-    await route_handler(exact)
-    exact.continue_.assert_not_awaited()
-    assert (
-        exact.fetch.await_args.kwargs["headers"]["X-HTMLRender-Filehost-Request"]
-        == "unit-token"
+    payload = b"asset"
+    resources = mocker.Mock()
+    resources.fetch_published = mocker.AsyncMock(
+        return_value=SimpleNamespace(
+            data=payload,
+            media_type="application/octet-stream",
+            final_url=None,
+        )
     )
-    assert exact.fetch.await_args.kwargs["max_redirects"] == 0
-    exact.fulfill.assert_awaited_once_with(response="api-response")
+    resources.fetch = mocker.AsyncMock()
+    guard = ManagedRequestGuard(
+        resources,
+        authorization={
+            "https://example.com/asset": {
+                "authorization": "publication",
+                "X-Publication": "yes",
+            }
+        },
+        preset_request_headers={
+            "Authorization": "preset",
+            "User-Agent": "Configured UA",
+            "X-Trace": "trace",
+        },
+    )
+    route = _route(mocker, "https://example.com/asset")
+    route.request.headers = {
+        "Cookie": "untrusted-browser-cookie",
+        "X-Browser": "untrusted",
+    }
 
-    # Same path, different query — no authorization, plain continue.
-    other_query = _route(mocker, "http://render:9012/filehost/abc?v=2")
-    await route_handler(other_query)
-    other_query.fetch.assert_not_awaited()
-    other_query.continue_.assert_awaited_once_with()
+    await guard._handle_route(cast("Route", route))
 
-    # Same path prefix on another origin — no authorization.
-    external = _route(mocker, "https://example.com/filehost/abc?v=1")
-    await route_handler(external)
-    external.fetch.assert_not_awaited()
-    external.continue_.assert_awaited_once_with()
+    fetched = resources.fetch_published.await_args
+    assert fetched is not None
+    capability = fetched.args[0]
+    assert capability.url == "https://example.com/asset"
+    assert capability.request_headers == {
+        "User-Agent": "Configured UA",
+        "X-Trace": "trace",
+        "authorization": "publication",
+        "X-Publication": "yes",
+    }
+    resources.fetch.assert_not_awaited()
+    route.fulfill.assert_awaited_once_with(
+        status=200,
+        body=payload,
+        content_type="application/octet-stream",
+        headers={"access-control-allow-origin": "*"},
+    )
 
-    # Unpublished path on the same origin — no authorization.
-    unpublished = _route(mocker, "http://render:9012/other/abc?v=1")
-    await route_handler(unpublished)
-    unpublished.fetch.assert_not_awaited()
-    unpublished.continue_.assert_awaited_once_with()
+
+@pytest.mark.anyio
+async def test_managed_request_guard_preserves_css_fragment_and_blocks_html_redirect(
+    mocker: MockerFixture,
+) -> None:
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+        ManagedRequestGuard,
+    )
+    from entari_plugin_htmlrender.resources.errors import (  # noqa: PLC0415
+        ResourceFetchError,
+    )
+
+    resources = mocker.Mock()
+    resources.fetch = mocker.AsyncMock(
+        return_value=SimpleNamespace(
+            data=b"body { background: url('pixel.svg#icon') }",
+            media_type="text/css",
+            final_url="https://example.com/assets/style.css",
+        )
+    )
+    guard = ManagedRequestGuard(resources, authorization={})
+    route = _route(mocker, "https://example.com/style.css")
+    await guard._handle_route(cast("Route", route))
+    route.fulfill.assert_awaited_once_with(
+        status=200,
+        body=b"body { background: url('https://example.com/assets/pixel.svg#icon') }",
+        content_type="text/css",
+        headers={"access-control-allow-origin": "*"},
+    )
+
+    resources.fetch.return_value = SimpleNamespace(
+        data=b"<p>redirected</p>",
+        media_type="text/html",
+        final_url="https://example.com/final.html",
+    )
+    html = _route(mocker, "https://example.com/start.html")
+    html_guard = ManagedRequestGuard(resources, authorization={})
+    await html_guard._handle_route(cast("Route", html))
+    html.abort.assert_awaited_once_with(error_code="blockedbyclient")
+    html.fulfill.assert_not_awaited()
+    with pytest.raises(ResourceFetchError, match="Redirected HTML"):
+        html_guard.raise_if_failed()
+
+
+@pytest.mark.anyio
+async def test_managed_request_guard_rejects_non_get_and_surfaces_failure(
+    mocker: MockerFixture,
+) -> None:
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+        ManagedRequestGuard,
+    )
+    from entari_plugin_htmlrender.resources.errors import (  # noqa: PLC0415
+        ResourceAccessDeniedError,
+    )
+
+    resources = mocker.Mock()
+    resources.fetch = mocker.AsyncMock()
+    resources.fetch_published = mocker.AsyncMock()
+    guard = ManagedRequestGuard(
+        resources,
+        authorization={
+            "https://assets.example/filehost/a": {
+                "X-HTMLRender-Filehost-Request": "token"
+            }
+        },
+    )
+
+    post = _route_with_method(
+        mocker,
+        "https://assets.example/filehost/a",
+        "POST",
+    )
+    await guard._handle_route(cast("Route", post))
+    post.abort.assert_awaited_once_with(error_code="blockedbyclient")
+    post.fulfill.assert_not_awaited()
+    resources.fetch.assert_not_awaited()
+    resources.fetch_published.assert_not_awaited()
+    with pytest.raises(ResourceAccessDeniedError, match="only allow GET"):
+        guard.raise_if_failed()
+
+
+@pytest.mark.anyio
+async def test_managed_request_guard_preserves_cancellation(
+    mocker: MockerFixture,
+) -> None:
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+        ManagedRequestGuard,
+    )
+
+    cancelled = anyio.get_cancelled_exc_class()
+    resources = mocker.Mock()
+    resources.fetch = mocker.AsyncMock(side_effect=cancelled())
+    resources.fetch_published = mocker.AsyncMock()
+    guard = ManagedRequestGuard(resources, authorization={})
+    route = _route(mocker, "https://example.com/asset.png")
+
+    with pytest.raises(cancelled):
+        await guard._handle_route(cast("Route", route))
+    route.abort.assert_awaited_once_with(error_code="aborted")
+
+
+@pytest.mark.anyio
+async def test_managed_request_guard_closes_web_socket_and_records_denial(
+    mocker: MockerFixture,
+) -> None:
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+        ManagedRequestGuard,
+    )
+    from entari_plugin_htmlrender.resources.errors import (  # noqa: PLC0415
+        ResourceAccessDeniedError,
+    )
+
+    resources = mocker.Mock()
+    guard = ManagedRequestGuard(resources, authorization={})
+    socket = SimpleNamespace(
+        url="wss://example.com/socket",
+        close=mocker.AsyncMock(),
+    )
+
+    await guard._reject_web_socket(cast("WebSocketRoute", socket))
+
+    socket.close.assert_awaited_once_with(
+        code=1008,
+        reason="WebSocket access is blocked",
+    )
+    with pytest.raises(ResourceAccessDeniedError, match="WebSocket"):
+        guard.raise_if_failed()
 
 
 @pytest.mark.anyio
@@ -862,8 +1064,91 @@ async def test_page_context_uses_injected_lease(
         viewport={"width": 1, "height": 1},
     ) as page2:
         assert page2 is page
+    browser.new_page.assert_awaited_once_with(viewport={"width": 1, "height": 1})
     instrument.assert_called_once()
     detach.assert_called_once_with(page)
+
+
+@pytest.mark.anyio
+async def test_managed_execution_blocks_service_workers(
+    mocker: MockerFixture,
+) -> None:
+    from playwright.async_api import Browser  # noqa: PLC0415
+
+    from entari_plugin_htmlrender.adapters.playwright import (  # noqa: PLC0415
+        _page,
+        operations,
+    )
+    from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
+        ContentConfig,
+        PageConfig,
+        RenderConfig,
+    )
+    from entari_plugin_htmlrender.adapters.playwright.prepared import (  # noqa: PLC0415
+        BrowserLoadPlan,
+    )
+    from entari_plugin_htmlrender.preparation import parse_html  # noqa: PLC0415
+
+    browser = mocker.AsyncMock(spec=Browser)
+    page = browser.new_page.return_value
+    page.on = mocker.MagicMock()
+    page.set_content = mocker.AsyncMock()
+    page.wait_for_timeout = mocker.AsyncMock()
+    page.screenshot = mocker.AsyncMock(return_value=b"image")
+    mocker.patch.object(_page, "instrument_page")
+    mocker.patch.object(_page, "detach_page")
+    mocker.patch.object(
+        operations,
+        "log_page_telemetry",
+        new=mocker.AsyncMock(),
+    )
+    mocker.patch.object(
+        operations,
+        "install_browser_asset_routes",
+        new=mocker.AsyncMock(),
+    )
+    guard = mocker.Mock()
+    guard.install = mocker.AsyncMock()
+    guard.raise_if_failed = mocker.Mock()
+    guard_factory = mocker.patch.object(
+        operations,
+        "ManagedRequestGuard",
+        return_value=guard,
+    )
+    prepared = parse_html("<main>managed</main>")
+    resources = _resources()
+
+    result = await operations._execute_browser_load_plan(
+        BrowserLoadPlan(html=prepared.html),
+        content=ContentConfig(html=prepared.html),
+        render=RenderConfig(
+            page=PageConfig(
+                user_agent="Configured UA",
+                extra_http_headers={
+                    "user-agent": "Header UA",
+                    "X-Trace": "trace",
+                },
+            )
+        ),
+        lease=_lease("local_pw", browser=browser),
+        resources=resources,
+        filehost_authorization={},
+        telemetry_op="test",
+    )
+
+    assert result == b"image"
+    assert browser.new_page.await_args.kwargs["service_workers"] == "block"
+    assert browser.new_page.await_args.kwargs["user_agent"] == "Configured UA"
+    guard_factory.assert_called_once_with(
+        resources,
+        authorization={},
+        preset_request_headers={
+            "user-agent": "Header UA",
+            "X-Trace": "trace",
+        },
+    )
+    guard.install.assert_awaited_once_with(page)
+    page.close.assert_awaited_once_with()
 
 
 @pytest.mark.anyio
@@ -931,16 +1216,3 @@ def test_normalize_request_url_drops_default_port_and_fragment() -> None:
         _normalize_request_url("https://render:8443/filehost/a")
         == "https://render:8443/filehost/a"
     )
-
-
-@pytest.mark.anyio
-async def test_install_filehost_request_route_no_authorization_is_noop(
-    mocker: MockerFixture,
-) -> None:
-    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
-        install_filehost_request_route,
-    )
-
-    page = mocker.AsyncMock()
-    await install_filehost_request_route(page, authorization={})
-    page.route.assert_not_awaited()

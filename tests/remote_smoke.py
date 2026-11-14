@@ -220,6 +220,15 @@ async def _main() -> None:
                 "provider_config": _playwright_config(policy),
                 "resources": {
                     "local_access": {"allowed_paths": [str(fixture_root)]},
+                    "remote_access": {
+                        "allow_private_networks": [
+                            network.strip()
+                            for network in os.environ.get(
+                                "REMOTE_ALLOWED_PRIVATE_NETWORKS", ""
+                            ).split(",")
+                            if network.strip()
+                        ],
+                    },
                     "filehost": {
                         "bind_host": _FILEHOST_BIND_HOST,
                         "bind_port": _FILEHOST_BIND_PORT,

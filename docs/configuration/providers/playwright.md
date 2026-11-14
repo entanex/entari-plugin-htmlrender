@@ -112,8 +112,13 @@ uv run playwright install --with-deps chromium
 
 远程模式推荐 `memory`：本地图片、字体和 CSS 被物化为 render-scoped asset，由页面 route 返回，不要求共享 filesystem。`passthrough` 仅适用于显式共享卷；`error` 用于禁止所有本地引用。
 
-`filehost` 是需要真实 HTTP URL 时的兼容 transport，由 htmlrender 内置的 hosted
-asset store 提供。可选 `filehost` extra 会安装 `py-machineid`，用于派生默认请求头守卫值：
+受管理的 HTML rasterization 只允许 HTTP(S) `GET` 请求，并由 Bot 的 pinned transport 获取；浏览器不直接连接这些地址。redirect 在 Bot 内继续受同一主机名、DNS/IP 与最终连接地址校验，之后把最终响应交给浏览器。非 `GET` 请求与 WebSocket 会被拒绝，service worker 会被阻止。此保护仅限 HTTP(S) 资源访问，不等同于完整的 Chromium sandbox。
+
+受管 GET 不会复制浏览器生成的 cookie 或请求头。显式 `PageConfig.user_agent` 会作为 `User-Agent` 基础值，`extra_http_headers` 不区分大小写覆盖同名预设；精确 `PublishedResource` 授权头再做最终覆盖。未显式配置头部时不额外注入。redirect 到不同 URL 时不会转发这些请求头，而是重新经过资源策略校验。
+
+`allow_hosts: []` 不限制主机名但仍执行 IP 检查；非空列表只允许列出的主机及子域。访问回环、RFC 1918、链路本地、CGNAT/shared `100.64.0.0/10`、ULA 等非公网地址时，还要在 `allow_private_networks` 中列出对应 IP/CIDR。布尔值已失效，默认值为 `[]`；`deny_hosts` 始终优先。
+
+`filehost` 是需要真实 HTTP URL 时的兼容 transport，由 htmlrender 内置的 hosted asset store 提供。可选 `filehost` extra 会安装 `py-machineid`，用于派生默认请求头守卫值：
 
 ```bash
 uv add "entari-plugin-htmlrender[playwright,filehost]>=0.2.0,<0.3"
@@ -121,11 +126,13 @@ uv add "entari-plugin-htmlrender[playwright,filehost]>=0.2.0,<0.3"
 
 不安装该 extra 时 transport 仍可使用内置机器标识回退；对多副本或需要显式轮换的部署，直接配置 secret `resources.filehost.request_header_value`，不要依赖自动派生值。
 
-两种远程 transport 遵循同一浏览器响应契约：`memory` 的 Page route 会返回正确媒体类型、cache header 与 `Access-Control-Allow-Origin: *`；filehost 只为通过请求头守卫的资源请求添加该 CORS 响应头，未认证请求返回 403。
+`memory` 使用 render-scoped Page route 返回内存资源。`filehost` 的授权请求头由 Bot 添加到 `PublishedResource` 的精确 URL；redirect 到不同 URL 时不会转发该请求头，也不会缓存为该 URL 以外的授权。若 `public_base_url` 解析到非公网地址，它还必须匹配 `allow_private_networks`，且 Bot 必须能连接该 URL。
 
-!!! warning "filehost 代理必须保留双向 header"
+redirect 跟随和响应供给并不等价于浏览器直接访问。重定向 CSS 会按 `ResourceContent.final_url` 解析其相对引用；重定向后的 `text/html` 或 `application/xhtml+xml` 响应目前因无法安全保留 document base 而被拒绝。JavaScript、模块与 XML 的相对 URL 语义不做转换。
 
-    反向代理必须向 Bot 透传 `resources.filehost.request_header_name` 对应的请求头，并向浏览器保留 `Access-Control-Allow-Origin` 响应头。通配 CORS 只允许浏览器读取资源，不代替 filehost 授权。
+!!! warning "filehost 代理必须转交 Bot 的授权请求头"
+
+    受管理请求中的 `resources.filehost.request_header_name` 由 Bot 发出。反向代理必须把该请求头传给 filehost server；浏览器的预设请求头不能替代这项 URL-scoped 授权。
 
 filehost 运行参数由核心 Resource Service 管理，位于 `resources.filehost`：
 
@@ -166,3 +173,5 @@ async def open_page(playwright: PlaywrightCapability) -> None:
 远程部署与安全边界见 [远程 Playwright](../remote-playwright.md)。
 
 若需要完整 `Browser` 能力而不只是一张自动回收的 Page，可改用`playwright.lease_browser()`。原生对象同样不能逃逸租约；生命周期、资源所有权和telemetry 约束见 [Capability 参考](../../reference/capabilities.md#playwright)。
+
+`lease_page()` 与 `lease_browser()` 返回由调用方持有的原生 Playwright 对象。调用方在该租约内执行的导航和后续 HTTP(S) 请求不受受管理 rasterization 请求链路的自动保护，仍须自行执行 scheme、host、DNS/IP 与 redirect 校验。

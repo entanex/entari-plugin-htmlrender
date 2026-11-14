@@ -18,9 +18,11 @@ description: 第三方 HTML Provider 的发现、配置、资源策略与 compos
 parsed config 的 identity 从 `parse_config()` 一直传到 availability、resource strategy与 compose；composition 不复制或重建这个 Provider-owned value。
 
 `ProviderDependencies` 注入共享 `operation_admission`、operation observer、cache
-observer、收窄的 `ProviderResourceAccess` 与可选 `AssetPublisher`。Provider 不得自行创建 filehost、observer 或资源服务。自定义 capability 的完整公开操作必须进入共享admission；若 adapter 使用自有 lease，lifecycle `aclose()` 必须先停止接纳、drain全部 lease，再释放底层资源。
+observer、收窄的 `ProviderResourceAccess` 与可选 `AssetPublisher`。Provider 通过 `resources.fetch(ResourceRef, refresh=False)` 读取显式 locator，或通过 `resources.fetch_published(PublishedResource)` 在发布租约内读取 URL-scoped capability。后者不会按 URL 缓存授权，也不接受网络位置或同 host 路径来扩大授权范围。Provider 不得自行创建 filehost、observer 或资源服务。自定义 capability 的完整公开操作必须进入共享admission；若 adapter 使用自有 lease，lifecycle `aclose()` 必须先停止接纳、drain全部 lease，再释放底层资源。
 
 `ProviderBinding` 包含 `RuntimeLifecycle`、可选 `PreparedHtmlExecutor` 与可选`CapabilityCatalog`。executor 接受 `PreparedHtml`、`RasterOptions`、外层`RenderOperation` 与可选 `ResourceMaterializationPolicy`；专属操作通过 capability暴露。
+
+HTTP(S) 资源不能把 `allow_hosts` 当作私网绕过。主机名白名单为空时，任意主机名仍须通过 IP 策略；非空时只允许列出的主机及子域。回环、RFC 1918、链路本地、CGNAT/shared `100.64.0.0/10`、ULA 等非公网解析地址必须匹配 `resources.remote_access.allow_private_networks` 中的 IP/CIDR，`deny_hosts` 优先于所有允许规则。受管理渲染只把浏览器发起的 HTTP(S) `GET` 送入同一策略及 pinned transport；重定向跨到不同 URL 时，上一跳的发布授权头不会保留。WebSocket、非 `GET` 请求和 service worker 在该执行边界内被拒绝。直接租用原生 Page/Browser 的调用方负责后续导航和请求策略。
 
 ## Lifecycle
 

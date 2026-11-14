@@ -7,7 +7,7 @@ from ipaddress import ip_address
 import socket
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import anyio
 import pytest
@@ -35,6 +35,7 @@ from entari_plugin_htmlrender.resources.errors import (
 from entari_plugin_htmlrender.resources.models import (
     NotModified,
     RemoteResourceRef,
+    ResourceContent,
     ResourceRevision,
 )
 
@@ -93,15 +94,35 @@ def test_policy_denies_dns_answers_in_private_ranges() -> None:
     policy.authorize_address(url, ip_address("93.184.216.34"))
 
 
-def test_allow_hosts_whitelists_private_destinations_including_subdomains() -> None:
+def test_allow_hosts_does_not_bypass_private_address_checks() -> None:
     policy = ConfiguredRemoteAccessPolicy(
         RemoteAccessSettings(allow_hosts=("internal.test",))
+    )
+
+    with pytest.raises(ResourceAccessDeniedError):
+        policy.authorize_address("http://internal.test/asset", ip_address("10.0.0.1"))
+    with pytest.raises(ResourceAccessDeniedError):
+        policy.authorize_address(
+            "http://cdn.internal.test/asset", ip_address("10.0.0.1")
+        )
+
+
+def test_allow_hosts_and_private_networks_are_both_required() -> None:
+    policy = ConfiguredRemoteAccessPolicy(
+        RemoteAccessSettings(
+            allow_private_networks=("10.0.0.0/8",),
+            allow_hosts=("internal.test",),
+        )
     )
 
     policy.authorize_address("http://internal.test/asset", ip_address("10.0.0.1"))
     policy.authorize_address("http://cdn.internal.test/asset", ip_address("10.0.0.1"))
     with pytest.raises(ResourceAccessDeniedError):
         policy.authorize_address("http://other.test/asset", ip_address("10.0.0.1"))
+    with pytest.raises(ResourceAccessDeniedError):
+        policy.authorize_address(
+            "http://internal.test/asset", ip_address("192.168.1.1")
+        )
 
 
 def test_deny_hosts_wins_over_public_and_allowed_hosts() -> None:
@@ -118,13 +139,71 @@ def test_deny_hosts_wins_over_public_and_allowed_hosts() -> None:
         policy.authorize_url("https://sub.blocked.test/asset")
 
 
-def test_allow_private_networks_opts_out_of_blocking() -> None:
+@pytest.mark.parametrize(
+    ("address", "network"),
+    [
+        ("127.0.0.1", "127.0.0.0/8"),
+        ("10.23.45.67", "10.0.0.0/8"),
+        ("100.64.12.34", "100.64.0.0/10"),
+        ("169.254.10.20", "169.254.0.0/16"),
+        ("2001:10::1", "2001::/23"),
+        ("::1", "::1/128"),
+        ("fe80::1234", "fe80::/10"),
+    ],
+)
+def test_private_address_allowlist_requires_a_matching_network(
+    address: str,
+    network: str,
+) -> None:
     policy = ConfiguredRemoteAccessPolicy(
-        RemoteAccessSettings(allow_private_networks=True)
+        RemoteAccessSettings(allow_private_networks=(network,))
     )
 
-    policy.authorize_url("http://127.0.0.1/asset")
-    policy.authorize_address("http://a.test/x", ip_address("10.0.0.1"))
+    policy.authorize_address("http://a.test/x", ip_address(address))
+
+
+def test_private_address_allowlist_rejects_nonmatching_network() -> None:
+    policy = ConfiguredRemoteAccessPolicy(
+        RemoteAccessSettings(allow_private_networks=("10.0.0.0/8",))
+    )
+
+    with pytest.raises(ResourceAccessDeniedError):
+        policy.authorize_address("http://a.test/x", ip_address("192.168.1.1"))
+    with pytest.raises(ResourceAccessDeniedError):
+        policy.authorize_address("http://a.test/x", ip_address("100.64.12.34"))
+
+
+def test_private_address_allowlist_does_not_allow_special_destinations() -> None:
+    policy = ConfiguredRemoteAccessPolicy(
+        RemoteAccessSettings(allow_private_networks=("0.0.0.0/0",))
+    )
+
+    for address in ("0.0.0.0", "224.0.0.1", "240.0.0.1"):  # noqa: S104
+        with pytest.raises(ResourceAccessDeniedError):
+            policy.authorize_address("http://a.test/x", ip_address(address))
+
+
+def test_ipv4_mapped_ipv6_matches_its_ipv4_network() -> None:
+    policy = ConfiguredRemoteAccessPolicy(
+        RemoteAccessSettings(
+            allow_private_networks=("127.0.0.0/8",),
+            allow_hosts=("::ffff:127.0.0.1",),
+        )
+    )
+
+    policy.authorize_url("http://[::ffff:127.0.0.1]/asset")
+
+
+def test_deny_hosts_wins_over_mapped_private_address_allowlist() -> None:
+    policy = ConfiguredRemoteAccessPolicy(
+        RemoteAccessSettings(
+            allow_private_networks=("127.0.0.0/8",),
+            deny_hosts=("127.0.0.1",),
+        )
+    )
+
+    with pytest.raises(ResourceAccessDeniedError):
+        policy.authorize_url("http://[::ffff:127.0.0.1]/asset")
 
 
 def _transport() -> RemoteTransportExecutor:
@@ -159,10 +238,13 @@ async def test_dns_resolution_to_private_range_is_rejected_before_connecting(
 
 
 class _Handler(BaseHTTPRequestHandler):
+    seen_headers: ClassVar[list[tuple[str, str | None]]] = []
+
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002
         del format, args
 
     def do_GET(self) -> None:
+        self.seen_headers.append((self.path, self.headers.get("Authorization")))
         if self.path == "/ok":
             body = b"remote body"
             self.send_response(200)
@@ -175,6 +257,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Location", "http://169.254.169.254/latest/meta-data/")
             self.end_headers()
+        elif self.path == "/redirect-same-host":
+            self.send_response(302)
+            self.send_header("Location", "/redirect-target")
+            self.end_headers()
+        elif self.path == "/redirect-target":
+            body = b"redirect target"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/loop":
             self.send_response(302)
             self.send_header("Location", "/loop")
@@ -226,6 +319,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def loopback_server() -> Iterator[str]:
+    _Handler.seen_headers = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -237,7 +331,7 @@ def loopback_server() -> Iterator[str]:
         thread.join()
 
 
-_LOOPBACK_ALLOWED = RemoteAccessSettings(allow_hosts=("127.0.0.1",))
+_LOOPBACK_ALLOWED = RemoteAccessSettings(allow_private_networks=("127.0.0.0/8",))
 
 
 @pytest.mark.anyio
@@ -255,6 +349,29 @@ async def test_fetch_returns_content_from_allowed_host(loopback_server: str) -> 
 
 
 @pytest.mark.anyio
+async def test_publication_header_is_scoped_to_the_exact_initial_url(
+    loopback_server: str,
+) -> None:
+    content = await fetch_remote(
+        RemoteResourceRef(f"{loopback_server}/redirect-same-host"),
+        policy=ConfiguredRemoteAccessPolicy(_LOOPBACK_ALLOWED),
+        transport=_transport(),
+        max_resource_bytes=1024,
+        request_headers={"Authorization": "Bearer filehost-token"},
+    )
+
+    assert content == ResourceContent(
+        b"redirect target",
+        "text/plain",
+        final_url=f"{loopback_server}/redirect-target",
+    )
+    assert _Handler.seen_headers == [
+        ("/redirect-same-host", "Bearer filehost-token"),
+        ("/redirect-target", None),
+    ]
+
+
+@pytest.mark.anyio
 async def test_redirect_into_private_range_is_blocked(loopback_server: str) -> None:
     with pytest.raises(ResourceAccessDeniedError):
         await fetch_remote(
@@ -268,7 +385,10 @@ async def test_redirect_into_private_range_is_blocked(loopback_server: str) -> N
 @pytest.mark.anyio
 async def test_redirect_chain_is_bounded(loopback_server: str) -> None:
     policy = ConfiguredRemoteAccessPolicy(
-        RemoteAccessSettings(allow_hosts=("127.0.0.1",), max_redirects=2)
+        RemoteAccessSettings(
+            allow_private_networks=("127.0.0.0/8",),
+            max_redirects=2,
+        )
     )
 
     with pytest.raises(ResourceFetchError, match="redirects"):
@@ -566,7 +686,10 @@ async def test_aclose_drain_timeout_raises_and_close_stays_retryable() -> None:
 @pytest.mark.anyio
 async def test_deadline_is_not_reset_by_redirect_hops(loopback_server: str) -> None:
     policy = ConfiguredRemoteAccessPolicy(
-        RemoteAccessSettings(allow_hosts=("127.0.0.1",), max_redirects=50)
+        RemoteAccessSettings(
+            allow_private_networks=("127.0.0.0/8",),
+            max_redirects=50,
+        )
     )
 
     started = time.monotonic()

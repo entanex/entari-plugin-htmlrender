@@ -28,15 +28,16 @@ from entari_plugin_htmlrender.resources.config import (
     RemoteLocalResourcePolicy,
     ResourceMaterializationPolicy,
 )
+from entari_plugin_htmlrender.resources.headers import merge_request_headers
 from entari_plugin_htmlrender.resources.models import (
     InlineResource,
     PublicationLeaseId,
 )
 
 from ._page import (
+    ManagedRequestGuard,
     PageContext,
     _setup_page_logging,
-    install_filehost_request_route,
 )
 from .models import (
     ContentConfig,
@@ -259,11 +260,19 @@ async def _execute_browser_load_plan(
     content: ContentConfig,
     render: RenderConfig,
     lease: PlaywrightLease,
-    local_resource_policy: LocalLocalResourcePolicy | RemoteLocalResourcePolicy,
+    resources: ProviderResourceAccess,
     filehost_authorization: Mapping[str, Mapping[str, str]],
     telemetry_op: str,
 ) -> bytes:
     """Execute a fully resolved load plan in one Playwright page."""
+    preset_request_headers = (
+        merge_request_headers(
+            {"User-Agent": render.page.user_agent},
+            render.page.extra_http_headers,
+        )
+        if render.page.user_agent is not None
+        else dict(render.page.extra_http_headers)
+    )
     async with PageContext(lease).open(
         viewport={
             "width": render.page.viewport.width,
@@ -272,36 +281,45 @@ async def _execute_browser_load_plan(
         device_scale_factor=render.screenshot.device_scale_factor,
         user_agent=render.page.user_agent,
         extra_http_headers=render.page.extra_http_headers,
+        service_workers="block",
     ) as page:
-        if local_resource_policy == RemoteLocalResourcePolicy.FILEHOST:
-            await install_filehost_request_route(
-                page,
-                authorization=filehost_authorization,
-            )
+        guarded = ManagedRequestGuard(
+            resources,
+            authorization=filehost_authorization,
+            preset_request_headers=preset_request_headers,
+        )
+        await guarded.install(page)
 
-        # Install the narrow route after the catch-all filehost route so it gets
+        # Install the narrow route after the catch-all resource route so it gets
         # first chance to fulfil immutable in-memory resources.
         await install_browser_asset_routes(page, plan)
         _setup_page_logging(page)
-        if plan.document_url is not None:
-            await page.goto(plan.document_url)
-        await page.set_content(plan.html, wait_until=content.wait_until)
-        await page.wait_for_timeout(content.additional_wait)
-        await log_page_telemetry(page, op=telemetry_op)
-        screenshot = render.screenshot
-        await page.wait_for_timeout(screenshot.wait_before_screenshot)
-        if isinstance(screenshot, JpegScreenshotOptions):
-            return await page.screenshot(
-                full_page=screenshot.full_page,
-                type=screenshot.format,
-                quality=screenshot.quality,
-                timeout=screenshot.timeout,
-            )
-        return await page.screenshot(
-            full_page=screenshot.full_page,
-            type=screenshot.format,
-            timeout=screenshot.timeout,
-        )
+        try:
+            if plan.document_url is not None:
+                await page.goto(plan.document_url)
+            await page.set_content(plan.html, wait_until=content.wait_until)
+            await page.wait_for_timeout(content.additional_wait)
+            await log_page_telemetry(page, op=telemetry_op)
+            screenshot = render.screenshot
+            await page.wait_for_timeout(screenshot.wait_before_screenshot)
+            if isinstance(screenshot, JpegScreenshotOptions):
+                image = await page.screenshot(
+                    full_page=screenshot.full_page,
+                    type=screenshot.format,
+                    quality=screenshot.quality,
+                    timeout=screenshot.timeout,
+                )
+            else:
+                image = await page.screenshot(
+                    full_page=screenshot.full_page,
+                    type=screenshot.format,
+                    timeout=screenshot.timeout,
+                )
+        except Exception:
+            guarded.raise_if_failed()
+            raise
+        guarded.raise_if_failed()
+        return image
 
 
 async def render_prepared_html(
@@ -391,7 +409,7 @@ async def render_prepared_html(
             content=content,
             render=render,
             lease=lease,
-            local_resource_policy=policy,
+            resources=resources,
             filehost_authorization=filehost_authorization,
             telemetry_op=telemetry_op,
         )

@@ -39,9 +39,10 @@ plugins:
 
 WebSocket 连接在 startup/probe 阶段比较客户端与远端版本。版本门禁 fail-open：远端无法报告版本时会记录诊断并继续，但软门禁不能证明任意版本组合兼容。发现明确不兼容时应在 preparing 阶段失败，而不是把问题推迟到首个业务请求。
 
-CDP 模式不执行 Playwright client/server 版本门禁；它只使用 Chromium DevTools
-Protocol，仍需通过真实 probe 验证目标服务能力。
+CDP 模式不执行 Playwright client/server 版本门禁；它只使用 Chromium DevTools Protocol，仍需通过真实 probe 验证目标服务能力。
 
-远程浏览器无法直接读取宿主本地路径。优先使用内存/data URL；资源较大或浏览器与宿主分离时配置显式 filehost。若选中 filehost strategy，必须安装 `filehost` extra并提供外部可达的 `resources.filehost.public_base_url`。
+远程浏览器无法直接读取宿主本地路径。优先使用内存/data URL；资源较大或浏览器与宿主分离时配置显式 filehost。选择 filehost transport 时必须提供 Bot 可连接的 `resources.filehost.public_base_url`；`filehost` extra 只用于安装 `py-machineid` 以改善默认请求头值的机器标识派生。未安装该 extra 或机器标识读取失败时，publisher 会回退到 MAC 地址派生标识；显式配置 `resources.filehost.request_header_value` 时直接使用该值。受管理的 HTML rendering 由 Bot 获取 filehost URL 后把响应交给浏览器，因此私网目标还须匹配 `allow_private_networks`。
 
 `startup: probe` 在 Launart preparing 阶段建立连接并执行最小探测。业务 handler不应再次手工 startup；需要原生页面时通过`service.capabilities.playwright.lease_page()` 建立显式租约。
+
+受管理的 HTML rasterization 只把 HTTP(S) `GET` 请求交给 Bot-side 的 pinned resource transport；浏览器不直接连接这些地址，WebSocket 与非 `GET` 请求会被拒绝，service worker 会被阻止。每跳地址都须符合 `resources.remote_access`：非公网地址必须列入 `allow_private_networks`，旧布尔值无效，`deny_hosts` 优先。发布授权头只适用于原发布 URL，redirect 到不同 URL 时不会沿用，且不会进入授权缓存。该机制保护 HTTP(S) 资源访问，不构成完整 Chromium sandbox；`lease_page()` / `lease_browser()` 的原生导航及后续请求仍由调用方负责策略校验。
