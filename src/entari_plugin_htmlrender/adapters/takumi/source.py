@@ -296,7 +296,7 @@ def prepare_takumi_document(
     images: Sequence[object] | None = None,
     strict: bool = True,
 ) -> TakumiDocument:
-    """Validate and adapt one backend-neutral document for Takumi 0.2.0."""
+    """Validate and adapt one backend-neutral document for Takumi 0.4.0."""
 
     snapshot, document_base = _inspect_document(prepared)
     return _build_takumi_document(

@@ -528,8 +528,8 @@ requires-dist = [
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2.0.0" },
     { name = "skia-python", marker = "extra == 'all'", specifier = ">=144.0.post2" },
     { name = "skia-python", marker = "extra == 'skia'", specifier = ">=144.0.post2" },
-    { name = "takumi-py", marker = "extra == 'all'", specifier = "==0.2.0" },
-    { name = "takumi-py", marker = "extra == 'takumi'", specifier = "==0.2.0" },
+    { name = "takumi-py", marker = "extra == 'all'", specifier = "==0.4.0" },
+    { name = "takumi-py", marker = "extra == 'takumi'", specifier = "==0.4.0" },
     { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 provides-extras = ["filehost", "sentry", "prometheus", "takumi", "playwright", "all", "pillow", "skia"]
@@ -2170,19 +2170,22 @@ wheels = [
 
 [[package]]
 name = "takumi-py"
-version = "0.2.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
     { name = "msgspec" },
-    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/59/fc/85c77ff016617eb3f3a2093a89288374bc8310d82c7162c61290ef789fc1/takumi_py-0.2.0.tar.gz", hash = "sha256:096a98e5f200a28b58c83759c623705a7c715a4bcc102be9aaeb6d24fbe073bd", size = 8298846, upload-time = "2026-07-10T10:30:15.384Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/ac/0531313f71d92e34797542f48fa3a50d9fc5b358a68cf11e7dbc346e4130/takumi_py-0.4.0.tar.gz", hash = "sha256:c67165751d3f6eaa6519235bf52b4b82d45d53f6c24d9c713c21537833eef797", size = 7957362, upload-time = "2026-11-07T12:00:29.98Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/a5/b005a244440abf0efc3505cff5b468660a94caabf59aa9df0ad835fe4cb2/takumi_py-0.2.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:29e11242af625395e26489dd74b0c4d7d460180a36770cafd11e9fee11f8e182", size = 4446996, upload-time = "2026-07-10T10:30:07.286Z" },
-    { url = "https://files.pythonhosted.org/packages/60/40/8024180776c16bc414dad112ed858eb7b4f3eadf8a59d0c80fd258e1036e/takumi_py-0.2.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6d56482cf09b25db82c251be200b766f9ecc19a3ea32155567649868a99d2f41", size = 4881738, upload-time = "2026-07-10T10:30:09.14Z" },
-    { url = "https://files.pythonhosted.org/packages/c6/c1/e6f2768438ac949db0b724ef7e171065ec16e70d5b052cf3f03f64b372ac/takumi_py-0.2.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f3536ed28e94022fc750a7d31939a3941c0069b4c6d4a9f93eba80f457aab6a2", size = 4918632, upload-time = "2026-07-10T10:30:11.097Z" },
-    { url = "https://files.pythonhosted.org/packages/e4/e2/e73da347dc3f33b4918e4fbe921dd944cd32100af18c1c93281999b61a37/takumi_py-0.2.0-cp310-abi3-win_amd64.whl", hash = "sha256:9d1340965f8dd56a4e4b25bfda1f4b12282cd13d252b521bd5e77a2e91623ea8", size = 4298240, upload-time = "2026-07-10T10:30:13.267Z" },
+    { url = "https://files.pythonhosted.org/packages/24/21/9d0843b031125c50ffacc96f173b115c6b5fd079aed28500982b105acde4/takumi_py-0.4.0-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:ed0045f8237cd2c92718c9c278d521fe6aa3621a3a0017b053eefe3c36c22c7a", size = 5352009, upload-time = "2026-11-07T12:00:15.512Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/5d/dd6e5e2b95cda3b087baf57404b74fb5d135918aaaf921b3cce9dd516e82/takumi_py-0.4.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:d4628ae13433e7aa8dd0bad03b5c43b0d28961c009fa77bbaf116dbf62fab461", size = 5120711, upload-time = "2026-11-07T12:00:17.969Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/c5/5d512093ef0467b51846feab84fc578018594df4a6b01ea998dc01cf8c4e/takumi_py-0.4.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f8e2ae4871d8af1a2260b50448dff59454f99c443efa690582e5356bf03654b7", size = 5554177, upload-time = "2026-11-07T12:00:19.831Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/3c/168382dd8f3a2ec7c750f5698be594dbeb84b2b9162689bebec51737e846/takumi_py-0.4.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8bef71f4755a067e3934bc051ef1f75937d2d8f69cb983011a25d97a58f4c6ce", size = 5656050, upload-time = "2026-11-07T12:00:21.703Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/53/57f8a4f6d822baea865c5a5aad04b435e0592511a72083d24d028c7569b5/takumi_py-0.4.0-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:e912cdd71f2f89a3099a6173ba87f9956787d5e431c95163ed1aaed3195d54a3", size = 5735930, upload-time = "2026-11-07T12:00:23.328Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/40/3c63d105c8f58da63c217b8346bc85cc15762d8413c0953bbb0055588cfd/takumi_py-0.4.0-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:7cc68c738c969fca9bdc6d0b1e8d98800e5854f246912153c0006e4aacbc20b6", size = 6019739, upload-time = "2026-11-07T12:00:25.159Z" },
+    { url = "https://files.pythonhosted.org/packages/59/14/70f5361e4d3d8d4df03b2ac6f8993294155363d43cd29f772bc44f954b52/takumi_py-0.4.0-cp311-abi3-win_amd64.whl", hash = "sha256:0f73d5763b3875c836379f984296583220dfbcc74e67e82a6d8e4f8b3f0e82a5", size = 4982009, upload-time = "2026-11-07T12:00:26.774Z" },
+    { url = "https://files.pythonhosted.org/packages/00/cc/333a029bcea89de3878caf64c05c7dd793c77fa5180fa742745b14b0534a/takumi_py-0.4.0-cp311-abi3-win_arm64.whl", hash = "sha256:ff463e927b592fb397f9e0886f719f22924857c7c48edfc9b9fcd27f4390b5ef", size = 4619239, upload-time = "2026-11-07T12:00:28.343Z" },
 ]
 
 [[package]]

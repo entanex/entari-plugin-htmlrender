@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 PACKAGE_NAME: Final = "entari-plugin-htmlrender"
 PACKAGE_IMPORT: Final = "entari_plugin_htmlrender"
-TAKUMI_VERSION: Final = "0.2.0"
+TAKUMI_VERSION: Final = "0.4.0"
 PILLOW_MINIMUM_VERSION: Final = "12.0.0"
 SKIA_MINIMUM_VERSION: Final = "144.0.post2"
 EXPECTED_EXTRAS: Final = frozenset(

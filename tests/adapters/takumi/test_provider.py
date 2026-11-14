@@ -190,9 +190,13 @@ def test_availability_maps_backend_result(mocker: MockerFixture) -> None:
 @pytest.mark.parametrize(
     ("located", "installed_version", "available", "reason"),
     [
-        (False, "0.2.0", False, "not installed"),
+        (False, "0.4.0", False, "not installed"),
         (True, "0.1.0", False, "Unsupported"),
-        (True, "0.2.0", True, None),
+        (True, "0.2.0", False, "Unsupported"),
+        (True, "0.3.0", False, "Unsupported"),
+        (True, "0.4.0", True, None),
+        (True, "0.5.0", False, "Unsupported"),
+        (True, "999.0.0", False, "Unsupported"),
     ],
 )
 def test_availability_checks_exact_native_version(
