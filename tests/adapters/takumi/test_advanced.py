@@ -461,6 +461,7 @@ async def test_font_registration_reuses_the_runtime_admission_path(
         style="normal",
         subset_of="Parent",
         generic_family="sans-serif",
+        unicode_range=[(0x20, 0x7E)],
     ) == ("File",)
 
     register.assert_awaited_once_with(b"one", source="memory:one")
@@ -475,8 +476,138 @@ async def test_font_registration_reuses_the_runtime_admission_path(
         style="normal",
         subset_of="Parent",
         generic_family="sans-serif",
+        unicode_range=[(0x20, 0x7E)],
         cache_policy=advanced_module.FileCachePolicy.REVALIDATE,
     )
+
+
+async def test_font_cache_and_release_operations_delegate_to_runtime_state(
+    mocker: MockerFixture,
+    operation_observer: RecordingOperationObserver,
+) -> None:
+    state = _state()
+    cache_font = mocker.patch.object(
+        TakumiRuntimeState,
+        "cache_font",
+        new=mocker.AsyncMock(return_value=("Cached",)),
+    )
+    cached_fonts = mocker.patch.object(
+        TakumiRuntimeState,
+        "cached_fonts",
+        new=mocker.AsyncMock(return_value=("Cached",)),
+    )
+    unregister_font = mocker.patch.object(
+        TakumiRuntimeState,
+        "unregister_font",
+        new=mocker.AsyncMock(return_value=True),
+    )
+    clear_fonts = mocker.patch.object(
+        TakumiRuntimeState,
+        "clear_fonts",
+        new=mocker.AsyncMock(return_value=None),
+    )
+    api = TakumiAPIAdapter(state, operation_observer)
+
+    assert await api.cache_font(b"font", "memory:font") == ("Cached",)
+    assert await api.cached_fonts("memory:font", pin=True) == ("Cached",)
+    assert await api.unregister_font("Cached")
+    assert await api.clear_fonts() is None
+
+    cache_font.assert_awaited_once_with(b"font", "memory:font")
+    cached_fonts.assert_awaited_once_with("memory:font", pin=True)
+    unregister_font.assert_awaited_once_with("Cached")
+    clear_fonts.assert_awaited_once_with()
+    assert [operation[0] for operation in operation_observer.operations[-4:]] == [
+        "takumi.api.cache_font",
+        "takumi.api.cached_fonts",
+        "takumi.api.unregister_font",
+        "takumi.api.clear_fonts",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "args", "expected_cause"),
+    [
+        pytest.param(
+            "cache_font",
+            (b"font", "memory:font"),
+            TypeError("cache rejected"),
+            id="cache-font",
+        ),
+        pytest.param(
+            "cached_fonts",
+            ("memory:font",),
+            TypeError("lookup rejected"),
+            id="cached-fonts",
+        ),
+        pytest.param(
+            "unregister_font",
+            ("Family",),
+            ValueError("release rejected"),
+            id="unregister-font",
+        ),
+        pytest.param(
+            "clear_fonts",
+            (),
+            ValueError("clear rejected"),
+            id="clear-fonts",
+        ),
+    ],
+)
+async def test_managed_font_cache_operations_translate_errors(
+    mocker: MockerFixture,
+    operation_observer: RecordingOperationObserver,
+    operation: str,
+    args: tuple[object, ...],
+    expected_cause: Exception,
+) -> None:
+    mocker.patch.object(
+        TakumiRuntimeState,
+        operation,
+        new=mocker.AsyncMock(side_effect=expected_cause),
+    )
+    api = TakumiAPIAdapter(_state(), operation_observer)
+
+    expected_type = (
+        InvalidRenderInputError
+        if isinstance(expected_cause, TypeError)
+        else ProviderExecutionError
+    )
+    with pytest.raises(expected_type) as raised:
+        await getattr(api, operation)(*args)
+
+    assert raised.value.__cause__ is expected_cause
+    assert raised.value.operation == f"takumi.api.{operation}"
+    assert operation_observer.operations[-1] == (
+        f"takumi.api.{operation}",
+        {"render.backend": "takumi"},
+        "error",
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "args"),
+    [
+        pytest.param("cache_font", (b"font", "memory:font"), id="cache-font"),
+        pytest.param("cached_fonts", ("memory:font",), id="cached-fonts"),
+        pytest.param("unregister_font", ("Family",), id="unregister-font"),
+        pytest.param("clear_fonts", (), id="clear-fonts"),
+    ],
+)
+async def test_expired_lease_rejects_new_font_cache_operations(
+    operation: str,
+    args: tuple[object, ...],
+) -> None:
+    api = TakumiAPIAdapter(_state())
+    if api._lease_guard is None:
+        raise AssertionError("adapter must own a lease guard")
+    api._lease_guard.invalidate()
+
+    with pytest.raises(RuntimeUnavailableError) as raised:
+        await getattr(api, operation)(*args)
+
+    assert raised.value.state == "lease_expired"
+    assert raised.value.operation == f"takumi.api.{operation}"
 
 
 def test_properties_and_prepared_input_share_lease_validation() -> None:

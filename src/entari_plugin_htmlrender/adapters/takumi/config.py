@@ -12,6 +12,10 @@ from entari_plugin_htmlrender.capabilities.takumi import (
 from entari_plugin_htmlrender.capabilities.takumi import (
     GenericFontFamily as GenericFontFamily,
 )
+from entari_plugin_htmlrender.capabilities.takumi import UnicodeRange
+
+from .errors import TakumiInputError
+from .validation import normalize_unicode_range
 
 
 def _default_concurrency() -> int:
@@ -27,6 +31,7 @@ class TakumiFontConfig(BaseModel):
     style: str | None = None
     subset_of: str | None = None
     generic_family: GenericFontFamily | None = None
+    unicode_range: tuple[UnicodeRange, ...] | None = None
     cache_policy: FileCachePolicy | None = None
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -48,6 +53,14 @@ class TakumiFontConfig(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+    @field_validator("unicode_range", mode="before")
+    @classmethod
+    def _normalize_unicode_range(cls, value: object) -> tuple[UnicodeRange, ...] | None:
+        try:
+            return normalize_unicode_range(value, field="unicode_range")
+        except TakumiInputError as error:
+            raise ValueError(str(error)) from error
 
 
 class TakumiHtmlOptionsConfig(BaseModel):
@@ -76,6 +89,8 @@ class TakumiConfig(BaseModel):
     load_default_fonts: bool = True
     fonts: list[TakumiFontConfig] = Field(default_factory=list)
     font_cache_policy: FileCachePolicy = FileCachePolicy.REVALIDATE
+    cache_max_bytes: int | None = Field(default=None, ge=0, strict=True)
+    font_cache_max_bytes: int | None = Field(default=None, ge=0, strict=True)
     max_concurrency: int = Field(default_factory=_default_concurrency, ge=1, le=64)
     compiled_cache_max_entries: int = Field(default=128, ge=0, le=4096)
     compiled_cache_max_source_bytes: int = Field(

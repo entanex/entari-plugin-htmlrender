@@ -61,11 +61,14 @@ else:
 ImageCacheMode: TypeAlias = Literal["auto", "none"]
 StaticImageFormat: TypeAlias = Literal["png", "jpeg", "jpg", "webp", "ico", "raw"]
 AnimationImageFormat: TypeAlias = Literal["webp", "apng", "gif"]
+# ``floyd-steinberg`` remains a 0.4.0 alias of ``ordered-bayer`` and is
+# scheduled for removal in takumi-py 0.6.0.
 DitheringAlgorithm: TypeAlias = Literal[
     "none",
     "ordered-bayer",
     "floyd-steinberg",
 ]
+UnicodeRange: TypeAlias = tuple[int, int]
 TakumiKeyframesInput: TypeAlias = (
     Mapping[str, Mapping[str, Mapping[str, str | int | float]]]
     | Sequence[Mapping[str, object]]
@@ -328,6 +331,7 @@ class TakumiSession(Protocol):
         style: str | None = None,
         subset_of: str | None = None,
         generic_family: GenericFontFamily | None = None,
+        unicode_range: Sequence[UnicodeRange] | None = None,
         cache_policy: FileCachePolicy = FileCachePolicy.REVALIDATE,
     ) -> tuple[str, ...]: ...
 
@@ -487,6 +491,23 @@ class TakumiAPI(Protocol):
         sources: Sequence[str | None] | None = None,
     ) -> tuple[str, ...]: ...
 
+    async def cache_font(
+        self,
+        font: NativeFontResourceInput,
+        key: str,
+    ) -> tuple[str, ...]: ...
+
+    async def cached_fonts(
+        self,
+        key: str,
+        *,
+        pin: bool = False,
+    ) -> tuple[str, ...] | None: ...
+
+    async def unregister_font(self, name: str) -> bool: ...
+
+    async def clear_fonts(self) -> None: ...
+
     async def register_font_file(
         self,
         path: str | Path,
@@ -496,6 +517,7 @@ class TakumiAPI(Protocol):
         style: str | None = None,
         subset_of: str | None = None,
         generic_family: GenericFontFamily | None = None,
+        unicode_range: Sequence[UnicodeRange] | None = None,
         cache_policy: FileCachePolicy = FileCachePolicy.REVALIDATE,
     ) -> tuple[str, ...]: ...
 
@@ -542,4 +564,5 @@ __all__ = [
     "TakumiSequenceOptions",
     "TakumiSession",
     "TakumiSvgOptions",
+    "UnicodeRange",
 ]

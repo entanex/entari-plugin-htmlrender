@@ -33,6 +33,40 @@ def ensure_native_identifier(value: str, *, field: str) -> str:
     return value
 
 
+def normalize_unicode_range(
+    value: object, *, field: str
+) -> tuple[tuple[int, int], ...] | None:
+    """Snapshot inclusive Unicode codepoint ranges before native admission."""
+
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise TakumiInputError(field, "must be a sequence of codepoint pairs")
+    ranges: list[tuple[int, int]] = []
+    for index, item in enumerate(value):
+        item_field = f"{field}[{index}]"
+        if (
+            isinstance(item, (str, bytes))
+            or not isinstance(item, Sequence)
+            or len(item) != 2
+        ):
+            raise TakumiInputError(item_field, "must contain a start and an end")
+        start, end = item
+        if (
+            isinstance(start, bool)
+            or isinstance(end, bool)
+            or not isinstance(start, int)
+            or not isinstance(end, int)
+        ):
+            raise TakumiInputError(item_field, "codepoints must be integers")
+        if not 0 <= start <= end <= 0x10FFFF:
+            raise TakumiInputError(
+                item_field, "must satisfy 0 <= start <= end <= 0x10FFFF"
+            )
+        ranges.append((start, end))
+    return tuple(ranges)
+
+
 def validate_native_strings(value: object, *, field: str) -> None:
     """Recursively validate every string in one native-call argument."""
 
@@ -113,6 +147,7 @@ def utf8_weight(*values: str) -> int:
 __all__ = [
     "ensure_native_identifier",
     "ensure_utf8",
+    "normalize_unicode_range",
     "utf8_weight",
     "validate_native_strings",
 ]

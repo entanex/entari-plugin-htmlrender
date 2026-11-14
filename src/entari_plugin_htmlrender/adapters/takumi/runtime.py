@@ -24,13 +24,15 @@ from .types import TakumiImageResource
 from .validation import (
     ensure_native_identifier,
     ensure_utf8,
+    normalize_unicode_range,
     utf8_weight,
     validate_native_strings,
 )
 
 if TYPE_CHECKING:
-    from takumi_py import FontResourceInput
+    from takumi_py import FontResource
 
+    from entari_plugin_htmlrender.capabilities.takumi import UnicodeRange
     from entari_plugin_htmlrender.resources.observation import CacheObserver
     from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
 
@@ -86,6 +88,7 @@ class _FontSpec:
     style: str | None = None
     subset_of: str | None = None
     generic_family: GenericFontFamily | None = None
+    unicode_range: tuple[UnicodeRange, ...] | None = None
 
     @property
     def digest(self) -> str:
@@ -99,6 +102,7 @@ class _FontSpec:
             self.style,
             self.subset_of,
             self.generic_family,
+            self.unicode_range,
         )
 
     @property
@@ -110,16 +114,16 @@ class _FontSpec:
             fingerprint.update(repr(value).encode("utf-8"))
         return f"memory:sha256:{fingerprint.hexdigest()}"
 
-    def to_native(self) -> FontResourceInput:
+    def to_native(self) -> FontResource:
         from takumi_py import FontResource  # noqa: PLC0415
 
         return FontResource(
             self.data,
-            name=self.name,
+            name=self.name if self.subset_of is None else self.subset_of,
             weight=self.weight,
             style=self.style,
-            subset_of=self.subset_of,
             generic_family=self.generic_family,
+            unicode_range=self.unicode_range,
         )
 
 
@@ -141,6 +145,7 @@ class _CompiledStylesheetCacheValue:
 
 
 def _validate_font_spec(spec: _FontSpec, *, field_name: str) -> _FontSpec:
+    normalize_unicode_range(spec.unicode_range, field=f"{field_name}.unicode_range")
     for attribute, value in (
         ("name", spec.name),
         ("style", spec.style),
@@ -231,6 +236,10 @@ def _coerce_font_spec(font: object, *, field_name: str) -> _FontSpec:
             style=style,
             subset_of=subset_of,
             generic_family=generic_family,
+            unicode_range=normalize_unicode_range(
+                getattr(font, "unicode_range", None),
+                field=f"{field_name}.unicode_range",
+            ),
         ),
         field_name=field_name,
     )
@@ -630,9 +639,11 @@ class TakumiRuntimeState:
         style: str | None = None,
         subset_of: str | None = None,
         generic_family: GenericFontFamily | None = None,
+        unicode_range: Sequence[UnicodeRange] | None = None,
         cache_policy: FileCachePolicy,
     ) -> tuple[str, ...]:
         self._ensure_open()
+        ranges = normalize_unicode_range(unicode_range, field="font.unicode_range")
         reference = FileResourceRef(self.resources.authorize_local(Path(path)))
         payload = await self.resources.fetch_bytes(
             reference,
@@ -646,6 +657,7 @@ class TakumiRuntimeState:
                 style=style,
                 subset_of=subset_of,
                 generic_family=generic_family,
+                unicode_range=ranges,
             ),
             field_name="font",
         )
@@ -653,6 +665,66 @@ class TakumiRuntimeState:
             self._register_fonts_sync,
             ((_font_source(path), spec),),
         )
+
+    async def unregister_font(self, name: str) -> bool:
+        """Release a family and invalidate affected registration records."""
+
+        ensure_native_identifier(name, field="font.name")
+
+        def _unregister() -> bool:
+            renderer = self._renderer_for_admitted_call()
+            with self._font_lock:
+                removed = renderer.unregister_font(name)
+                self._font_registrations = {
+                    source: registration
+                    for source, registration in self._font_registrations.items()
+                    if name not in registration.families
+                }
+                self.registered_font_families = tuple(
+                    family for family in self.registered_font_families if family != name
+                )
+                return removed
+
+        return await self.run(_unregister)
+
+    async def clear_fonts(self) -> None:
+        """Release native fonts and forget their source-identity records."""
+
+        def _clear() -> None:
+            renderer = self._renderer_for_admitted_call()
+            with self._font_lock:
+                renderer.clear_fonts()
+                self._font_registrations.clear()
+                self.registered_font_families = ()
+
+        await self.run(_clear)
+
+    async def cache_font(self, font: object, key: str) -> tuple[str, ...]:
+        """Use Takumi's evictable font cache, separate from pinned sources."""
+
+        spec = _coerce_font_spec(font, field_name="font")
+        ensure_native_identifier(key, field="font.key")
+
+        def _cache() -> tuple[str, ...]:
+            renderer = self._renderer_for_admitted_call()
+            with self._font_lock:
+                return renderer.cache_font(spec.to_native(), key)
+
+        return await self.run(_cache)
+
+    async def cached_fonts(
+        self, key: str, *, pin: bool = False
+    ) -> tuple[str, ...] | None:
+        """Query the native cache, including entries evicted by another call."""
+
+        ensure_native_identifier(key, field="font.key")
+
+        def _cached() -> tuple[str, ...] | None:
+            renderer = self._renderer_for_admitted_call()
+            with self._font_lock:
+                return renderer.cached_fonts(key, pin=pin)
+
+        return await self.run(_cached)
 
     def _release_resources(self) -> None:
         """Drop native-backed cache, font, and renderer state in a worker."""
@@ -787,7 +859,7 @@ def _prepare_call_kwargs(
     """Normalize pure-Python adapters and validate native-bound strings."""
 
     normalized = dict(kwargs)
-    for name in ("images", "fetched_resources"):
+    for name in ("images",):
         value = normalized.get(name)
         if value is not None:
             if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
@@ -819,9 +891,7 @@ def _to_native_call_kwargs(kwargs: dict[str, object]) -> dict[str, object]:
     """Construct takumi-py resource objects inside the admitted worker."""
 
     native = dict(kwargs)
-    resource_names = tuple(
-        name for name in ("images", "fetched_resources") if native.get(name) is not None
-    )
+    resource_names = tuple(name for name in ("images",) if native.get(name) is not None)
     if not resource_names:
         return native
 
@@ -885,6 +955,7 @@ async def create_runtime_state(
                 style=font.style,
                 subset_of=font.subset_of,
                 generic_family=font.generic_family,
+                unicode_range=font.unicode_range,
             ),
             field_name=f"fonts[{index}]",
         )
@@ -901,7 +972,11 @@ async def create_runtime_state(
     ]:
         from takumi_py import Renderer  # noqa: PLC0415
 
-        renderer = Renderer(load_default_fonts=config.load_default_fonts)
+        renderer = Renderer(
+            load_default_fonts=config.load_default_fonts,
+            cache_max_bytes=config.cache_max_bytes,
+            font_cache_max_bytes=config.font_cache_max_bytes,
+        )
         try:
             registrations: dict[str, _FontRegistration] = {}
             all_families: list[str] = []

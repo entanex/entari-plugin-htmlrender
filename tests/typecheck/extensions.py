@@ -49,6 +49,13 @@ async def _probe(runtime: RenderRuntime) -> None:
     async with takumi.lease_session() as session:
         assert_type(session, TakumiSession)
         assert_type(await session.render_html("<strong>Hello</strong>"), bytes)
+        assert_type(
+            await session.register_font_file(
+                "font.ttf",
+                unicode_range=((0x20, 0x7E),),
+            ),
+            tuple[str, ...],
+        )
 
     async with takumi.lease_api() as api:
         assert_type(api, TakumiAPI)
@@ -106,6 +113,16 @@ async def _probe(runtime: RenderRuntime) -> None:
         assert_type(await api.render_svg_html("<strong>Hello</strong>"), str)
         assert_type(await api.register_font(b"font"), tuple[str, ...])
         assert_type(await api.register_fonts([b"font"]), tuple[str, ...])
+        assert_type(
+            await api.cache_font(b"font", "memory:font"),
+            tuple[str, ...],
+        )
+        assert_type(
+            await api.cached_fonts("memory:font", pin=True),
+            tuple[str, ...] | None,
+        )
+        assert_type(await api.unregister_font("Family"), bool)
+        assert_type(await api.clear_fonts(), None)
         assert_type(keyframes, CompiledStyleSheet)
 
     async with takumi.lease_native_renderer() as renderer:

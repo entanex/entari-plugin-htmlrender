@@ -35,6 +35,7 @@ from entari_plugin_htmlrender.capabilities.takumi import (
     TakumiRasterOptions,
     TakumiSequenceOptions,
     TakumiSvgOptions,
+    UnicodeRange,
     _compile_keyframes_signature,
     _compile_node_signature,
     _TakumiLeaseGuard,
@@ -703,6 +704,31 @@ class TakumiAPIAdapter:
     ) -> tuple[str, ...]:
         return await self._state.register_fonts(fonts, sources=sources)
 
+    @_tracked("takumi.api.cache_font")
+    async def cache_font(
+        self,
+        font: NativeFontResourceInput,
+        key: str,
+    ) -> tuple[str, ...]:
+        return await self._state.cache_font(font, key)
+
+    @_tracked("takumi.api.cached_fonts")
+    async def cached_fonts(
+        self,
+        key: str,
+        *,
+        pin: bool = False,
+    ) -> tuple[str, ...] | None:
+        return await self._state.cached_fonts(key, pin=pin)
+
+    @_tracked("takumi.api.unregister_font")
+    async def unregister_font(self, name: str) -> bool:
+        return await self._state.unregister_font(name)
+
+    @_tracked("takumi.api.clear_fonts")
+    async def clear_fonts(self) -> None:
+        await self._state.clear_fonts()
+
     @_tracked("takumi.api.register_font_file")
     async def register_font_file(
         self,
@@ -713,6 +739,7 @@ class TakumiAPIAdapter:
         style: str | None = None,
         subset_of: str | None = None,
         generic_family: GenericFontFamily | None = None,
+        unicode_range: Sequence[UnicodeRange] | None = None,
         cache_policy: FileCachePolicy = FileCachePolicy.REVALIDATE,
     ) -> tuple[str, ...]:
         return await self._state.register_font_file(
@@ -722,6 +749,7 @@ class TakumiAPIAdapter:
             style=style,
             subset_of=subset_of,
             generic_family=generic_family,
+            unicode_range=unicode_range,
             cache_policy=cache_policy,
         )
 

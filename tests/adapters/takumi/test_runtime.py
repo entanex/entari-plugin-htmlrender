@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 
 import anyio
 from anyio.to_thread import run_sync as run_sync_in_worker
+from pydantic import ValidationError
 import pytest
 
 from entari_plugin_htmlrender.adapters.takumi import (
@@ -58,6 +59,7 @@ class _FontResource:
     style: str | None = None
     subset_of: str | None = None
     generic_family: str | None = None
+    unicode_range: Sequence[tuple[int, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,46 @@ class _FakeRenderer:
     def register_font(self, font: object) -> tuple[str, ...]:
         self.font_registrations.append(font)
         return (getattr(font, "name", None) or "Detected",)
+
+
+class _FontCacheRenderer(_FakeRenderer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.families: set[str] = set()
+        self.cached: dict[str, tuple[str, ...]] = {}
+        self.pinned: list[str] = []
+        self.worker_threads: list[int] = []
+
+    def register_font(self, font: object) -> tuple[str, ...]:
+        families = super().register_font(font)
+        self.families.update(families)
+        return families
+
+    def cache_font(self, font: object, key: str) -> tuple[str, ...]:
+        self.worker_threads.append(threading.get_ident())
+        families = self.register_font(font)
+        self.cached[key] = families
+        return families
+
+    def cached_fonts(self, key: str, *, pin: bool = False) -> tuple[str, ...] | None:
+        self.worker_threads.append(threading.get_ident())
+        families = self.cached.get(key)
+        if families is None or not self.families.issuperset(families):
+            return None
+        if pin:
+            self.pinned.append(key)
+        return families
+
+    def unregister_font(self, name: str) -> bool:
+        self.worker_threads.append(threading.get_ident())
+        present = name in self.families
+        self.families.discard(name)
+        return present
+
+    def clear_fonts(self) -> None:
+        self.worker_threads.append(threading.get_ident())
+        self.families.clear()
+        self.cached.clear()
 
 
 @pytest.fixture
@@ -710,3 +752,163 @@ async def test_create_runtime_state_releases_renderer_when_font_registration_fai
         await create_runtime_state(config, resources=resource_service())
 
     assert closed == [True]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "U+0000-007F",
+        [(1,)],
+        [(2, 1)],
+        [(-1, 1)],
+        [(0, 0x110000)],
+        [(True, 1)],
+        [(0, 1.5)],
+    ],
+)
+def test_unicode_ranges_reject_invalid_values_before_native_use(value: object) -> None:
+    with pytest.raises(ValidationError, match="unicode_range"):
+        TakumiFontConfig.model_validate({"path": "font.ttf", "unicode_range": value})
+    font = SimpleNamespace(
+        data=b"font",
+        name=None,
+        weight=None,
+        style=None,
+        subset_of=None,
+        generic_family=None,
+        unicode_range=value,
+    )
+    with pytest.raises(TakumiInputError, match="unicode_range"):
+        takumi_runtime._coerce_font_spec(font, field_name="font")
+
+
+def test_font_subsets_snapshot_ranges_and_preserve_legacy_family_name(
+    fake_takumi_module: None,
+) -> None:
+    del fake_takumi_module
+    ranges = [(0, 127)]
+    font = _FontResource(
+        b"font", name="Original", subset_of="Legacy", unicode_range=ranges
+    )
+    spec = takumi_runtime._coerce_font_spec(font, field_name="font")
+    ranges.append((128, 255))
+    native = spec.to_native()
+    assert native.name == "Legacy"
+    assert native.subset_of is None
+    assert native.unicode_range == ((0, 127),)
+    other = takumi_runtime._coerce_font_spec(
+        _FontResource(
+            b"font", name="Original", subset_of="Legacy", unicode_range=[(128, 255)]
+        ),
+        field_name="font",
+    )
+    assert spec.generated_source != other.generated_source
+
+
+@pytest.mark.parametrize("field", ["cache_max_bytes", "font_cache_max_bytes"])
+def test_native_cache_budgets_preserve_none_zero_and_reject_invalid_values(
+    field: str,
+) -> None:
+    assert getattr(TakumiConfig(), field) is None
+    assert getattr(TakumiConfig.model_validate({field: 0}), field) == 0
+    assert getattr(TakumiConfig.model_validate({field: 1024}), field) == 1024
+    for value in (-1, True, 1.5):
+        with pytest.raises(ValidationError):
+            TakumiConfig.model_validate({field: value})
+
+
+@pytest.mark.anyio
+async def test_configured_cache_budgets_reach_native_constructor(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    settings: list[dict[str, object]] = []
+
+    class ConfiguredRenderer(_FakeRenderer):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__()
+            settings.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules, "takumi_py", SimpleNamespace(Renderer=ConfiguredRenderer)
+    )
+    state = await takumi_runtime.create_runtime_state(
+        TakumiConfig(cache_max_bytes=0, font_cache_max_bytes=1024),
+        resources=resource_service(),
+    )
+    try:
+        assert settings == [
+            {
+                "load_default_fonts": True,
+                "cache_max_bytes": 0,
+                "font_cache_max_bytes": 1024,
+            }
+        ]
+    finally:
+        await state.aclose()
+
+
+@pytest.mark.anyio
+async def test_font_release_forgets_source_identity_and_allows_reregistration(
+    fake_takumi_module: None,
+) -> None:
+    del fake_takumi_module
+    renderer = _FontCacheRenderer()
+    state = _state(renderer)
+    try:
+        font = _FontResource(b"first", name="Shared", unicode_range=[(0, 127)])
+        assert await state.register_font(font, source="memory:font") == ("Shared",)
+        assert await state.register_font(font, source="memory:font") == ("Shared",)
+        assert len(renderer.font_registrations) == 1
+        assert await state.unregister_font("Shared") is True
+        assert await state.unregister_font("Shared") is False
+        assert state.registered_font_families == ()
+        assert await state.register_font(
+            _FontResource(b"second", name="Shared"), source="memory:font"
+        ) == ("Shared",)
+        await state.clear_fonts()
+        assert state.registered_font_families == ()
+        assert await state.register_font(
+            _FontResource(b"third", name="Shared"), source="memory:font"
+        ) == ("Shared",)
+        assert len(renderer.font_registrations) == 3
+        assert all(
+            identity != threading.get_ident() for identity in renderer.worker_threads
+        )
+    finally:
+        await state.aclose()
+    with pytest.raises(TakumiRuntimeError, match="closed"):
+        await state.clear_fonts()
+
+
+@pytest.mark.anyio
+async def test_font_cache_queries_native_eviction_and_releases_records(
+    fake_takumi_module: None,
+) -> None:
+    del fake_takumi_module
+    renderer = _FontCacheRenderer()
+    state = _state(renderer)
+    try:
+        assert await state.cached_fonts("key") is None
+        assert await state.cache_font(_FontResource(b"font", name="Cached"), "key") == (
+            "Cached",
+        )
+        assert await state.cached_fonts("key", pin=True) == ("Cached",)
+        assert renderer.pinned == ["key"]
+        renderer.families.discard("Cached")
+        assert await state.cached_fonts("key") is None
+        await state.cache_font(_FontResource(b"next", name="Cached"), "key")
+        assert await state.unregister_font("Cached") is True
+        assert await state.cached_fonts("key") is None
+        await state.cache_font(_FontResource(b"last", name="Cached"), "key")
+        await state.clear_fonts()
+        assert await state.cached_fonts("key") is None
+        assert state.registered_font_families == ()
+        with pytest.raises(TakumiInputError, match=r"font\.key"):
+            await state.cached_fonts("bad\x00key")
+        with pytest.raises(TakumiInputError, match=r"font\.key"):
+            await state.cache_font(b"invalid", "\ud800")
+        assert all(
+            identity != threading.get_ident() for identity in renderer.worker_threads
+        )
+    finally:
+        await state.aclose()
