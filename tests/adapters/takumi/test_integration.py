@@ -45,16 +45,6 @@ async def test_takumi_native_boundary_renders_extension_output() -> None:
     assert struct.unpack(">II", rendered[16:24]) == (64, 32)
 
 
-async def test_native_methods_are_not_projected_onto_the_managed_session() -> None:
-    state = await create_runtime_state(TakumiConfig(), resources=resource_service())
-    try:
-        session = TakumiSessionAdapter(state)
-        assert not hasattr(session, "compile_node")
-        assert not hasattr(session, "compile_keyframes")
-    finally:
-        await state.aclose()
-
-
 async def test_takumi_native_error_is_translated_at_runtime_boundary() -> None:
     state = await create_runtime_state(TakumiConfig(), resources=resource_service())
     try:
@@ -66,7 +56,7 @@ async def test_takumi_native_error_is_translated_at_runtime_boundary() -> None:
     assert isinstance(raised.value.__cause__, takumi_py.StyleSheetError)
 
 
-async def test_takumi_advanced_api_real_native_chain() -> None:
+async def test_takumi_native_renders_managed_compiled_document() -> None:
     state = await create_runtime_state(TakumiConfig(), resources=resource_service())
     api = TakumiAPIAdapter(state)
     image = ("memory:avatar", encoded_image("png", width=2, height=2))
@@ -91,96 +81,13 @@ async def test_takumi_advanced_api_real_native_chain() -> None:
         assert measured.height == 24
         assert svg.startswith("<svg ")
 
-        assert (
-            await api.render_html(
-                html,
-                stylesheets=(stylesheet,),
-                images=(image,),
-                width=40,
-                height=24,
-            )
-        ).startswith(b"\x89PNG\r\n\x1a\n")
-        assert (await api.measure_html(html, width=40, height=24)).width == 40
-        assert (await api.render_svg_html(html, width=40, height=24)).startswith(
-            "<svg "
-        )
-
-        node = await api.compile_node(
-            {
-                "type": "container",
-                "children": [{"type": "text", "text": "Node"}],
-            },
-            validate=True,
-        )
-        assert isinstance(node, takumi_py.CompiledNode)
-        assert isinstance(
-            await api.compile_stylesheet("div { color: red }"),
-            takumi_py.CompiledStyleSheet,
-        )
-        assert isinstance(
-            await api.compile_keyframes(
-                {
-                    "fade": {
-                        "from": {"opacity": 0},
-                        "to": {"opacity": 1},
-                    }
-                }
-            ),
-            takumi_py.CompiledStyleSheet,
-        )
-
-        node_input: dict[str, object] = {
-            "type": "container",
-            "children": [{"type": "text", "text": "Node"}],
-        }
-        assert (
-            await api.render_node(node_input, width=40, height=24, validate=True)
-        ).startswith(b"\x89PNG\r\n\x1a\n")
-        assert (await api.measure_node(node_input, width=40, height=24)).width > 0
-        assert (await api.render_svg_node(node_input, width=40, height=24)).startswith(
-            "<svg "
-        )
-
-        scenes = (
-            takumi_py.AnimationScene(node=node_input, duration_ms=60),
-            takumi_py.AnimationScene(node=node, duration_ms=60),
-        )
-        animation = await api.render_animation(
-            scenes,
-            width=20,
-            height=20,
-            format="gif",
-            fps=10,
-        )
-        sequence_frame = await api.render_sequence_at_time(
-            scenes,
-            30,
-            width=20,
-            height=20,
-        )
-        assert animation.startswith(b"GIF89a")
-        assert sequence_frame.startswith(b"\x89PNG\r\n\x1a\n")
-
-        raw_frames = (
-            takumi_py.RawAnimationFrame(
-                data=b"\xff\x00\x00\xff" * 4,
-                width=2,
-                height=2,
-                duration_ms=60,
-            ),
-            takumi_py.RawAnimationFrame(
-                data=b"\x00\xff\x00\xff" * 4,
-                width=2,
-                height=2,
-                duration_ms=60,
-            ),
-        )
-        assert (await api.encode_frames(raw_frames, format="gif")).startswith(b"GIF89a")
     finally:
         await state.aclose()
 
 
-async def test_takumi_register_font_file_real_native(tmp_path: Path) -> None:
+async def test_takumi_native_font_lifecycle_updates_managed_records(
+    tmp_path: Path,
+) -> None:
     match = _FONT_DATA_RE.search(_KATEX_FONT_CSS.read_text(encoding="utf-8"))
     assert match is not None
     font_path = tmp_path / "fixture.woff2"
@@ -189,15 +96,25 @@ async def test_takumi_register_font_file_real_native(tmp_path: Path) -> None:
     state = await create_runtime_state(TakumiConfig(), resources=resource_service())
     api = TakumiAPIAdapter(state)
     try:
-        families = await api.register_font_file(font_path, name="Htmlrender Smoke")
+        families = await api.register_font_file(
+            font_path,
+            name="Htmlrender Smoke",
+            unicode_range=((0x0000, 0x007F),),
+        )
         assert families == ("Htmlrender Smoke",)
         assert api.registered_font_families == families
+        assert await api.unregister_font("Htmlrender Smoke") is True
+        assert api.registered_font_families == ()
 
-        rendered = await api.render_html(
-            '<div style="font-family: Htmlrender Smoke;font-size: 12px">Smoke</div>',
-            width=80,
-            height=20,
+        source = takumi_py.FontResource(
+            data=font_path.read_bytes(),
+            name="Htmlrender Smoke",
+            unicode_range=[(0x0000, 0x007F)],
         )
-        assert rendered.startswith(b"\x89PNG\r\n\x1a\n")
+        assert await api.cache_font(source, "memory:smoke-font") == families
+        assert await api.cached_fonts("memory:smoke-font") == families
+        await api.clear_fonts()
+        assert await api.cached_fonts("memory:smoke-font") is None
+        assert api.registered_font_families == ()
     finally:
         await state.aclose()

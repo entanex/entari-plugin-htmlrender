@@ -74,7 +74,7 @@ plugins:
 
 ### Animation FPS
 
-`TakumiAPI.render_animation()` 在进入 native rendering 前限制帧率：WebP 与 APNG 不得超过 `90` fps，GIF 不得超过 `50` fps。超出限制会失败，不会截断或静默降帧。
+`takumi-py` 0.4.0 的 native 编码器限制帧率：WebP 与 APNG 不得超过 `90` fps，GIF 不得超过 `50` fps。插件传递 `fps` 参数，并将上游失败转换为 `ProviderExecutionError`；这些上限由上游校验，插件不自行截断或降帧。
 
 ### 稳定版与 dev 预览边界
 

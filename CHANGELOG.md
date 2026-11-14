@@ -28,7 +28,6 @@ and versioning follows the [release policy](docs/project/release.md).
 - expose native resource and font-cache budgets through `provider_config.cache_max_bytes` and `provider_config.font_cache_max_bytes`. `null` retains upstream defaults: 64 MiB for resource caching and no limit for the evictable font cache.
 - register font subsets under a shared `name` with inclusive `unicode_range` codepoint pairs. Existing `subset_of` configuration remains compatible and takes precedence over `name`.
 - retain separate native resource, native font, and compiled HTML/CSS caches. Native resource caching includes repeated `data:` URI images; the font-cache budget guides eviction rather than bounding peak memory, and fonts added by the current call or pinned by registration are not evicted for space.
-- enforce upstream animation limits of 90 fps for WebP/APNG and 50 fps for GIF.
 - retain native Playwright and Takumi static types without eagerly importing optional engines.
 - use Python 3.11 built-in exception groups and string enums.
 - require Python `>=3.11,<4.0` and Entari `>=0.19.4,<0.20.0`, with release validation across Python 3.11–3.14.
