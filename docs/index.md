@@ -1,6 +1,6 @@
 ---
 title: entari-plugin-htmlrender
-description: 从首次渲染到扩展开发与项目维护的统一文档入口
+description: 使用 Takumi 渲染静态内容，按需接入远程 Playwright 与 Python 绘图
 icon: lucide/image
 hide:
   - navigation
@@ -52,7 +52,7 @@ hide:
         把内容渲染成<strong>图片。</strong>
       </h1>
       <p class="htmlrender-hero__lead">
-        一套 API 接收 HTML、Markdown、纯文本与 Jinja 模板；可插拔 Provider 在浏览器与原生后端之间选择，稳定产出类型化图片。
+        用 Takumi 将 HTML、Markdown、纯文本与 Jinja 模板渲染成图片，无需安装浏览器。需要脚本或网页截图时，连接远程 Playwright。
       </p>
       <div class="htmlrender-hero__actions">
         <a class="md-button md-button--primary" href="start/quickstart/">
@@ -65,7 +65,7 @@ hide:
       </div>
       <ul class="htmlrender-hero__facts" aria-label="项目能力概览">
         <li><strong>多种内容</strong> HTML · Markdown · Text · Jinja</li>
-        <li><strong>按需选型</strong> Browser · Native</li>
+        <li><strong>原生排版</strong> Takumi · 无需浏览器</li>
         <li><strong>图片就绪</strong> PNG · JPEG · 尺寸信息</li>
       </ul>
     </div>
@@ -112,6 +112,14 @@ hide:
 </section>
 
 </div>
+
+## 从 Takumi 开始
+
+[快速开始](start/quickstart.md)使用 Takumi 生成第一张图片。[Takumi 配置](configuration/providers/takumi.md)说明中文字体、缓存、SVG、测量与动画接口；需要 JavaScript、网页导航或 Markdown 数学公式时，使用[远程 Playwright](configuration/remote-playwright.md)。
+
+!!! warning "本地 Playwright 弃用计划"
+
+    本地 Playwright 浏览器安装、管理与启动将在不久的将来弃用，后续仅保留 remote support。当前版本仍支持本地模式，尚未确定移除版本或日期。远程连接仍需 `[playwright]` Python 客户端，但 Bot 环境无需安装浏览器。
 
 ## 按任务进入
 

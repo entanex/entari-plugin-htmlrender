@@ -8,7 +8,7 @@ description: Entari add_service、Launart stages、热卸载与关闭语义
 ```yaml
 plugins:
   htmlrender:
-    provider: playwright
+    provider: takumi
     startup: probe
 ```
 

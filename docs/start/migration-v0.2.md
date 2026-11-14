@@ -9,12 +9,19 @@ description: Python 与 Entari 基线、0.1 升级步骤、0.2 公共能力与 T
 
 ## 从 0.1 升级
 
+静态内容可以安装 Takumi，并将 `plugins.htmlrender.provider` 设为 `takumi`，移除 Playwright 专属的 `provider_config` 后按需配置字体：
+
 ```bash
-uv add "entari-plugin-htmlrender[playwright]>=0.2.0,<0.3"
-uv run playwright install chromium
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
 ```
 
-按实际能力选择 `playwright`、`takumi`、`pillow`、`skia`、`filehost`、`sentry` 或 `prometheus` extra。升级 Playwright client 后，需要在同一环境中重新安装浏览器。`0.1.0` 使用 Python 3.10 与较早的 Entari 基线；升级到 `0.2.x` 时必须同步调整 Python 与 Entari。
+Takumi 不执行 JavaScript，HTML/CSS 支持也不等同于浏览器。迁移现有模板前请检查排版结果；中文等字符需按 [Takumi 字体配置](../configuration/providers/takumi.md#fonts)随部署提供字体。使用网页导航、选择器截图或 Markdown 数学公式的业务应保留 `[playwright]` 客户端，改为连接[远程浏览器](../configuration/remote-playwright.md)。
+
+!!! warning "本地 Playwright 弃用计划"
+
+    本地 Playwright 浏览器安装、管理与启动将在不久的将来弃用，后续仅保留 remote support。当前版本仍支持本地模式，尚未确定移除版本或日期。远程连接通过 `connect_ws` 或 `connect_cdp` 配置，Bot 环境不需要执行 `playwright install`；浏览器二进制与系统依赖由远程服务管理。仍使用本地模式时，升级 Playwright 客户端后应重新安装与之匹配的浏览器。
+
+按实际能力选择 `takumi`、`playwright`、`pillow`、`skia`、`filehost`、`sentry` 或 `prometheus` extra。`0.1.0` 使用 Python 3.10 与较早的 Entari 基线；升级到 `0.2.x` 时必须同步调整 Python 与 Entari。
 
 `HtmlRenderService` 现提供 `preparation`、`renderer`、`templates`、`resources`、`graphics`、`drawings` 与 `capabilities` 七个稳定入口。新增 `.preparation: HtmlPreparer` 后，可以在没有 HTML Provider 的 core 安装中生成 `PreparedHtml`，再把同一对象交给 `rasterize_prepared()`。
 
@@ -76,9 +83,9 @@ plugins:
 
 `takumi-py` 0.4.0 的 native 编码器限制帧率：WebP 与 APNG 不得超过 `90` fps，GIF 不得超过 `50` fps。插件传递 `fps` 参数，并将上游失败转换为 `ProviderExecutionError`；这些上限由上游校验，插件不自行截断或降帧。
 
-### 稳定版与 dev 预览边界
+### 插件接入边界
 
-PyPI `0.4.0` 不包含上游 `dev` 分支新增的 `Document`、`RasterImage` 与 MathJax API。插件不公开这些预览接口；上文 `TakumiCompiledDocument` 是本插件的稳定包装，不能据此假定存在上游 `Document`。Markdown 公式仍通过 KaTeX JavaScript 渲染，因此需要 Playwright；Takumi 会以 `UnsupportedDocumentFeatureError` 拒绝含 JavaScript 要求的文档。需要静态后端输出公式时，应先提供不依赖 JavaScript 的预排版 HTML/SVG。
+插件当前未接入上游 `Document`、`RasterImage` 与 MathJax API。上文 `TakumiCompiledDocument` 是本插件的稳定包装，不能据此假定公开了上游 `Document`。单独升级 `takumi-py` 不会改变插件的公式管线：Markdown 公式仍通过 KaTeX JavaScript 渲染，需要 Playwright；Takumi 会以 `UnsupportedDocumentFeatureError` 拒绝含 JavaScript 要求的文档。需要静态后端输出公式时，应先提供不依赖 JavaScript 的预排版 HTML/SVG。
 
 原生 Playwright 与 Takumi 类型只用于静态检查。普通 core import 不会加载浏览器、native engine 或对应可选依赖。
 

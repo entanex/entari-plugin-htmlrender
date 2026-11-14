@@ -1,89 +1,64 @@
 # entari-plugin-htmlrender
 
-把 HTML、Markdown 和 Jinja2 模板渲染成图片的 Entari 插件。支持 Playwright、Takumi，也提供 Pillow 和 Skia 绘图接口。
+Entari 的图片渲染插件，支持 HTML、Markdown、纯文本和 Jinja2 模板。
 
-## 安装
+> [!NOTE]
+> **Takumi 原生渲染**：在进程内完成排版和图片输出，无需安装浏览器，支持 SVG、布局测量和动画。另提供远程 Playwright 的网页截图与 JavaScript 支持，以及 Pillow / Skia 的 Python 绘图接口。
 
-需要 Python `>=3.11,<4.0`、Entari `>=0.19.4,<0.20.0`。
+[使用文档](https://entanex.github.io/entari-plugin-htmlrender/) · [示例](examples) · [升级指南](docs/start/migration-v0.2.md)
 
-一般使用 Playwright，安装后还需要下载浏览器：
+## 快速开始
 
-```bash
-uv add "entari-plugin-htmlrender[playwright]>=0.2.0,<0.3"
-uv run playwright install chromium
-```
-
-在 Debian / Ubuntu 或基于它们的容器中，可以用 `uv run playwright install --with-deps chromium` 一并安装系统依赖。
-
-如果使用 Takumi，`[takumi]` extra 要求 `takumi-py>=0.4.0`，不设上限：
+需要 Python `>=3.11,<4.0` 和 Entari `>=0.19.4,<0.20.0`。
 
 ```bash
-uv add "entari-plugin-htmlrender[takumi]>=0.2.0,<0.3"
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
 ```
 
-Pillow、Skia 按需安装，对应的可选依赖是 `pillow`、`skia`。只安装基础包不会安装渲染后端。
-
-## 配置
-
-在 Entari 配置中启用 `htmlrender`：
+在 Entari 配置中启用插件：
 
 ```yaml
 plugins:
   htmlrender:
-    provider: playwright
+    provider: takumi
     startup: probe
-    provider_config:
-      engine: chromium
 ```
 
-`startup: probe` 会在启动时检查后端是否可用。使用 Takumi 时，将 `provider` 改为 `takumi`，并移除 Playwright 专用的 `provider_config`。
-
-## 使用
-
-在 Entari 事件处理函数的参数中声明 `renderer: HtmlRenderer`，即可取得渲染接口。下面是一个生成 Markdown 图片的例子，省略了事件注册部分：
+在事件处理函数中注入 `HtmlRenderer`，即可调用渲染接口。下面省略事件注册，只展示图片生成部分：
 
 ```python
 from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
 
 
-async def build_card(renderer: HtmlRenderer) -> RenderedImage:
+async def render_card(renderer: HtmlRenderer) -> RenderedImage:
     return await renderer.rasterize_markdown(
-        "# Hello, Entari\n\n这是一张用 Markdown 生成的图片。",
+        "# Hello, Entari\n\nRendered with Takumi.",
         raster=RasterOptions(width=720),
     )
 ```
 
-返回值是 `RenderedImage`，用 `bytes(image)` 获取图片数据，再交给消息发送接口。
+返回值是 `RenderedImage`，通过 `bytes(image)` 获取图片数据。HTML、纯文本和模板分别使用 `rasterize_html()`、`rasterize_text()` 和 `rasterize_template()`。
 
-HTML、纯文本和模板分别使用 `rasterize_html()`、`rasterize_text()`、`rasterize_template()`，参数和示例见[渲染内容](docs/guides/rendering-content.md)。
+渲染中文前，请先[配置字体](docs/configuration/providers/takumi.md)。读取本地模板、图片或字体时，需要将对应目录加入[路径白名单](docs/guides/templates-and-resources.md)。
 
-本地模板、图片和字体的读取路径需要加入 `resources.local_access.allowed_paths`，配置方式见[模板与资源](docs/guides/templates-and-resources.md)。插件负责启动和关闭后端；不要把注入的对象长期保存在全局变量中，热重载后它们会被替换。
+## 渲染后端
 
-## 后端与限制
+| 后端 | 用途 |
+| --- | --- |
+| [Takumi](docs/configuration/providers/takumi.md) | 静态内容转图片；支持 SVG、布局测量、动画和字体管理 |
+| [Playwright](docs/configuration/remote-playwright.md) | 连接远程浏览器，处理 JavaScript、网页截图和 Markdown 数学公式 |
+| [Pillow / Skia](docs/configuration/graphics/index.md) | 使用 Python 函数绘图，支持加载文件或模块、模块间引用和可选热重载 |
 
-- **Playwright**：使用浏览器排版，支持 JavaScript、Markdown 公式和网页截图，也可以连接远程浏览器。需要安装浏览器及其系统依赖。
-- **Takumi**：不需要浏览器，适合静态内容渲染。HTML、CSS 的支持范围有限，不执行 JavaScript，也不支持网页导航和 CSS 选择器截图。中文等字符需要额外配置字体；`takumi-py` 0.4.0 提供主流 Linux、macOS 与 Windows 原生 wheel。
-- **Pillow / Skia**：用 Python 函数绘图，支持按名称加载 `.py` 文件或模块。在 Entari 中由插件系统管理模块引用和可选热重载，也保留 `RasterScene` 场景接口。不解析 HTML 或 Markdown，配置见[Python 绘图](docs/configuration/graphics/index.md)。
+Takumi 的 HTML/CSS 支持范围与浏览器不同，不执行 JavaScript，**目前不支持本插件的 Markdown 数学公式渲染**。样式、图片和字体的接入方式见 [Takumi 文档](docs/configuration/providers/takumi.md)。
 
-### 数学公式
+> 本插件将在不久的将来弃用 Playwright 本地浏览器的安装、管理与启动，仅保留远程支持。当前版本仍可使用本地模式。远程连接仍需安装 `[playwright]`，但 Bot 环境无需执行 `playwright install`。迁移方式见[远程部署](docs/configuration/remote-playwright.md)。
 
-Markdown 公式通过 KaTeX 渲染，目前需要选择 **Playwright**。行内公式可写为 `$x$` 或 `\(x\)`；块级公式使用独占段落的 `$$...$$` 或 `\[...\]`。`$ x $` 会保留为普通文本。
+## 示例
 
-**Takumi 目前不能直接渲染 Markdown 数学公式。** 这条渲染流程依赖 JavaScript，使用 Takumi 渲染含公式的 Markdown 会抛出 `UnsupportedDocumentFeatureError`。插件尚未提供将公式自动转换成静态 SVG 或图片的功能。
-
-上游 `Document`、`RasterImage` 与 MathJax API 尚未接入本插件，当前 Markdown 公式仍使用 Playwright 的 KaTeX 渲染。
-
-其他差异见[后端选择](docs/start/choosing-provider.md)，Takumi 的详细说明见 [Takumi 配置](docs/configuration/providers/takumi.md)。
-
-## 文档与示例
-
-- [完整文档](https://entanex.github.io/entari-plugin-htmlrender/)
-- [从 0.1 升级到 0.2](docs/start/migration-v0.2.md)
-- [本地模板渲染](examples/template_render)
-- [连接远程浏览器](examples/remote_browser)
-- [Takumi 高级接口](examples/takumi_capability)
+- [Jinja2 模板](examples/template_render)
+- [Takumi SVG 与字体接口](examples/takumi_capability)
+- [远程浏览器](examples/remote_browser)
 - [Pillow / Skia 绘图](examples/graphics_render)
-- [编写第三方渲染后端](examples/echo-provider)
 
 ## License
 

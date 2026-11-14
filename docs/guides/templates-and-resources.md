@@ -5,34 +5,39 @@ description: TemplateRef、ResourceRef、受控本地路径与 scoped publicatio
 
 # 模板与资源
 
-把模板与静态资源放在受控目录，并将最小目录加入`resources.local_access.allowed_paths`：
+下面使用 Takumi 渲染静态模板。把模板与静态资源放在受控目录，并将最小目录加入 `resources.local_access.allowed_paths`：
 
 ```yaml
 plugins:
   htmlrender:
-    provider: playwright
+    provider: takumi
     resources:
       local_access:
         allowed_paths: [templates, assets]
 ```
 
+中文等字符需要额外配置字体，见 [Takumi 字体配置](../configuration/providers/takumi.md#fonts)。模板依赖 JavaScript 或浏览器专属布局时，使用[远程 Playwright](../configuration/remote-playwright.md)。
+
 ```python
 from pathlib import Path
 
 from entari_plugin_htmlrender import HtmlRenderer, TemplateRef
-from entari_plugin_htmlrender.resources import FileResourceRef
 
 async def render_card(renderer: HtmlRenderer, name: str):
     return await renderer.rasterize_template(
         TemplateRef(Path("templates"), "card.html"),
         {
             "name": name,
-            "logo": FileResourceRef(Path("assets/logo.png")),
+            "logo": Path("assets/logo.png").resolve(),
         },
     )
 ```
 
-`TemplateRef.root` 和 HTML `<base>` 只影响相对引用解析，不会扩大访问白名单。locator 使用 `FileResourceRef` / `PackageResourceRef` / `RemoteResourceRef`；payload使用 `ResourceContent` / `InlineResource`，避免按字符串或 `Path` 的形状猜测语义。
+在模板中用 `<img src="{{ logo }}">` 引用图片。启用资源物化时，模板变量支持 `Path` 和字节数据；相对 `Path` 以模板根目录为基准，所以示例先用 `.resolve()` 明确工作目录下的 `assets` 路径。`TemplateRef.root` 和 HTML `<base>` 只影响相对引用解析，不会扩大访问白名单。
+
+显式调用 `ResourceAccess` 时，locator 使用 `FileResourceRef` / `PackageResourceRef` / `RemoteResourceRef`，payload 使用 `ResourceContent` / `InlineResource`；这些对象不是模板图片变量的替代写法。远程图片应先用资源接口读取，再把字节作为变量交给模板。
+
+Takumi 不支持 `<link rel="stylesheet">`、CSS `@import` 或 `@font-face`。Jinja2 模板可以使用 `<style>{% include "style.css" %}</style>` 内联样式，字体通过 Provider 配置或能力接口注册；完整示例位于仓库的 `examples/template_render`。
 
 需要把 payload 交给必须 fetch URL 的 consumer 时，通过 `ResourceAccess.publish()`建立显式 lease。`PublishedResource` 的 URL 与请求头只在 `async with` 内有效，不能返回 URL 后再使用。
 

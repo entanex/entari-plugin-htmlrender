@@ -78,7 +78,7 @@ Entari 宿主先将绘图所在真实 Python 包的模块声明为独立插件�
 from entari_plugin_htmlrender.composition import build_runtime_plan
 from entari_plugin_htmlrender.config import HtmlRenderConfig
 
-config = HtmlRenderConfig.model_validate({"provider": "playwright", "startup": "off"})
+config = HtmlRenderConfig.model_validate({"provider": "takumi", "startup": "off"})
 plan = build_runtime_plan(config)
 runtime = plan.build_runtime()
 server = plan.hosted_asset_server
