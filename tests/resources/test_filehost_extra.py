@@ -329,6 +329,159 @@ async def test_release_detaches_lease_from_inflight_publish(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("clear_during_upload", [False, True])
+async def test_delayed_upload_reconciles_released_and_active_leases(
+    mocker: MockerFixture,
+    *,
+    clear_during_upload: bool,
+) -> None:
+    store = HostedAssetStore(max_entries=1, max_bytes=1024)
+    await store.startup()
+    publisher = _publisher(
+        store=store,
+        public_base_url="http://public.example/assets/",
+    )
+    await publisher.startup()
+    namespace = publisher._namespace
+    assert namespace is not None
+    namespace_id = namespace.url_for("x").rsplit("/", 2)[-2]
+
+    released_lease = publisher.create_lease()
+    active_lease = publisher.create_lease()
+    upload_started = anyio.Event()
+    release_upload = anyio.Event()
+    owner_results: list[str] = []
+    waiter_results: list[str] = []
+    original_upload = publisher._upload
+
+    async def delayed_upload(
+        key: tuple[str, str],
+        data: bytes,
+        lease_ids: set[PublicationLeaseId],
+    ) -> str:
+        upload_started.set()
+        await release_upload.wait()
+        return await original_upload(key, data, lease_ids)
+
+    mocker.patch.object(publisher, "_upload", side_effect=delayed_upload)
+
+    async def publish(
+        lease_id: PublicationLeaseId,
+        results: list[str],
+    ) -> None:
+        results.append(
+            (
+                await publisher.publish(
+                    _inline(b"shared"),
+                    lease_id=lease_id,
+                    suffix=".css",
+                )
+            ).url
+        )
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(publish, released_lease, owner_results)
+        with anyio.fail_after(5):
+            await upload_started.wait()
+        group.start_soon(publish, active_lease, waiter_results)
+        await wait_all_tasks_blocked()
+        await publisher.release(released_lease)
+        if clear_during_upload:
+            await publisher.clear()
+        release_upload.set()
+
+    assert owner_results == waiter_results
+    name = owner_results[0].rsplit("/", 1)[-1]
+    asset = store.lookup(namespace_id, name)
+    assert asset is not None
+    assert asset.leases == {active_lease}
+
+    # The released upload no longer occupies the only entry, but the active
+    # waiter still pins it against capacity eviction.
+    with pytest.raises(HostedAssetCapacityError):
+        await publisher.publish(_inline(b"other"), suffix=".css")
+
+    await publisher.release(active_lease)
+    await publisher.publish(_inline(b"other"), suffix=".css")
+    assert store.lookup(namespace_id, name) is None
+
+    await publisher.aclose()
+    await store.aclose()
+
+
+@pytest.mark.anyio
+async def test_cache_hit_reconfirmation_is_serialized_with_release(
+    mocker: MockerFixture,
+) -> None:
+    store = HostedAssetStore(max_entries=2, max_bytes=1024)
+    await store.startup()
+    publisher = _publisher(
+        store=store,
+        public_base_url="http://public.example/assets/",
+    )
+    await publisher.startup()
+    namespace = publisher._namespace
+    assert namespace is not None
+    namespace_id = namespace.url_for("x").rsplit("/", 2)[-2]
+
+    initial_lease = publisher.create_lease()
+    hit_lease = publisher.create_lease()
+    confirmed = anyio.Event()
+    continue_hit = anyio.Event()
+    hit_results: list[str] = []
+    original_confirm = publisher._confirm_hosted
+
+    async def delayed_confirm(
+        key: tuple[str, str],
+        lease_id: PublicationLeaseId | None,
+    ) -> bool:
+        confirmed.set()
+        await continue_hit.wait()
+        return await original_confirm(key, lease_id)
+
+    mocker.patch.object(publisher, "_confirm_hosted", side_effect=delayed_confirm)
+
+    published = await publisher.publish(
+        _inline(b"asset"),
+        lease_id=initial_lease,
+        suffix=".css",
+    )
+    name = published.url.rsplit("/", 1)[-1]
+
+    async def cache_hit() -> None:
+        hit_results.append(
+            (
+                await publisher.publish(
+                    _inline(b"asset"),
+                    lease_id=hit_lease,
+                    suffix=".css",
+                )
+            ).url
+        )
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(cache_hit)
+        with anyio.fail_after(5):
+            await confirmed.wait()
+        # The publisher lock deliberately serializes pinning with release;
+        # start release while confirmation is paused, then let confirmation
+        # finish so the later membership change has no opportunity to re-pin.
+        group.start_soon(publisher.release, hit_lease)
+        await wait_all_tasks_blocked()
+        continue_hit.set()
+
+    assert hit_results == [published.url]
+    asset = store.lookup(namespace_id, name)
+    assert asset is not None
+    assert hit_lease not in asset.leases
+    assert asset.leases == {initial_lease}
+
+    await publisher.release(initial_lease)
+    await publisher.aclose()
+    await store.aclose()
+
+
+@pytest.mark.anyio
 async def test_clear_does_not_admit_an_older_inflight_mapping(
     mocker: MockerFixture,
 ) -> None:
@@ -360,6 +513,53 @@ async def test_clear_does_not_admit_an_older_inflight_mapping(
         await publisher.publish(_inline(b"shared"))
     ).url == "https://assets.example/2"
     assert calls == 2
+
+
+@pytest.mark.anyio
+async def test_clear_then_reuse_preserves_existing_active_lease() -> None:
+    store = HostedAssetStore(max_entries=1, max_bytes=1024)
+    await store.startup()
+    publisher = _publisher(
+        store=store,
+        public_base_url="http://public.example/assets/",
+    )
+    await publisher.startup()
+    namespace = publisher._namespace
+    assert namespace is not None
+    namespace_id = namespace.url_for("x").rsplit("/", 2)[-2]
+
+    original_lease = publisher.create_lease()
+    published = await publisher.publish(
+        _inline(b"asset"),
+        lease_id=original_lease,
+        suffix=".css",
+    )
+    name = published.url.rsplit("/", 1)[-1]
+    later_lease = publisher.create_lease()
+
+    await publisher.clear()
+    before = store.lookup(namespace_id, name)
+    assert before is not None
+    assert before.leases == {original_lease}
+
+    await publisher.publish(
+        _inline(b"asset"),
+        lease_id=later_lease,
+        suffix=".css",
+    )
+
+    after = store.lookup(namespace_id, name)
+    assert after is not None
+    assert after.leases == {original_lease, later_lease}
+
+    await publisher.release(original_lease)
+    assert store.lookup(namespace_id, name) is not None
+    await publisher.release(later_lease)
+    await publisher.publish(_inline(b"other"), suffix=".css")
+    assert store.lookup(namespace_id, name) is None
+
+    await publisher.aclose()
+    await store.aclose()
 
 
 @pytest.mark.anyio
