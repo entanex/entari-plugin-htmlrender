@@ -27,7 +27,7 @@ uv run playwright install chromium
 | Template | `service.templates` / `TemplateRenderer` | `TemplateRef`、变量、可选 filters 与 extensions |
 | Resources | `service.resources` / `ResourceAccess` | 显式 `ResourceRef`、精确 URL 授权、cache 与 publication lease |
 | Playwright | `capabilities.playwright` | managed page/browser lease；远程 CDP/WS 与文件资源传输 |
-| Takumi | `capabilities.takumi` | 固定 `takumi-py==0.4.0`；HTML/compiled/node/SVG/animation/font 操作，另保留 raw renderer lease |
+| Takumi | `capabilities.takumi` | 要求 `takumi-py>=0.4.0`；HTML/compiled/node/SVG/animation/font 操作，另保留 raw renderer lease |
 | Graphics | `service.graphics` / `GraphicsRenderer` | Pillow 与 Skia 共享 `RasterScene` contract，可同时启用 |
 | Drawing | `service.drawings` / `DrawingRenderer` | 按配置名称执行受信任的 Pillow/Skia 原生 Python 绘图函数 |
 | Provider SDK | `entari_plugin_htmlrender.providers.v2` | 独立的发现、availability、resource strategy 与 composition 契约 |
@@ -62,7 +62,7 @@ plugins:
 
 ## Takumi 0.4 managed API
 
-`[takumi]` extra 当前固定 PyPI 已发布的 `takumi-py==0.4.0`。`TakumiSession` 保留小型调用面；`capabilities.takumi.lease_api()` 另行提供完整高级 API，包括 compile、measure、HTML/node/SVG、animation、frame 与 font 操作。`TakumiCompiledDocument` 是本插件的稳定 lease-scoped 包装，承载 native compiled node/stylesheets；managed session、API 与 compiled document 都只在对应 lease 内有效，需要保留到上下文外的代码应把操作移回 `async with` 内。
+`[takumi]` extra 要求 `takumi-py>=0.4.0`，不设上限。`TakumiSession` 保留小型调用面；`capabilities.takumi.lease_api()` 另行提供完整高级 API，包括 compile、measure、HTML/node/SVG、animation、frame 与 font 操作。`TakumiCompiledDocument` 是本插件的稳定 lease-scoped 包装，承载 native compiled node/stylesheets；managed session、API 与 compiled document 都只在对应 lease 内有效，需要保留到上下文外的代码应把操作移回 `async with` 内。
 
 ### Font subsets、cache 与 release
 

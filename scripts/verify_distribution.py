@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 PACKAGE_NAME: Final = "entari-plugin-htmlrender"
 PACKAGE_IMPORT: Final = "entari_plugin_htmlrender"
-TAKUMI_VERSION: Final = "0.4.0"
+TAKUMI_MINIMUM_VERSION: Final = "0.4.0"
 PILLOW_MINIMUM_VERSION: Final = "12.0.0"
 SKIA_MINIMUM_VERSION: Final = "144.0.post2"
 EXPECTED_EXTRAS: Final = frozenset(
@@ -46,13 +46,14 @@ OPTIONAL_REQUIREMENTS: Final = {
     "prometheus": ("prometheus-client>=0.20.0",),
     "sentry": ("sentry-sdk>=2.0.0",),
     "skia": (f"skia-python>={SKIA_MINIMUM_VERSION}",),
-    "takumi": (f"takumi-py=={TAKUMI_VERSION}",),
+    "takumi": (f"takumi-py>={TAKUMI_MINIMUM_VERSION}",),
 }
 BASE_REQUIREMENTS: Final = (
     "anyio>=4.13.0",
     "arclet-entari[pydantic]>=0.19.4,<0.20.0",
     "jinja2>=3.0.3",
     "markdown>=3.11.3",
+    "packaging>=26.2",
     "pygments>=2.10.0",
     "pymdown-extensions>=12.3",
     "typing-extensions>=4.15.0",
@@ -249,6 +250,8 @@ from importlib.metadata import version
 import os
 import struct
 
+from packaging.version import InvalidVersion, Version
+
 from entari_plugin_htmlrender import RasterOptions
 from entari_plugin_htmlrender.composition import build_runtime_plan
 from entari_plugin_htmlrender.config import HtmlRenderConfig
@@ -259,9 +262,17 @@ def check(condition: object, message: str) -> None:
         raise RuntimeError(message)
 
 
+try:
+    installed_takumi_version = Version(version("takumi-py"))
+except InvalidVersion as error:
+    raise RuntimeError("Installed takumi-py version is not valid PEP 440") from error
+minimum_takumi_version = Version(os.environ["HTMLRENDER_TAKUMI_MINIMUM_VERSION"])
 check(
-    version("takumi-py") == os.environ["HTMLRENDER_EXPECTED_TAKUMI_VERSION"],
-    "Installed takumi-py version does not match the pinned provider",
+    installed_takumi_version >= minimum_takumi_version,
+    (
+        f"Installed takumi-py {installed_takumi_version} is below the required "
+        f"minimum {minimum_takumi_version}"
+    ),
 )
 
 
@@ -705,7 +716,7 @@ def _run_install_smokes(
                 "HOME": str(root / "home"),
                 "HTMLRENDER_ENTARI_CONFIG": str(root / "missing-entari.yml"),
                 "HTMLRENDER_EXPECTED_RESOURCES": json.dumps(PACKAGE_RESOURCES),
-                "HTMLRENDER_EXPECTED_TAKUMI_VERSION": TAKUMI_VERSION,
+                "HTMLRENDER_TAKUMI_MINIMUM_VERSION": TAKUMI_MINIMUM_VERSION,
                 "HTMLRENDER_EXPECTED_VERSION": expected_version,
                 "HTMLRENDER_REPOSITORY_ROOT": str(repository_root),
                 "PYTHONNOUSERSITE": "1",

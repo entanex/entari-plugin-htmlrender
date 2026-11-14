@@ -1,4 +1,4 @@
-"""Compatibility checks for the published takumi-py 0.4.0 API."""
+"""Compatibility checks for the native API introduced in takumi-py 0.4.0."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import TYPE_CHECKING, Callable
 
+from packaging.version import Version
 import pytest
 
 from entari_plugin_htmlrender.adapters.takumi import TakumiConfig
@@ -50,15 +51,12 @@ def release_api() -> None:
     } <= set(dir(takumi_py.Renderer))
 
 
-async def test_release_exposes_only_published_document_free_api(
+async def test_release_supports_minimum_native_api(
     installed_takumi_version: str,
     release_api: None,
 ) -> None:
     del release_api
-    assert installed_takumi_version == "0.4.0"
-    assert not hasattr(takumi_py, "Document")
-    assert not hasattr(takumi_py, "CompiledDocument")
-    assert not hasattr(takumi_py, "math")
+    assert Version(installed_takumi_version) >= Version("0.4.0")
 
 
 async def test_release_renders_static_png_and_svg() -> None:

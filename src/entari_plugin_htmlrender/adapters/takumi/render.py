@@ -4,6 +4,8 @@ from importlib.metadata import PackageNotFoundError, version
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, final
 
+from packaging.version import InvalidVersion, Version
+
 from entari_plugin_htmlrender.adapters.takumi.errors import TakumiRuntimeError
 from entari_plugin_htmlrender.adapters.takumi.runtime import (
     create_runtime_state,
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
     from .config import TakumiConfig
     from .runtime import TakumiRuntimeState
 
-_SUPPORTED_TAKUMI_VERSION = "0.4.0"
+_MINIMUM_TAKUMI_VERSION = Version("0.4.0")
 OBSERVATION_ATTRIBUTES: dict[str, str] = {"render.backend": TAKUMI_PROVIDER_ID}
 
 
@@ -78,7 +80,10 @@ def takumi_availability() -> ProviderAvailability:
     try:
         if find_spec("takumi_py") is None:
             return ProviderUnavailable(
-                reason="Optional dependency `takumi-py==0.4.0` is not installed.",
+                reason=(
+                    f"Optional dependency `takumi-py>={_MINIMUM_TAKUMI_VERSION}` "
+                    "is not installed."
+                ),
             )
     except (ImportError, ValueError) as error:
         return ProviderUnavailable(
@@ -91,11 +96,17 @@ def takumi_availability() -> ProviderAvailability:
         return ProviderUnavailable(
             reason="Distribution metadata for `takumi-py` is unavailable.",
         )
-    if installed_version != _SUPPORTED_TAKUMI_VERSION:
+    try:
+        parsed_version = Version(installed_version)
+    except InvalidVersion:
+        return ProviderUnavailable(
+            reason=f"Invalid takumi-py version {installed_version!r}.",
+        )
+    if parsed_version < _MINIMUM_TAKUMI_VERSION:
         return ProviderUnavailable(
             reason=(
                 f"Unsupported takumi-py version {installed_version!r}; "
-                f"expected {_SUPPORTED_TAKUMI_VERSION!r}."
+                f"requires >= {_MINIMUM_TAKUMI_VERSION}."
             ),
         )
 

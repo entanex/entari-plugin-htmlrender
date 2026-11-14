@@ -11,6 +11,7 @@ dependencies = [
     "arclet-entari[pydantic]>=0.19.4,<0.20.0",
     "jinja2>=3.0.3",
     "markdown>=3.11.3",
+    "packaging>=26.2",
     "pygments>=2.10.0",
     "pymdown-extensions>=12.3",
     "typing-extensions>=4.15.0",
@@ -26,7 +27,7 @@ sentry = [
 prometheus = [
     "prometheus-client>=0.20.0",
 ]
-takumi = ["takumi-py==0.4.0"]
+takumi = ["takumi-py>=0.4.0"]
 playwright = [
     "playwright>=1.60.0",
 ]
@@ -38,7 +39,7 @@ all = [
     "py-machineid>=0.8.0",
     "sentry-sdk>=2.0.0",
     "skia-python>=144.0.post2",
-    "takumi-py==0.4.0",
+    "takumi-py>=0.4.0",
 ]
 pillow = [
     "pillow>=12.0.0",

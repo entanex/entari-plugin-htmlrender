@@ -64,7 +64,7 @@ def test_distribution_archive_guard_allows_release_metadata() -> None:
     )
 
 
-def _release_metadata() -> Message:
+def _release_metadata(takumi_specifier: str = ">=0.4.0") -> Message:
     metadata = Message()
     metadata["Name"] = "entari-plugin-htmlrender"
     metadata["Version"] = "0.2.0"
@@ -75,6 +75,8 @@ def _release_metadata() -> Message:
         metadata["Requires-Dist"] = requirement
     for extra, requirements in OPTIONAL_REQUIREMENTS.items():
         for requirement in requirements:
+            if requirement.startswith("takumi-py"):
+                requirement = f"takumi-py{takumi_specifier}"
             metadata["Requires-Dist"] = f'{requirement}; extra == "{extra}"'
             metadata["Requires-Dist"] = f'{requirement}; extra == "all"'
     return metadata
@@ -86,6 +88,27 @@ def test_distribution_metadata_accepts_independent_backends() -> None:
         expected_version="0.2.0",
         artifact=Path("artifact.whl"),
     )
+
+
+@pytest.mark.parametrize(
+    "takumi_specifier",
+    [
+        "==0.4.0",
+        ">=0.4.0,<1.0.0",
+    ],
+)
+def test_distribution_metadata_requires_the_takumi_minimum_without_an_upper_bound(
+    takumi_specifier: str,
+) -> None:
+    with pytest.raises(
+        DistributionVerificationError,
+        match=r"takumi-py>=0\.4\.0",
+    ):
+        _validate_metadata(
+            _release_metadata(takumi_specifier=takumi_specifier),
+            expected_version="0.2.0",
+            artifact=Path("artifact.whl"),
+        )
 
 
 @pytest.mark.parametrize(

@@ -15,7 +15,7 @@ uv run playwright install chromium
 
 在 Debian / Ubuntu 或基于它们的容器中，可以用 `uv run playwright install --with-deps chromium` 一并安装系统依赖。
 
-如果使用 Takumi，`[takumi]` extra 会安装已发布的 `takumi-py==0.4.0`：
+如果使用 Takumi，`[takumi]` extra 要求 `takumi-py>=0.4.0`，不设上限：
 
 ```bash
 uv add "entari-plugin-htmlrender[takumi]>=0.2.0,<0.3"
@@ -71,7 +71,7 @@ Markdown 公式通过 KaTeX 渲染，目前需要选择 **Playwright**。行内�
 
 **Takumi 目前不能直接渲染 Markdown 数学公式。** 这条渲染流程依赖 JavaScript，使用 Takumi 渲染含公式的 Markdown 会抛出 `UnsupportedDocumentFeatureError`。插件尚未提供将公式自动转换成静态 SVG 或图片的功能。
 
-`takumi-py` 上游 `dev` 分支中的 `Document`、`RasterImage` 与 MathJax 仍在开发，尚未随 PyPI 0.4.0 发布，因此当前插件的 Markdown 公式仍使用 Playwright 的 KaTeX 渲染。
+上游 `Document`、`RasterImage` 与 MathJax API 尚未接入本插件，当前 Markdown 公式仍使用 Playwright 的 KaTeX 渲染。
 
 其他差异见[后端选择](docs/start/choosing-provider.md)，Takumi 的详细说明见 [Takumi 配置](docs/configuration/providers/takumi.md)。
 
