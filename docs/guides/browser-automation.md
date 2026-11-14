@@ -18,5 +18,5 @@ async def capture(playwright: PlaywrightCapability, url: str) -> bytes:
 
 Entari handler 可把 `service.capabilities.playwright` 传给该函数。`Page` 只在`lease_page()` 上下文内有效；`Browser` 同理使用 `lease_browser()`。离开上下文、runtime cleanup 或插件热卸载后不得保存或继续使用原生对象。
 
-原生 API 保留 Playwright 自身异常。需要跨 Provider 的 typed artifact 与稳定错误时，依赖 `HtmlRenderer`。导航 URL 必须由调用层建立 allowlist；资源 materialization
-policy 不提供导航 SSRF 防护。
+原生 API 保留 Playwright 自身异常。需要跨 Provider 的 typed artifact 与稳定错误时，依赖 `HtmlRenderer`。`lease_page()` / `lease_browser()` 中的导航与后续请求由调用层建立 allowlist；资源 materialization
+policy 不替代这一校验。受管理的 HTML rasterization 只把 HTTP(S) `GET` 请求送入资源网络策略和 pinned transport；WebSocket、非 `GET` 请求和 service worker 会被拒绝。

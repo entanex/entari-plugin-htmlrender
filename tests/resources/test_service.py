@@ -50,7 +50,7 @@ from entari_plugin_htmlrender.resources.ports import (
 from entari_plugin_htmlrender.resources.service import ResourceService
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Awaitable, Callable, Mapping
 
 
 class RecordingFetcher:
@@ -215,6 +215,8 @@ def _service(
     publisher: RecordingPublisher | None = None,
     traversal_budget: ResourceTraversalBudget | None = None,
     strategy: LocalResourceStrategy | RemoteResourceStrategy | None = None,
+    published_fetcher: Callable[[PublishedResource], Awaitable[ResourceContent]]
+    | None = None,
 ) -> ResourceService:
     return ResourceService(
         fetcher=fetcher or RecordingFetcher(ResourceContent(b"value")),
@@ -224,6 +226,7 @@ def _service(
         ),
         strategy=strategy or LocalResourceStrategy(),
         publisher=publisher,
+        published_fetcher=published_fetcher,
         traversal_budget=traversal_budget,
     )
 
@@ -271,6 +274,53 @@ async def test_fetch_translates_custom_fetcher_failures(
     assert captured.value.operation == "fetch"
     assert captured.value.retryable is False
     assert captured.value.causes[0].exception_type == "RuntimeError"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "error",
+    [
+        ResourceAccessDeniedError(
+            "publication address is not allowlisted",
+            reference="https://assets.example/private/item",
+            operation="fetch_published",
+        ),
+        ResourceFetchError(
+            "publication transport is unavailable",
+            reference="https://assets.example/private/item",
+            operation="fetch_published",
+        ),
+    ],
+)
+async def test_published_fetch_bypasses_general_fetch_cache_and_preserves_denial(
+    tmp_path: Path,
+    error: ResourceError,
+) -> None:
+    content = ResourceContent(b"fresh publication")
+    fetcher = RecordingFetcher(content)
+    calls: list[PublishedResource] = []
+    published = PublishedResource(
+        "https://assets.example/private/item",
+        {"Authorization": "Bearer filehost-token"},
+    )
+
+    async def deny_published(resource: PublishedResource) -> ResourceContent:
+        calls.append(resource)
+        assert resource is published
+        raise error
+
+    resources = _service(
+        tmp_path,
+        fetcher=fetcher,
+        published_fetcher=deny_published,
+    )
+
+    with pytest.raises(type(error)) as captured:
+        await resources.fetch_published(published)
+
+    assert captured.value.operation == "fetch_published"
+    assert calls == [published]
+    assert fetcher.fetches == []
 
 
 @pytest.mark.anyio

@@ -215,6 +215,8 @@ class ResourceContent:
     data: bytes
     media_type: str | None = None
     revision: ResourceRevision | None = None
+    final_url: str | None = None
+    """Final HTTP URL when a fetch followed a redirect; otherwise ``None``."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.data, bytes):
@@ -235,6 +237,8 @@ class ResourceContent:
                 operation="create_resource_content",
                 field="revision",
             )
+        if self.final_url is not None:
+            object.__setattr__(self, "final_url", RemoteResourceRef(self.final_url).url)
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,6 +18,7 @@ services:
       PLAYWRIGHT_WS_ENDPOINT: ws://playwright:53333/playwright
       FILEHOST_PUBLIC_URL: http://render:9012/_htmlrender/assets/
       FILEHOST_BIND_PORT: "9012"
+      REMOTE_ALLOWED_PRIVATE_NETWORKS: 172.30.240.0/24
     expose:
       - "9012"
     command:
@@ -42,3 +43,9 @@ services:
       BROWSER_WS_ENDPOINT: /playwright
     ports:
       - "53333:53333"
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.240.0/24

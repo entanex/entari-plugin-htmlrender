@@ -36,6 +36,7 @@ def test_htmlrender_config_defaults() -> None:
     assert settings.resources.traversal.max_concurrency == 16
     assert settings.resources.local_access.allow_any_path is False
     assert settings.resources.local_access.allowed_paths == []
+    assert settings.resources.remote_access.allow_private_networks == ()
     assert settings.resources.filehost.bind_host == "127.0.0.1"
     assert settings.resources.filehost.bind_port == 8080
     assert settings.resources.filehost.cache_ttl_seconds == 300.0
@@ -69,6 +70,13 @@ def test_htmlrender_config_nested_parse() -> None:
             },
             "resources": {
                 "cache": {"max_entries": 8},
+                "remote_access": {
+                    "allow_private_networks": [
+                        "10.1.2.3/8",
+                        "::1",
+                        "::ffff:127.0.0.1",
+                    ],
+                },
                 "traversal": {
                     "max_nodes": 128,
                     "max_depth": 8,
@@ -100,6 +108,11 @@ def test_htmlrender_config_nested_parse() -> None:
     assert settings.graphics.max_pixels == 1_000_000
     assert settings.graphics.max_concurrency == 1
     assert settings.resources.cache.max_entries == 8
+    assert settings.resources.remote_access.allow_private_networks == (
+        "10.0.0.0/8",
+        "::1/128",
+        "127.0.0.1/32",
+    )
     assert settings.resources.traversal.max_nodes == 128
     assert settings.resources.traversal.max_depth == 8
     assert settings.resources.traversal.max_concurrency == 2
@@ -180,6 +193,32 @@ def test_htmlrender_config_rejects_non_finite_numbers(
 ) -> None:
     with pytest.raises(ValidationError):
         HtmlRenderConfig.model_validate(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        False,
+        True,
+        None,
+        "10.0.0.0/8",
+        ["private"],
+        ["10.0.0.0/33"],
+    ],
+)
+def test_remote_private_network_allowlist_is_normalized_and_validated(
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError, match="allow_private_networks"):
+        HtmlRenderConfig.model_validate(
+            {
+                "resources": {
+                    "remote_access": {
+                        "allow_private_networks": value,
+                    }
+                }
+            }
+        )
 
 
 @pytest.mark.parametrize(

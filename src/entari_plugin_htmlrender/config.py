@@ -13,7 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # Pydantic resolves this annotation while constructing the model.
 from entari_plugin_htmlrender.graphics.models import GraphicsBackendName  # noqa: TC001
 from entari_plugin_htmlrender.providers.sdk import ProviderId, validate_provider_id
-from entari_plugin_htmlrender.resources.config import normalize_public_base_url
+from entari_plugin_htmlrender.resources.config import (
+    normalize_private_network,
+    normalize_public_base_url,
+)
 from entari_plugin_htmlrender.resources.headers import (
     validate_request_header_name,
     validate_request_header_value,
@@ -81,12 +84,24 @@ class LocalAccessSettings(_StrictRenderModel):
 class RemoteAccessSettings(_StrictRenderModel):
     """Security policy for remote (http/https) resource fetches."""
 
-    allow_private_networks: bool = Field(default=False)
+    allow_private_networks: tuple[str, ...] = ()
     allow_hosts: list[str] = Field(default_factory=list)
     deny_hosts: list[str] = Field(default_factory=list)
     max_redirects: int = Field(default=5, ge=0)
     request_timeout_seconds: float = Field(default=30.0, gt=0.0)
     max_concurrent_fetches: int = Field(default=8, gt=0)
+
+    @field_validator("allow_private_networks", mode="before")
+    @classmethod
+    def _normalize_private_networks(cls, value: object) -> tuple[str, ...]:
+        if isinstance(value, (bool, str, bytes)) or not isinstance(
+            value, (list, tuple)
+        ):
+            raise ValueError(
+                "allow_private_networks must be a list or tuple of "
+                "IPv4/IPv6 IPs or CIDRs."
+            )
+        return tuple(normalize_private_network(entry) for entry in value)
 
 
 class FilehostSettings(_StrictRenderModel):

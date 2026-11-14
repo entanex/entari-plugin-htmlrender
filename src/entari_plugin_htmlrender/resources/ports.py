@@ -67,6 +67,17 @@ class ProviderResourceAccess(Protocol):
 
     def authorize_local(self, path: Path) -> Path: ...
 
+    async def fetch(
+        self,
+        resource: ResourceRef,
+        *,
+        refresh: bool = False,
+    ) -> ResourceContent: ...
+
+    async def fetch_published(self, resource: PublishedResource) -> ResourceContent:
+        """Fetch a scoped publication without caching its authorization."""
+        ...
+
     async def fetch_bytes(
         self,
         resource: ResourceRef,

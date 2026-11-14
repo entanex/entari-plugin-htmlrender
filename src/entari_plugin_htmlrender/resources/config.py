@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import StrEnum
+from ipaddress import IPv6Network, ip_network
 from pathlib import Path
 from typing import Literal, TypeAlias
 from urllib.parse import urlsplit
@@ -24,6 +25,33 @@ def normalize_public_base_url(value: str) -> str:
     if split.query or split.fragment:
         raise ValueError("filehost public_base_url must not carry a query or fragment.")
     return value if value.endswith("/") else f"{value}/"
+
+
+def normalize_private_network(value: object) -> str:
+    """Return one canonical IPv4 or IPv6 network string."""
+    if not isinstance(value, str):
+        raise ValueError("private network allowlist entries must be strings.")
+    try:
+        network = ip_network(value.strip(), strict=False)
+    except ValueError as error:
+        raise ValueError(
+            "private network allowlist entries must be IPv4/IPv6 IPs or CIDRs."
+        ) from error
+    if (
+        isinstance(network, IPv6Network)
+        and network.prefixlen >= 96
+        and network.network_address.ipv4_mapped is not None
+    ):
+        prefixlen = network.prefixlen - 96
+        return str(
+            ip_network(
+                (
+                    network.network_address.ipv4_mapped,
+                    prefixlen,
+                )
+            )
+        )
+    return str(network)
 
 
 class ResourceMaterializationPolicy(StrEnum):
@@ -87,11 +115,13 @@ class RemoteAccessSettings:
     """Network egress policy for remote resource fetches.
 
     Private, loopback, and link-local destinations are denied unless the host
-    is explicitly listed in ``allow_hosts`` or ``allow_private_networks`` is
-    enabled.  ``deny_hosts`` always wins over every allow rule.
+    address belongs to the corresponding IP network in
+    ``allow_private_networks``.  Multicast, unspecified, and reserved
+    destinations remain denied.  ``deny_hosts`` always wins over every allow
+    rule.
     """
 
-    allow_private_networks: bool = False
+    allow_private_networks: tuple[str, ...] = ()
     allow_hosts: tuple[str, ...] = ()
     deny_hosts: tuple[str, ...] = ()
     max_redirects: int = 5
@@ -99,6 +129,19 @@ class RemoteAccessSettings:
     max_concurrent_fetches: int = 8
 
     def __post_init__(self) -> None:
+        networks = self.allow_private_networks
+        if isinstance(networks, (str, bytes)) or not isinstance(
+            networks, (list, tuple)
+        ):
+            raise ValueError(
+                "allow_private_networks must be a list or tuple of "
+                "IPv4/IPv6 IPs or CIDRs."
+            )
+        object.__setattr__(
+            self,
+            "allow_private_networks",
+            tuple(normalize_private_network(entry) for entry in networks),
+        )
         if self.max_redirects < 0:
             raise ValueError("Remote redirect limit must not be negative.")
         if self.request_timeout_seconds <= 0:

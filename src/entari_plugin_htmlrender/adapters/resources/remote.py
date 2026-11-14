@@ -11,11 +11,18 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping  # noqa: TC003
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from functools import partial
 from http.client import HTTPConnection, HTTPSConnection
-from ipaddress import IPv4Address, IPv6Address, ip_address
+from ipaddress import (
+    IPv4Address,
+    IPv4Network,
+    IPv6Address,
+    IPv6Network,
+    ip_address,
+    ip_network,
+)
 import socket
 import ssl
 import threading
@@ -39,6 +46,7 @@ from entari_plugin_htmlrender.resources.errors import (
     ResourceTimeoutError,
     ResourceTooLargeError,
 )
+from entari_plugin_htmlrender.resources.headers import merge_request_headers
 from entari_plugin_htmlrender.resources.models import (
     NotModified,
     RemoteResourceRef,
@@ -71,36 +79,64 @@ def _normalize_host(host: str) -> str:
     return host.lower().rstrip(".")
 
 
+def _normalize_address(
+    address: IPv4Address | IPv6Address,
+) -> IPv4Address | IPv6Address:
+    if isinstance(address, IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    return address
+
+
+def _normalize_host_literal(host: str) -> str:
+    normalized = _normalize_host(host)
+    try:
+        return str(_normalize_address(ip_address(normalized)))
+    except ValueError:
+        return normalized
+
+
 def _matches_host(host: str, patterns: Iterable[str]) -> bool:
     return any(host == entry or host.endswith(f".{entry}") for entry in patterns)
 
 
-def _is_blocked_address(address: IPv4Address | IPv6Address) -> bool:
-    if isinstance(address, IPv6Address):
-        mapped = address.ipv4_mapped
-        if mapped is not None:
-            address = mapped
-    return (
-        address.is_loopback
-        or address.is_link_local
-        or address.is_private
-        or address.is_multicast
-        or address.is_reserved
-        or address.is_unspecified
+def _matches_network(
+    address: IPv4Address | IPv6Address,
+    networks: Iterable[IPv4Network | IPv6Network],
+) -> bool:
+    return any(
+        address.version == network.version and address in network
+        for network in networks
     )
+
+
+def _is_blocked_address(
+    address: IPv4Address | IPv6Address,
+    networks: Iterable[IPv4Network | IPv6Network],
+) -> bool:
+    address = _normalize_address(address)
+    if address.is_multicast or address.is_unspecified:
+        return True
+    if address.is_loopback:
+        return not _matches_network(address, networks)
+    if address.is_reserved:
+        return True
+    return not address.is_global and not _matches_network(address, networks)
 
 
 @final
 class ConfiguredRemoteAccessPolicy:
-    """Deny private-network egress unless a host is explicitly allowed."""
+    """Require destination networks to opt into private-network egress."""
 
     def __init__(self, settings: RemoteAccessSettings | None = None) -> None:
         self._settings = settings or RemoteAccessSettings()
+        self._allow_private_networks = tuple(
+            ip_network(entry) for entry in self._settings.allow_private_networks
+        )
         self._allow_hosts = tuple(
-            _normalize_host(entry) for entry in self._settings.allow_hosts
+            _normalize_host_literal(entry) for entry in self._settings.allow_hosts
         )
         self._deny_hosts = tuple(
-            _normalize_host(entry) for entry in self._settings.deny_hosts
+            _normalize_host_literal(entry) for entry in self._settings.deny_hosts
         )
 
     @property
@@ -125,15 +161,19 @@ class ConfiguredRemoteAccessPolicy:
         return _normalize_host(host)
 
     def authorize_url(self, url: str) -> None:
-        host = self._host_of(url)
+        host = _normalize_host_literal(self._host_of(url))
         if _matches_host(host, self._deny_hosts):
             raise ResourceAccessDeniedError(
                 f"Remote host {host!r} is denied: {url}",
                 reference=url,
                 operation="authorize",
             )
-        if _matches_host(host, self._allow_hosts):
-            return
+        if self._allow_hosts and not _matches_host(host, self._allow_hosts):
+            raise ResourceAccessDeniedError(
+                f"Remote host {host!r} is not allowed: {url}",
+                reference=url,
+                operation="authorize",
+            )
         try:
             literal = ip_address(host)
         except ValueError:
@@ -145,21 +185,23 @@ class ConfiguredRemoteAccessPolicy:
         url: str,
         address: IPv4Address | IPv6Address,
     ) -> None:
-        host = self._host_of(url)
+        host = _normalize_host_literal(self._host_of(url))
         if _matches_host(host, self._deny_hosts):
             raise ResourceAccessDeniedError(
                 f"Remote host {host!r} is denied: {url}",
                 reference=url,
                 operation="authorize",
             )
-        if _matches_host(host, self._allow_hosts):
-            return
+        if self._allow_hosts and not _matches_host(host, self._allow_hosts):
+            raise ResourceAccessDeniedError(
+                f"Remote host {host!r} is not allowed: {url}",
+                reference=url,
+                operation="authorize",
+            )
         self._check_address(url, address)
 
     def _check_address(self, url: str, address: IPv4Address | IPv6Address) -> None:
-        if self._settings.allow_private_networks:
-            return
-        if _is_blocked_address(address):
+        if _is_blocked_address(address, self._allow_private_networks):
             raise ResourceAccessDeniedError(
                 f"Remote resource resolves to blocked address {address}: {url}",
                 reference=url,
@@ -635,6 +677,7 @@ def _perform_hop(
     max_resource_bytes: int,
     socket_timeout: float,
     conditional_headers: Mapping[str, str] | None = None,
+    request_headers: Mapping[str, str] | None = None,
 ) -> _HopOutcome:
     """Connect to the first reachable authorized address and read one hop.
 
@@ -664,7 +707,9 @@ def _perform_hop(
             connection.request(
                 "GET",
                 _request_target(url),
-                headers=dict(conditional_headers or {}),
+                headers=merge_request_headers(
+                    conditional_headers or {}, request_headers or {}
+                ),
             )
             return _read_response(
                 connection,
@@ -706,6 +751,7 @@ async def fetch_remote(
     max_resource_bytes: int,
     request_timeout_seconds: float = ...,
     conditional_revision: None = None,
+    request_headers: Mapping[str, str] | None = None,
 ) -> ResourceContent: ...
 
 
@@ -718,6 +764,7 @@ async def fetch_remote(
     max_resource_bytes: int,
     request_timeout_seconds: float = ...,
     conditional_revision: ResourceRevision,
+    request_headers: Mapping[str, str] | None = None,
 ) -> ResourceContent | NotModified: ...
 
 
@@ -729,6 +776,7 @@ async def fetch_remote(
     max_resource_bytes: int,
     request_timeout_seconds: float = 30.0,
     conditional_revision: ResourceRevision | None = None,
+    request_headers: Mapping[str, str] | None = None,
 ) -> ResourceContent | NotModified:
     """Fetch a remote resource under one end-to-end deadline.
 
@@ -738,7 +786,8 @@ async def fetch_remote(
     answer and each redirect are re-validated and the connection is pinned to
     an address that passed validation. When ``conditional_revision`` carries
     an HTTP validator, the request is conditional and a 304 response maps to
-    :class:`NotModified`.
+    :class:`NotModified`. Publication request headers are scoped to the exact
+    initial URL and are never forwarded to a different redirect destination.
     """
     conditional_headers = _conditional_headers(conditional_revision)
     deadline = time.monotonic() + request_timeout_seconds
@@ -771,6 +820,9 @@ async def fetch_remote(
                         max_resource_bytes=max_resource_bytes,
                         socket_timeout=remaining,
                         conditional_headers=conditional_headers,
+                        request_headers=(
+                            request_headers if url == reference.url else None
+                        ),
                     ),
                     deadline=deadline,
                 )
@@ -791,7 +843,11 @@ async def fetch_remote(
                         reference=url,
                         operation="fetch",
                     )
-                return outcome.content
+                return (
+                    replace(outcome.content, final_url=url)
+                    if url != reference.url
+                    else outcome.content
+                )
     except TimeoutError as error:
         raise ResourceTimeoutError(
             f"Remote resource fetch exceeded the {request_timeout_seconds}s deadline.",

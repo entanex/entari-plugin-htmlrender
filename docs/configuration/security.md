@@ -17,10 +17,16 @@ htmlrender 会处理不可信 HTML、模板变量、文件路径和 URL。安全
 
 ## 网络
 
-- 默认拒绝私网地址；按业务建立 `allow_hosts`，必要时叠加 `deny_hosts`。
+- 默认拒绝非公网解析地址。访问回环、RFC 1918、链路本地、CGNAT/shared `100.64.0.0/10`、ULA 等地址时，必须把目标 IPv4/IPv6 地址或 CIDR 显式加入 `resources.remote_access.allow_private_networks`。
+- `allow_hosts: []` 不限制主机名，但仍受 IP 策略约束；非空列表只允许列出的主机及其子域。`allow_hosts` 不能绕过 IP 白名单，`deny_hosts` 始终优先。
+- `allow_private_networks` 只接受 IP/CIDR 列表，默认 `[]`；旧版布尔值 `true` / `false` 无效。
 - 限制 redirect、timeout、并发与单资源大小。
 - DNS、redirect 与最终连接地址均需保持在策略内；部署层同时限制 egress。
-- Playwright `Page.goto()` 是原生导航能力，不受`ResourceMaterializationPolicy` 保护；导航 URL 必须由调用层单独校验。
+- 受管理的 Playwright HTML rendering 只把 HTTP(S) `GET` 请求交给 Bot-side 的同一资源策略和 pinned transport；WebSocket、非 `GET` 请求和 service worker 会被拒绝。发布请求头仅绑定原 URL，跨 URL redirect 时不会保留，且不会进入授权缓存。这项保护只覆盖 HTTP(S) 资源访问，不构成完整 Chromium sandbox。显式 `lease_page()` / `lease_browser()` 返回调用方持有的原生对象，其导航与后续请求仍由调用层校验。
+
+## 升级迁移
+
+旧配置中的 `allow_private_networks: true` 或 `false` 会被拒绝，因为两者都无法表达目标网段白名单。先确认实际依赖的公网与非公网地址，再用 IP/CIDR 列表替换布尔值。旧版通过 `allow_hosts` 绕过私网检查的配置必须同时补充精确的 IP/CIDR；只保留主机名会继续拒绝非公网解析地址。
 
 ## 资源发布
 

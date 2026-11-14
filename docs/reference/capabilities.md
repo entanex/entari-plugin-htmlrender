@@ -23,7 +23,7 @@ async def screenshot(
         return await page.screenshot(type="png")
 ```
 
-`lease_page(**options)` 与 `lease_browser()` 返回 async context manager。原生 Page或 Browser 只能在上下文内使用；URL 导航的 scheme/host/egress 策略由调用层负责。
+`lease_page(**options)` 与 `lease_browser()` 返回 async context manager。原生 Page或 Browser 只能在上下文内使用；这两个原生租约中的 URL 导航与后续请求策略由调用层负责。受管理的 HTML rasterization 只通过资源策略与 pinned transport 执行浏览器发起的 HTTP(S) `GET` 请求；WebSocket、非 `GET` 请求和 service worker 会被拒绝。
 
 ## Takumi
 
