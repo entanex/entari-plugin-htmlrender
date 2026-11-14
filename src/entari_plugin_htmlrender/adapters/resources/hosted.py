@@ -40,7 +40,7 @@ from entari_plugin_htmlrender.resources.headers import (
     RequestHeaderConflict,
     combine_request_capabilities,
 )
-from entari_plugin_htmlrender.resources.models import PublicationLeaseId  # noqa: TC001
+from entari_plugin_htmlrender.resources.models import PublicationLeaseId
 
 if TYPE_CHECKING:
     from aiohttp.web import Request, StreamResponse
@@ -247,14 +247,17 @@ class HostedAssetStore:
         self,
         namespace: str,
         name: str,
-        lease_id: PublicationLeaseId,
+        lease_ids: PublicationLeaseId | Iterable[PublicationLeaseId],
     ) -> bool:
-        """Pin a resident asset to a lease; ``False`` when it was evicted."""
+        """Pin resident assets to leases; ``False`` when it was evicted."""
         async with self._lock:
             asset = self._entries.get((namespace, name))
             if asset is None:
                 return False
-            asset.leases.add(lease_id)
+            if isinstance(lease_ids, str):
+                asset.leases.add(PublicationLeaseId(lease_ids))
+            else:
+                asset.leases.update(lease_ids)
             self._entries.move_to_end((namespace, name))
             return True
 
@@ -351,8 +354,12 @@ class HostedAssetNamespace:
         )
         return self.url_for(name)
 
-    async def attach(self, name: str, lease_id: PublicationLeaseId) -> bool:
-        return await self._store.attach(self._namespace, name, lease_id)
+    async def attach(
+        self,
+        name: str,
+        lease_ids: PublicationLeaseId | Iterable[PublicationLeaseId],
+    ) -> bool:
+        return await self._store.attach(self._namespace, name, lease_ids)
 
     async def touch(self, name: str) -> bool:
         return await self._store.touch(self._namespace, name)

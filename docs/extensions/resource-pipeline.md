@@ -25,6 +25,8 @@ caller 通过 `ResourceAccess.fetch*()` 从 `ResourceRef` 得到 `ResourceConten
 
 远程浏览器通常使用 memory route 或 filehost。选择 filehost 时 composition 显式创建 aiohttp server/store，并把同一 store 注入 publisher。one-shot `RuntimePlan`中的 server/store 与唯一 runtime 同寿命；service cleanup 等待活跃 operation 与publication lease 后再关闭。
 
+filehost 在上传完成后先协调当前仍有效的 publication lease，再唤醒等待者；上传过程中已释放的 lease 不会重新占用容量。清空 URL 缓存不会撤销其他调用仍持有的 lease，缓存命中时的续租与释放也按同一顺序串行处理。
+
 所有 fetch、template、publication 与 Provider operation 经过同一个 runtime
 admission gate：cleanup 开始后拒绝新操作，已获准操作完成后才释放 cache 与 native
 handle。composition 通过 `WorkerExecutor` 隔离阻塞 I/O/native work。

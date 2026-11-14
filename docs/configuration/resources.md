@@ -72,6 +72,8 @@ async with service.resources.publish(InlineResource(b"payload", media_type="appl
     # url 与精确授权 headers 仅在这个作用域内有效。
 ```
 
+上传过程中释放的租约不会在上传完成后重新生效。发布器会保留仍在使用资源的租约，并在协调存储状态后返回 URL。
+
 | 完整配置路径 | 默认值 |
 | --- | ---: |
 | `resources.filehost.bind_host` | `127.0.0.1` |

@@ -305,7 +305,6 @@ class FilehostAssetPublisher:
             )
         normalized_suffix = normalize_publication_suffix(suffix) or ""
         key = (sha256(data).hexdigest(), normalized_suffix)
-        now = time.monotonic()
         async with self._lock:
             if self._closed:
                 raise ResourcePublishError(
@@ -313,6 +312,7 @@ class FilehostAssetPublisher:
                     reference=content,
                     operation="publish",
                 )
+            now = time.monotonic()
             expired = [
                 cache_key
                 for cache_key, entry in self._entries.items()
@@ -320,30 +320,16 @@ class FilehostAssetPublisher:
             ]
             for cache_key in expired:
                 self._entries.pop(cache_key, None)
-            entry = self._entries.get(key)
-            hit_url: str | None = None
-            if entry is not None:
-                if lease_id is not None:
-                    entry.leases.add(lease_id)
-                hit_url = entry.url
-        if hit_url is not None:
-            # The URL mapping must not outlive the bytes: confirm the store
-            # still holds the asset (pinning it to the lease) before reuse.
-            if await self._confirm_hosted(key, lease_id):
-                self._record({"hit": 1})
-                return self._published(hit_url)
-            async with self._lock:
-                current = self._entries.get(key)
-                if current is not None and current.url == hit_url:
-                    self._entries.pop(key, None)
-
-        async with self._lock:
-            if self._closed:
-                raise ResourcePublishError(
-                    "The filehost publisher is closed.",
-                    reference=content,
-                    operation="publish",
-                )
+            current = self._entries.get(key)
+            if current is not None:
+                # Store confirmation and lease registration share release()'s
+                # lock so a completed release cannot be undone by a cache hit.
+                if await self._confirm_hosted(key, lease_id):
+                    if lease_id is not None:
+                        current.leases.add(lease_id)
+                    self._record({"hit": 1})
+                    return self._published(current.url)
+                self._entries.pop(key, None)
             inflight = self._inflight.get(key)
             owner = inflight is None
             if inflight is None:
@@ -369,11 +355,29 @@ class FilehostAssetPublisher:
             url = await self._upload(key, data, uploaded_leases)
             with anyio.CancelScope(shield=True):
                 async with self._lock:
+                    current_leases = set(inflight.leases)
+                    released_leases = uploaded_leases - current_leases
+                    late_leases = current_leases - uploaded_leases
+                    namespace = self._namespace
+                    if namespace is not None:
+                        # Pin active waiters before removing stale upload pins,
+                        # without replacing leases retained across clear().
+                        if late_leases:
+                            name = f"{key[0]}{key[1]}"
+                            attached = await namespace.attach(name, late_leases)
+                            if not attached and current_leases:
+                                await namespace.put(
+                                    name,
+                                    data,
+                                    lease_ids=current_leases,
+                                )
+                        for released in released_leases:
+                            await namespace.release(released)
                     if inflight.epoch == self._epoch:
                         self._entries[key] = _Entry(
                             url,
                             time.monotonic() + self._settings.cache_ttl_seconds,
-                            set(inflight.leases),
+                            current_leases,
                         )
                     self._inflight.pop(key, None)
                     if not self._inflight:
@@ -381,11 +385,6 @@ class FilehostAssetPublisher:
                     inflight.url = url
                     inflight.event.set()
                     self._record({"miss": 1, "load": 1})
-                    late_leases = set(inflight.leases) - uploaded_leases
-                namespace = self._namespace
-                if namespace is not None:
-                    for late in late_leases:
-                        await namespace.attach(f"{key[0]}{key[1]}", late)
             return self._published(url)
         except BaseException as error:
             published_error: BaseException = error
@@ -430,9 +429,9 @@ class FilehostAssetPublisher:
                 if lease_id in entry.leases:
                     entry.leases.remove(lease_id)
                     entry.expires_at = now + self._settings.cache_ttl_seconds
-        namespace = self._namespace
-        if namespace is not None:
-            await namespace.release(lease_id)
+            namespace = self._namespace
+            if namespace is not None:
+                await namespace.release(lease_id)
 
 
 __all__ = ["FilehostAssetPublisher"]
