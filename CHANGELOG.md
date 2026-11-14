@@ -24,7 +24,7 @@ and versioning follows the [release policy](docs/project/release.md).
 
 ### Changed
 
-- pin the optional Takumi backend to the published `takumi-py==0.4.0`, with Takumi 2.17 rendering behavior and removal of upstream's deprecated resource APIs.
+- require `takumi-py>=0.4.0` without an upper bound. The 0.4.0 baseline uses Takumi 2.17 rendering behavior and removes upstream's deprecated resource APIs.
 - expose native resource and font-cache budgets through `provider_config.cache_max_bytes` and `provider_config.font_cache_max_bytes`. `null` retains upstream defaults: 64 MiB for resource caching and no limit for the evictable font cache.
 - register font subsets under a shared `name` with inclusive `unicode_range` codepoint pairs. Existing `subset_of` configuration remains compatible and takes precedence over `name`.
 - retain separate native resource, native font, and compiled HTML/CSS caches. Native resource caching includes repeated `data:` URI images; the font-cache budget guides eviction rather than bounding peak memory, and fonts added by the current call or pinned by registration are not evicted for space.
@@ -43,7 +43,7 @@ and versioning follows the [release policy](docs/project/release.md).
 
 - preserve resource URL fragments and decode local URL paths before authorization, while keeping filehost request headers scoped to the exact fragment-free request URL.
 - harden release workflow dispatch ([d224199](https://github.com/entanex/entari-plugin-htmlrender/commit/d2241991fd2428fa259f685d72982428834766a1) by Tacrolimus).
-- strengthen distribution metadata and CI contracts for the Python/Entari support matrix and pinned native extras.
+- strengthen distribution metadata and CI contracts for the Python/Entari support matrix and minimum versions for native extras.
 
 ### Documentation
 

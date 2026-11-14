@@ -6,7 +6,7 @@ icon: lucide/gauge
 
 # Takumi 配置与能力
 
-Takumi 在进程内执行 Rust 原生排版，不启动浏览器，不执行 JavaScript，也不访问网络。插件正式依赖 PyPI 已发布的 `takumi-py==0.4.0`。
+Takumi 在进程内执行 Rust 原生排版，不启动浏览器，不执行 JavaScript，也不访问网络。插件要求 `takumi-py>=0.4.0`，不设上限。
 
 ## 安装与选择
 
@@ -129,7 +129,7 @@ Takumi 支持静态 HTML、文本、模板和大多数 Markdown；下列需求�
 
 ## 平台约束
 
-项目锁定的 `takumi-py==0.4.0` 提供 CPython 3.11+ ABI3 wheel：
+基线版本 `takumi-py` 0.4.0 提供 CPython 3.11+ ABI3 wheel：
 
 | 平台 | wheel |
 | --- | --- |
@@ -137,7 +137,7 @@ Takumi 支持静态 HTML、文本、模板和大多数 Markdown；下列需求�
 | macOS | macOS 11+ ARM64、macOS 10.12+ Intel |
 | Windows | x86-64、ARM64 |
 
-没有匹配 wheel 的平台会尝试源码构建，需要 Rust 1.91+、Python 开发环境和目标平台原生工具链。已在 wheel 矩阵内的安装不需要 Rust。安装环境应重新核对[PyPI 0.4.0 文件](https://pypi.org/project/takumi-py/0.4.0/#files)。
+没有匹配 wheel 的平台会尝试源码构建，需要 Rust 1.91+、Python 开发环境和目标平台原生工具链。已在 wheel 矩阵内的安装不需要 Rust。以上是 0.4.0 的平台与构建要求；使用其他版本时，应核对对应的 [PyPI 文件](https://pypi.org/project/takumi-py/)与构建说明。
 
 Takumi 自带的 Latin fallback 不能覆盖业务所需字符集。需要中文或其他脚本时，应通过 `provider_config.fonts` 把字体随部署交付；这属于内容资源，不是系统动态库依赖。
 
