@@ -145,6 +145,8 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
         from arclet.entari import load_plugin
         from arclet.entari.config import EntariConfig
         from arclet.entari.plugin import (
+            disable_plugin,
+            enable_plugin,
             find_plugin,
             reload_plugin,
             unload_plugin_async,
@@ -255,6 +257,10 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
 
         async def exercise(directory: str) -> None:
             set_event_loop(asyncio.get_running_loop())
+            template_root = Path(directory)
+            (template_root / "lifecycle.html").write_text(
+                "<h1>{{ title }}</h1>", encoding="utf-8"
+            )
             EntariConfig(Path(directory) / "entari.yml")
             manager = it(Launart)
             manager.add_component(HostService())
@@ -309,12 +315,18 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
                         "provider": None,
                         "startup": "off",
                         "html": {"max_source_bytes": 8192},
+                        "resources": {
+                            "local_access": {"allowed_paths": [directory]}
+                        },
                     },
                 ),
                 timeout=10,
             )
             assert reloaded
             replacement_plugin = reloaded.plugin
+            template = replacement_plugin.module.TemplateRef(
+                template_root, "lifecycle.html"
+            )
             replacement_service = replacement_plugin._services["htmlrender.runtime"]
             await wait_for_stage(replacement_service, "blocking")
 
@@ -330,9 +342,9 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
             assert contract_provider_count() == 1
             await assert_handler_uses(replacement_service)
 
-            disable_tasks = replacement_plugin.disable()
-            if disable_tasks:
-                await asyncio.wait_for(asyncio.wait(disable_tasks), timeout=10)
+            assert await asyncio.wait_for(
+                disable_plugin("entari_plugin_htmlrender"), timeout=10
+            )
             await wait_for_component_removal(manager, "htmlrender.runtime")
             assert not replacement_plugin.is_available
             assert find_plugin("entari_plugin_htmlrender") is replacement_plugin
@@ -359,6 +371,127 @@ def test_atomic_plugin_reload_replaces_service_with_new_configuration() -> None:
                 assert cause is not None, repr(error)
             else:
                 raise AssertionError("disabled plugin unexpectedly resolved DI")
+
+            for cycle in range(2):
+                previous_service = replacement_service
+                previous_templates = previous_service.templates
+                assert await asyncio.wait_for(
+                    enable_plugin("entari_plugin_htmlrender"), timeout=10
+                )
+                replacement_service = replacement_plugin._services["htmlrender.runtime"]
+                await wait_for_stage(replacement_service, "blocking")
+                assert replacement_service is not previous_service
+                assert manager.get_component("htmlrender.runtime") is replacement_service
+                await assert_handler_uses(replacement_service)
+                rendered = await replacement_service.templates.render(
+                    template, {"title": f"cycle-{cycle}"}
+                )
+                assert rendered.content == f"<h1>cycle-{cycle}</h1>"
+                try:
+                    await previous_templates.render(template, {"title": "closed"})
+                except replacement_plugin.module.RuntimeUnavailableError:
+                    pass
+                else:
+                    raise AssertionError("a closed generation still rendered templates")
+                assert await asyncio.wait_for(
+                    disable_plugin("entari_plugin_htmlrender"), timeout=10
+                )
+                await wait_for_component_removal(manager, "htmlrender.runtime")
+
+            async def assert_failure_visible():
+                try:
+                    await asyncio.wait_for(run_handler(consumer, Probe()), timeout=2)
+                except TimeoutError as error:
+                    raise AssertionError("failed service stranded DI") from error
+                except Exception as error:
+                    cause = error
+                    while cause is not None:
+                        if isinstance(
+                            cause, replacement_plugin.module.RuntimeUnavailableError
+                        ) and cause.state == "failed":
+                            break
+                        cause = cause.__cause__ or cause.__context__
+                    assert cause is not None, repr(error)
+                else:
+                    raise AssertionError("failed service unexpectedly resolved DI")
+
+            for failure_mode in ("cleanup", "build"):
+                if failure_mode == "cleanup":
+                    assert await asyncio.wait_for(
+                        enable_plugin("entari_plugin_htmlrender"), timeout=10
+                    )
+                    failing = replacement_plugin._services["htmlrender.runtime"]
+                    await wait_for_stage(failing, "blocking")
+                    original_close = failing._runtime.aclose
+                    close_calls = 0
+
+                    async def fail_close_once():
+                        nonlocal close_calls
+                        close_calls += 1
+                        if close_calls == 1:
+                            raise RuntimeError("injected cleanup failure")
+                        await original_close()
+
+                    failing._runtime.aclose = fail_close_once
+                    assert await asyncio.wait_for(
+                        disable_plugin("entari_plugin_htmlrender"), timeout=10
+                    )
+                    await wait_for_component_removal(manager, "htmlrender.runtime")
+                else:
+                    failing = replacement_plugin._services["htmlrender.runtime"]
+
+                    async def fail_build(*args, **kwargs):
+                        raise RuntimeError("injected build failure")
+
+                    failing._runtime_factory = fail_build
+
+                if failure_mode == "cleanup":
+                    try:
+                        await asyncio.wait_for(
+                            enable_plugin("entari_plugin_htmlrender"), timeout=10
+                        )
+                    except RuntimeError:
+                        pass
+                    else:
+                        raise AssertionError("a failed generation was re-enabled")
+                else:
+                    assert await asyncio.wait_for(
+                        enable_plugin("entari_plugin_htmlrender"), timeout=10
+                    )
+                await wait_for_component_removal(manager, "htmlrender.runtime")
+                await assert_failure_visible()
+
+                recovered = await asyncio.wait_for(
+                    reload_plugin(
+                        "entari_plugin_htmlrender",
+                        {
+                            "provider": None,
+                            "startup": "off",
+                            "resources": {
+                                "local_access": {"allowed_paths": [directory]}
+                            },
+                        },
+                    ),
+                    timeout=10,
+                )
+                assert recovered, recovered.error
+                replacement_plugin = recovered.plugin
+                replacement_service = replacement_plugin._services["htmlrender.runtime"]
+                await wait_for_stage(replacement_service, "blocking")
+                await assert_handler_uses(replacement_service)
+                template = replacement_plugin.module.TemplateRef(
+                    template_root, "lifecycle.html"
+                )
+                rendered = await replacement_service.templates.render(
+                    template, {"title": "recovered"}
+                )
+                assert rendered.content == "<h1>recovered</h1>"
+                if failure_mode == "cleanup":
+                    assert close_calls == 2
+                assert await asyncio.wait_for(
+                    disable_plugin("entari_plugin_htmlrender"), timeout=10
+                )
+                await wait_for_component_removal(manager, "htmlrender.runtime")
 
             assert await unload_plugin_async("entari_plugin_htmlrender")
             await wait_for_stage(replacement_service, "finished")

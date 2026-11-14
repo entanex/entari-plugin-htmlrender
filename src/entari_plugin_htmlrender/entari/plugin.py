@@ -5,6 +5,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, cast
 
+import anyio
 from arclet.entari import (
     add_service,
     collect_disposes,
@@ -12,7 +13,10 @@ from arclet.entari import (
     metadata,
     plugin_config,
 )
-from arclet.entari.plugin import PluginRole, keeping
+from arclet.entari.plugin import PluginRole, get_plugin, keeping
+from arclet.entari.plugin.service import plugin_service
+from creart import it
+from launart import Launart
 
 from entari_plugin_htmlrender.composition import build_runtime_plan
 from entari_plugin_htmlrender.config import HtmlRenderConfig
@@ -20,15 +24,21 @@ from entari_plugin_htmlrender.providers.sdk import PLAYWRIGHT_PROVIDER_ID
 
 from .drawing_plugins import EntariDrawingPool
 from .providers import install_contract_providers
-from .service import HtmlRenderService
+from .service import HtmlRenderService, _ServiceState
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from launart import Service
 
+    from entari_plugin_htmlrender.adapters.resources.hosted import (
+        HostedAssetHttpServer,
+    )
     from entari_plugin_htmlrender.graphics.drawing_loader import DrawingSpec
-    from entari_plugin_htmlrender.graphics.drawings import DrawingSourceRegistry
+    from entari_plugin_htmlrender.graphics.drawings import (
+        DrawingRegistryFactory,
+        DrawingSourceRegistry,
+    )
     from entari_plugin_htmlrender.resources.ports import WorkerExecutor
     from entari_plugin_htmlrender.runtime import RenderRuntime
 
@@ -75,11 +85,15 @@ def register_plugin() -> HtmlRenderService:
     plan = build_runtime_plan(config)
     runtime: RenderRuntime | None = None
     sources: list[DrawingSourceRegistry] = []
+    state = _ServiceState()
 
     async def close_sources() -> None:
         # A failed staged composition has no service to perform its cleanup.
-        # Once built, use the runtime gate so admitted drawings finish first.
-        if runtime is not None:
+        # Once built, use the current generation's runtime gate so admitted
+        # drawings finish first. Closed generations are not retained here.
+        if state.current is not None:
+            await state.current._close(renew=False)
+        elif runtime is not None:
             await runtime.aclose()
         else:
             for source in sources:
@@ -100,10 +114,64 @@ def register_plugin() -> HtmlRenderService:
         return source
 
     runtime = plan.build_runtime(drawing_registry_factory=drawing_registry)
+    sources.clear()
+    owner = get_plugin()
+    # Subscriber provider records can survive atomic plugin reloads. Expose
+    # this owner's state on its module so they resolve the current generation.
+    vars(owner.module)["_htmlrender_service_state"] = state
+
+    async def build_generation(
+        drawing_registry_factory: DrawingRegistryFactory,
+    ) -> tuple[RenderRuntime, HostedAssetHttpServer | None]:
+        # The fresh plan is built only when the successor prepares.  In
+        # particular, configured drawing modules are not imported while the
+        # owner is disabled.
+        nonlocal runtime
+        source_start = len(sources)
+        try:
+            replacement_plan = build_runtime_plan(config)
+            replacement_runtime = replacement_plan.build_runtime(
+                drawing_registry_factory=drawing_registry_factory,
+            )
+        except BaseException as build_error:
+            partial_sources = sources[source_start:]
+            del sources[source_start:]
+            cleanup_errors: list[BaseException] = []
+            with anyio.CancelScope(shield=True):
+                for source in reversed(partial_sources):
+                    try:
+                        await source.aclose()
+                    except BaseException as cleanup_error:
+                        cleanup_errors.append(cleanup_error)
+            if cleanup_errors:
+                raise BaseExceptionGroup(
+                    "HTMLRender replacement composition and rollback both failed.",
+                    [build_error, *cleanup_errors],
+                ) from build_error
+            raise
+        runtime = replacement_runtime
+        sources.clear()
+        return replacement_runtime, replacement_plan.hosted_asset_server
+
+    def can_renew() -> bool:
+        manager = it(Launart)
+        return (
+            plugin_service.plugins.get(owner.id) is owner
+            and owner.available
+            and not owner.is_available
+            and manager.status.stage == "blocking"
+            and not manager.status.exiting
+        )
+
     service = HtmlRenderService(
         runtime,
         config,
         hosted_asset_server=plan.hosted_asset_server,
+        runtime_factory=build_generation,
+        drawing_registry_factory=drawing_registry,
+        owner=owner,
+        can_renew=can_renew,
+        state=state,
     )
     install_contract_providers()
     add_service(cast("Service", service))

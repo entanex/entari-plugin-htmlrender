@@ -27,7 +27,7 @@ from entari_plugin_htmlrender.rendering.contracts import (
 )
 from entari_plugin_htmlrender.resources import ResourceAccess
 
-from .service import HtmlRenderService
+from .service import HtmlRenderService, _ServiceState
 
 
 class _ContractProvider(Provider[Any]):
@@ -82,10 +82,19 @@ class _ContractProvider(Provider[Any]):
         manager = it(Launart)
         service_id = HtmlRenderService.id
         while True:
+            # Letoderea caches provider instances on existing subscribers.
+            # Read the current owner's fault instead of retaining stale state.
+            plugin = find_plugin("entari_plugin_htmlrender")
+            if plugin is not None:
+                state = cast(
+                    "_ServiceState | None",
+                    getattr(plugin.module, "_htmlrender_service_state", None),
+                )
+                if state is not None:
+                    state.ensure_available()
             try:
                 component = manager.get_component(service_id)
             except ValueError:
-                plugin = find_plugin("entari_plugin_htmlrender")
                 if plugin is None:
                     raise RuntimeError("Entari HTMLRender is not loaded.") from None
                 if not plugin.is_available:
