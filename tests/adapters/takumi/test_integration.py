@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from base64 import b64decode
 from pathlib import Path
+import re
 import struct
 
 import pytest
@@ -14,13 +16,17 @@ from tests.image_fixtures import encoded_image
 
 takumi_py = pytest.importorskip("takumi_py")
 
-_FONT_CANDIDATES = (
-    Path("/System/Library/Fonts/SFNS.ttf"),
-    Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
-    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    Path("/usr/share/fonts/TTF/DejaVuSans.ttf"),
-    Path(r"C:\Windows\Fonts\arial.ttf"),
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_KATEX_FONT_CSS = (
+    _PROJECT_ROOT
+    / "src"
+    / "entari_plugin_htmlrender"
+    / "templates"
+    / "markdown"
+    / "katex"
+    / "katex.min.b64_fonts.css"
 )
+_FONT_DATA_RE = re.compile(r"data:font/woff2;base64,([^\")]+)")
 
 
 async def test_takumi_native_boundary_renders_extension_output() -> None:
@@ -174,13 +180,11 @@ async def test_takumi_advanced_api_real_native_chain() -> None:
         await state.aclose()
 
 
-async def test_takumi_register_font_file_real_native() -> None:
-    font_path = next(
-        (candidate for candidate in _FONT_CANDIDATES if candidate.is_file()),
-        None,
-    )
-    if font_path is None:
-        pytest.skip("No standard system font is available for the Takumi font smoke.")
+async def test_takumi_register_font_file_real_native(tmp_path: Path) -> None:
+    match = _FONT_DATA_RE.search(_KATEX_FONT_CSS.read_text(encoding="utf-8"))
+    assert match is not None
+    font_path = tmp_path / "fixture.woff2"
+    font_path.write_bytes(b64decode(match.group(1)))
 
     state = await create_runtime_state(TakumiConfig(), resources=resource_service())
     api = TakumiAPIAdapter(state)
