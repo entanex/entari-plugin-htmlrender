@@ -21,6 +21,9 @@ ADVANCED_METHODS = {
     "compile_keyframes",
     "compile_node",
     "compile_stylesheet",
+    "cache_font",
+    "cached_fonts",
+    "clear_fonts",
     "encode_frames",
     "measure_compiled",
     "measure_html",
@@ -36,6 +39,7 @@ ADVANCED_METHODS = {
     "register_font",
     "register_font_file",
     "register_fonts",
+    "unregister_font",
 }
 ADVANCED_PROPERTIES = {
     "compiled_cache_stats",

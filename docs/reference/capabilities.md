@@ -38,7 +38,7 @@ async def render_svg(takumi: TakumiCapability) -> str:
         )
 ```
 
-受管理的 `TakumiSession` 提供 HTML raster、`render_svg_html()`、`register_font_file()`，以及只读的 `registered_font_families` 与`compiled_cache_stats`。这些操作在 runtime admission、lease 与稳定错误边界内。
+受管理的 `TakumiSession` 提供 HTML raster、`render_svg_html()`、`register_font_file()`，以及只读的 `registered_font_families` 与`compiled_cache_stats`。`register_font_file()` 接受 `unicode_range` 闭区间列表。这些操作在 runtime admission、lease 与稳定错误边界内。
 
 高级调用通过 `lease_api()` 获得 `TakumiAPI`，覆盖以下操作：
 
@@ -49,7 +49,7 @@ async def render_svg(takumi: TakumiCapability) -> str:
 | 测量 | `measure_html`、`measure_compiled`、`measure_node` |
 | SVG | `render_svg_html`、`render_svg_compiled`、`render_svg_node` |
 | 动画与帧 | `render_animation`、`render_sequence_at_time`、`encode_frames` |
-| 字体 | `register_font`、`register_fonts`、`register_font_file` |
+| 字体 | `register_font`、`register_fonts`、`register_font_file`、`cache_font`、`cached_fonts`、`unregister_font`、`clear_fonts` |
 
 ```python
 from entari_plugin_htmlrender.capabilities import TakumiCapability
@@ -62,6 +62,10 @@ async def compile_card(takumi: TakumiCapability) -> bytes:
 ```
 
 `TakumiCompiledDocument` 绑定创建它的 runtime 与当前 lease，不能传给另一个 runtime 或留到下次 lease 使用。高级调用和小型 session 都会在 lease 退出后失效，已生成的图像字节、SVG 字符串和统计快照可以保留。
+
+字体 API 的生命周期不同：`register_font*` 注册的字体在 runtime 生命周期内保持 pinned，直到 `unregister_font(name)` 或 `clear_fonts()`；`cache_font(font, key)` 注册的字体可以被 font-cache 空间淘汰，`cached_fonts(key)` 返回仍持有的 family tuple 或 `None`，`pin=True` 可将其转为 pinned。`cache_font()` 本次新增的 family 不会被同一调用淘汰，所以 `font_cache_max_bytes` 不是严格的进程内存峰值上限。
+
+`register_font_file()` 的 `subset_of` 是 0.4.0 兼容入口，会转发为 family `name` 并优先于 `name`。新代码应给同一族的每个子集使用相同 `name` 与不同 `unicode_range`。
 
 需要直接操作上游对象时，可显式使用`lease_native_renderer()`。安装对应 extra 后，`lease_page()`、`lease_browser()` 与 `lease_native_renderer()` 分别保留上游 `Page`、`Browser`、`takumi_py.Renderer` 类型，IDE 无需 `cast` 即可补全。native renderer 调用方仍承担同步执行、线程/worker 与底层错误语义；普通库导入不会加载这些可选引擎。
 
@@ -94,4 +98,4 @@ graphics:
 
 ## 租约规则
 
-任何 Page、Browser、Takumi session/native renderer 都只能在当前 async context 内使用。runtime cleanup 会等待活跃租约；离开上下文或插件热卸载后必须丢弃对象。
+任何 Page、Browser、Takumi session/native renderer 都只能在当前 async context 内使用。runtime cleanup 会等待活跃租约；离开上下文或插件热卸载后必须丢弃对象。通过 `cache_font()` 放入 native renderer 的字体随该 runtime 存在，调用方仍应在 `cached_fonts()` 中确认它尚未被空间淘汰。

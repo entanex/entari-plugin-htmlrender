@@ -15,6 +15,7 @@ from entari_plugin_htmlrender.capabilities.takumi import (
     TakumiCacheStats,
     TakumiRasterOptions,
     TakumiSvgOptions,
+    UnicodeRange,
     _TakumiLeaseGuard,
 )
 from entari_plugin_htmlrender.errors import (
@@ -287,6 +288,7 @@ class TakumiSessionAdapter:
         style: str | None = None,
         subset_of: str | None = None,
         generic_family: GenericFontFamily | None = None,
+        unicode_range: Sequence[UnicodeRange] | None = None,
         cache_policy: FileCachePolicy = FileCachePolicy.REVALIDATE,
     ) -> tuple[str, ...]:
         return await self._state.register_font_file(
@@ -296,6 +298,7 @@ class TakumiSessionAdapter:
             style=style,
             subset_of=subset_of,
             generic_family=generic_family,
+            unicode_range=unicode_range,
             cache_policy=cache_policy,
         )
 
