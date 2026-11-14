@@ -14,9 +14,11 @@ tags:
 
 ## 测试所有权边界
 
-仓库测试只覆盖本项目拥有的行为：输入与输出转换、组件接线、缓存和并发不变量、生命周期、错误翻译以及公开契约。第三方组件只在集成边界保留最小 smoke，用来确认当前锁定版本能够完成一次成功调用，并在必要时确认异常能被翻译到稳定边界。
+仓库测试只覆盖本项目拥有的行为：输入与输出转换、组件接线、缓存和并发不变量、生命周期、错误翻译以及公开契约。第三方组件只在集成边界保留最小 smoke，用来确认当前安装的依赖能够完成一次成功调用，并在必要时确认异常能被翻译到稳定边界。
 
 不得为了覆盖率重复验证第三方库已经拥有的格式矩阵、CSS/模板语义、像素算法、子进程参数语义或原生并发正确性。适配器单测应注入或模拟第三方边界，断言本项目传入了什么、如何处理返回值以及如何释放资源；第三方自身的行为由依赖锁定、上游测试和边界 smoke 承担。覆盖率不足时应补齐未验证的项目实现，不能增加上游行为测试充数。
+
+新增 case 应能说明它防止哪一种本仓库回归，同一行为选择一个主要层级验证。不要把上游 API 清单、实现代码的字符串或 AST 切片当成行为契约。静态守卫只用于明确的仓库边界，例如模块依赖方向、公开导出和打包资源；真实入口已有验证时，不再断言它的内部写法。
 
 ## 本地 profile
 
@@ -82,7 +84,7 @@ Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，�
 
 - 修改 `pyproject.toml`、`uv.lock`、包内资源、入口点或发布 workflow：运行 `make build-artifacts`；该 target 内部执行 `uv build --no-sources` 与 pinned `twine==7.0.0 check`；
 - package resource 门禁必须在仓库外、清空 `PYTHONPATH` 后安装真实 wheel；Python 3.11–3.14 均验证 package resources 与 Entari/preparation smoke，Python 3.12 另验证 sdist；
-- wheel/`RECORD` 检查 package resources 均存在且非空；bare-core smoke 断言 Playwright、Takumi、Pillow、Skia 与宿主框架插件依赖均未安装；`[takumi]` 校验锁定版本并执行真实 native PNG，`[pillow,skia]` 验证独立 `RasterScene` 能力；
+- wheel/`RECORD` 检查 package resources 均存在且非空；bare-core smoke 断言 Playwright、Takumi、Pillow、Skia 与宿主框架插件依赖均未安装；`[takumi]` 校验最低版本要求并执行真实 native PNG，`[pillow,skia]` 验证独立 `RasterScene` 能力；
 - `[all]` 隔离安装后扫描完整 distribution 集合，确认可选能力及传递依赖不含 NoneBot；metadata 校验同样覆盖所有 extra，归档检查拒绝已移除的 backend 文件；
 - 修改文档、MkDocs/Zensical 配置、文档依赖、Make target 或 docs workflow：运行 `make docs-build`，该 target 执行 strict build；
 - 修改插件入口、metadata、config 或依赖：除单测外必须等待完整 Entari load 矩阵；

@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 from typing import get_type_hints
 
-from entari_plugin_htmlrender.adapters.takumi.advanced import TakumiAPIAdapter
 from entari_plugin_htmlrender.capabilities import (
     TakumiAPI,
     TakumiCapability,
@@ -75,25 +74,6 @@ def test_advanced_takumi_api_exposes_the_complete_explicit_surface() -> None:
     assert properties == ADVANCED_PROPERTIES
     assert all(
         inspect.iscoroutinefunction(getattr(TakumiAPI, name)) for name in methods
-    )
-
-
-def test_advanced_takumi_adapter_implements_the_protocol_surface() -> None:
-    methods = {
-        name
-        for name, value in vars(TakumiAPIAdapter).items()
-        if callable(value) and not name.startswith("_")
-    }
-    properties = {
-        name
-        for name, value in vars(TakumiAPIAdapter).items()
-        if isinstance(value, property)
-    }
-
-    assert methods == ADVANCED_METHODS
-    assert properties == ADVANCED_PROPERTIES
-    assert all(
-        inspect.iscoroutinefunction(getattr(TakumiAPIAdapter, name)) for name in methods
     )
 
 
