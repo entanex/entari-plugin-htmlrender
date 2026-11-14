@@ -96,20 +96,28 @@ async def send_logo(service: HtmlRenderService):
 
 `PublishedResource` 原子携带 URL 与该精确 URL 所需的请求头。调用方不再从 side-table 单独取出 URL，因而不会静默丢失授权。其身份只在 `publish()` 的 async context 内有效，不能在 lease 退出后缓存或返回 URL。
 
-### 可选能力与 Graphics
+### 可选能力、Graphics 与 Python 绘图
 
 ```python
 from entari_plugin_htmlrender.entari import HtmlRenderService
-from entari_plugin_htmlrender.graphics import RasterScene
+from entari_plugin_htmlrender.graphics import DrawingRenderer, RasterScene
 
 async def rasterize_scene(service: HtmlRenderService, scene: RasterScene):
     image = await service.graphics.rasterize(scene)
     async with service.capabilities.playwright.lease_page() as page:
         await page.set_content("<strong>ready</strong>")
     return image
+
+async def render_profile(drawings: DrawingRenderer):
+    return await drawings.render(
+        "profile",
+        {"name": "Ada"},
+        width=640,
+        height=360,
+    )
 ```
 
-Graphics backend 只在配置与 composition 中选择；业务调用不分支 Pillow/Skia。切换 HTML Provider 同样不改变上述调用。
+`GraphicsRenderer` 与 `DrawingRenderer` 是两条独立入口：前者把 backend-neutral `RasterScene` 转成图片，后者按配置名称执行受信任的 Pillow/Skia 原生 Python 函数。backend 只在配置与 composition 中选择；业务调用不分支 Pillow/Skia。切换 HTML Provider 同样不改变上述调用。完整配置与安全边界见[绘图后端](../configuration/graphics/index.md)。
 
 ## 领域词汇
 
@@ -134,7 +142,8 @@ Graphics backend 只在配置与 composition 中选择；业务调用不分支 P
 - `TemplateRenderer` 只负责模板到 `RenderedHtml`。
 - `ResourceAccess` 使用 `ResourceRef`、`ResourceContent` 与 `PublishedResource` 分离定位、载荷与发布身份。
 - `GraphicsRenderer` 隐藏 Pillow/Skia selection。
-- `HtmlRenderService` 是显式 concrete Entari service，暴露 `preparation`、`renderer`、`templates`、`resources`、`graphics` 与 `capabilities`；中立调用契约不包含 `startup()`、`probe()` 或 `aclose()`。
+- `DrawingRenderer` 按配置名称租赁受信任 Python 入口并返回 `RenderedImage`；它不解析 HTML，也不属于 HTML Provider。
+- `HtmlRenderService` 是显式 concrete Entari service，暴露 `preparation`、`renderer`、`templates`、`resources`、`graphics`、`drawings` 与 `capabilities` 七个入口；中立调用契约不包含 `startup()`、`probe()` 或 `aclose()`。
 - `RenderRuntime`、composition plan、bindings、admission gate、catalog、observer 与 discovery 都是 advanced/composition API，不进入根导出。
 
 ## 失败语义

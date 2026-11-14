@@ -1,6 +1,6 @@
 ---
 title: Entari 0.2 能力概览与升级
-description: Python 与 Entari 基线、0.1 升级步骤和 0.2 公共能力
+description: Python 与 Entari 基线、0.1 升级步骤、0.2 公共能力与 Takumi 0.4
 ---
 
 # Entari 0.2 能力概览与升级
@@ -16,7 +16,7 @@ uv run playwright install chromium
 
 按实际能力选择 `playwright`、`takumi`、`pillow`、`skia`、`filehost`、`sentry` 或 `prometheus` extra。升级 Playwright client 后，需要在同一环境中重新安装浏览器。`0.1.0` 使用 Python 3.10 与较早的 Entari 基线；升级到 `0.2.x` 时必须同步调整 Python 与 Entari。
 
-原有 `HtmlRenderService.renderer`、`.templates`、`.resources`、`.graphics` 与 `.capabilities` 入口保持可用。新增 `.preparation: HtmlPreparer` 后，可以在没有 HTML Provider 的 core 安装中生成 `PreparedHtml`，再把同一对象交给 `rasterize_prepared()`。
+`HtmlRenderService` 现提供 `preparation`、`renderer`、`templates`、`resources`、`graphics`、`drawings` 与 `capabilities` 七个稳定入口。新增 `.preparation: HtmlPreparer` 后，可以在没有 HTML Provider 的 core 安装中生成 `PreparedHtml`，再把同一对象交给 `rasterize_prepared()`。
 
 ## 0.2 能力
 
@@ -27,11 +27,12 @@ uv run playwright install chromium
 | Template | `service.templates` / `TemplateRenderer` | `TemplateRef`、变量、可选 filters 与 extensions |
 | Resources | `service.resources` / `ResourceAccess` | 显式 `ResourceRef`、精确 URL 授权、cache 与 publication lease |
 | Playwright | `capabilities.playwright` | managed page/browser lease；远程 CDP/WS 与文件资源传输 |
-| Takumi | `capabilities.takumi` | HTML/compiled/node/SVG/animation/font 操作，另保留 raw renderer lease |
+| Takumi | `capabilities.takumi` | 固定 `takumi-py==0.4.0`；HTML/compiled/node/SVG/animation/font 操作，另保留 raw renderer lease |
 | Graphics | `service.graphics` / `GraphicsRenderer` | Pillow 与 Skia 共享 `RasterScene` contract，可同时启用 |
+| Drawing | `service.drawings` / `DrawingRenderer` | 按配置名称执行受信任的 Pillow/Skia 原生 Python 绘图函数 |
 | Provider SDK | `entari_plugin_htmlrender.providers.v2` | 独立的发现、availability、resource strategy 与 composition 契约 |
 
-Playwright 适合浏览器布局、JavaScript、导航与 selector 截图；Takumi 适合不依赖浏览器语义的静态 HTML、SVG、动画与动态字体。Pillow/Skia 只实现独立的 `RasterScene` 图形契约，不属于 HTML Provider。
+Playwright 适合浏览器布局、JavaScript、导航与 selector 截图；Takumi 适合不依赖浏览器语义的静态 HTML、SVG、动画与动态字体。Pillow/Skia 同时支持两条独立的绘图路径：`GraphicsRenderer` 执行 backend-neutral `RasterScene`，`DrawingRenderer` 执行按名称配置且可直接调用 Pillow/Skia 原生 API 的 Python 函数。两者都不属于 HTML Provider。完整配置与安全边界见[绘图后端](../configuration/graphics/index.md)。
 
 ## Markdown 数学兼容变化
 
@@ -43,7 +44,7 @@ Arithmatex 生成的公式容器使用公开的 `.arithmatex` class，并带有�
 
 ## DI 与生命周期
 
-业务 handler 可以直接注入 `HtmlRenderer`、`TemplateRenderer`、`HtmlPreparer`、`ResourceAccess` 或 `GraphicsRenderer`。需要多个入口时仍可注入 concrete `HtmlRenderService`。这些对象均绑定当前 plugin lifetime，不应保存在模块级全局变量中。
+业务 handler 可以直接注入 `HtmlRenderer`、`TemplateRenderer`、`HtmlPreparer`、`ResourceAccess`、`GraphicsRenderer` 或 `DrawingRenderer`。需要多个入口时仍可注入 concrete `HtmlRenderService`。这些对象均绑定当前 plugin lifetime，不应保存在模块级全局变量中。
 
 配置变化通过 Entari 默认的 staged reload 重建 composition；导入、配置校验和 composition 失败会保留旧插件。promote 后的 service startup/probe 失败不会回滚已经 promote 的插件，详见 [Runtime 生命周期](../reference/runtime.md)。Launart 的 `preparing` 与 `cleanup` 负责启动、停止接纳、排空与关闭；不要手工驱动 service 内部 runtime。
 
@@ -57,11 +58,27 @@ plugins:
       backend: pillow
 ```
 
-`backend` 必须出现在 `backends` 中；省略时使用首项作为 `service.graphics`。独立后端仍可通过 `service.capabilities.pillow` 与 `.skia` 调用。
+`backend` 必须出现在 `backends` 中；省略时使用首项作为 `service.graphics`。独立后端仍可通过 `service.capabilities.pillow` 与 `.skia` 调用。`service.drawings` 与 `service.graphics` 指向不同的领域入口；前者按名称加载受信任 Python 代码，后者执行可序列化的 `RasterScene`。两条路径共用 `graphics.max_pixels` 与 `graphics.max_concurrency`，但 `graphics.max_commands` 只限制 `RasterScene.commands`。
 
-## Takumi managed API
+## Takumi 0.4 managed API
 
-`TakumiSession` 保留原来的三个操作。`capabilities.takumi.lease_api()` 另行提供完整高级 API，包括 compile、measure、HTML/node/SVG、animation、frame 与 font 操作。managed session、API 与 compiled document 只在对应 lease 内有效；需要保留到上下文外的代码应把操作移回 `async with` 内。
+`[takumi]` extra 当前固定 PyPI 已发布的 `takumi-py==0.4.0`。`TakumiSession` 保留小型调用面；`capabilities.takumi.lease_api()` 另行提供完整高级 API，包括 compile、measure、HTML/node/SVG、animation、frame 与 font 操作。`TakumiCompiledDocument` 是本插件的稳定 lease-scoped 包装，承载 native compiled node/stylesheets；managed session、API 与 compiled document 都只在对应 lease 内有效，需要保留到上下文外的代码应把操作移回 `async with` 内。
+
+### Font subsets、cache 与 release
+
+配置中的 `fonts[].unicode_range` 与 `register_font_file(..., unicode_range=...)` 都接受闭区间码位列表，例如 `((0x0000, 0x007F),)`。同一字体族的子集文件应使用相同 `name`，并分别声明 `unicode_range`，让 Takumi 按字符选择覆盖该码位的文件。`subset_of` 作为兼容入口仍可读取，但上游已将相应 native 参数标记为弃用；新配置和代码应迁移到 `name` + `unicode_range`。
+
+`lease_api()` 提供 `cache_font(font, key)`、`cached_fonts(key, pin=False)`、`unregister_font(name)` 与 `clear_fonts()`。`register_font*` 注册的字体在 runtime 内保持 pinned，直到显式释放；`cache_font()` 的条目可按来源 key 查询并受空间淘汰，`pin=True` 可将其转为 pinned。
+
+`provider_config.cache_max_bytes` 控制 native resource cache，`null` 使用上游 64 MiB 默认值，`0` 禁止保留。`provider_config.font_cache_max_bytes` 控制 `cache_font()` 的淘汰预算，`null` 表示无上限；它不是严格的进程内存峰值上限，且 pinned 字体不参与空间释放。字段、调优与诊断见 [Takumi 配置](../configuration/providers/takumi.md)和[缓存生命周期](../guides/cache-lifecycle.md)。
+
+### Animation FPS
+
+`TakumiAPI.render_animation()` 在进入 native rendering 前限制帧率：WebP 与 APNG 不得超过 `90` fps，GIF 不得超过 `50` fps。超出限制会失败，不会截断或静默降帧。
+
+### 稳定版与 dev 预览边界
+
+PyPI `0.4.0` 不包含上游 `dev` 分支新增的 `Document`、`RasterImage` 与 MathJax API。插件不公开这些预览接口；上文 `TakumiCompiledDocument` 是本插件的稳定包装，不能据此假定存在上游 `Document`。Markdown 公式仍通过 KaTeX JavaScript 渲染，因此需要 Playwright；Takumi 会以 `UnsupportedDocumentFeatureError` 拒绝含 JavaScript 要求的文档。需要静态后端输出公式时，应先提供不依赖 JavaScript 的预排版 HTML/SVG。
 
 原生 Playwright 与 Takumi 类型只用于静态检查。普通 core import 不会加载浏览器、native engine 或对应可选依赖。
 
