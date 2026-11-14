@@ -15,7 +15,7 @@ uv run playwright install chromium
 
 在 Debian / Ubuntu 或基于它们的容器中，可以用 `uv run playwright install --with-deps chromium` 一并安装系统依赖。
 
-如果使用 Takumi：
+如果使用 Takumi，`[takumi]` extra 会安装已发布的 `takumi-py==0.4.0`：
 
 ```bash
 uv add "entari-plugin-htmlrender[takumi]>=0.2.0,<0.3"
@@ -62,7 +62,7 @@ HTML、纯文本和模板分别使用 `rasterize_html()`、`rasterize_text()`、
 ## 后端与限制
 
 - **Playwright**：使用浏览器排版，支持 JavaScript、Markdown 公式和网页截图，也可以连接远程浏览器。需要安装浏览器及其系统依赖。
-- **Takumi**：不需要浏览器，适合静态内容渲染。HTML、CSS 的支持范围有限，不执行 JavaScript，也不支持网页导航和 CSS 选择器截图。中文等字符需要额外配置字体；安装时也要留意 `takumi-py` 对目标平台的支持。
+- **Takumi**：不需要浏览器，适合静态内容渲染。HTML、CSS 的支持范围有限，不执行 JavaScript，也不支持网页导航和 CSS 选择器截图。中文等字符需要额外配置字体；`takumi-py` 0.4.0 提供主流 Linux、macOS 与 Windows 原生 wheel。
 - **Pillow / Skia**：用 Python 函数绘图，支持按名称加载 `.py` 文件或模块。在 Entari 中由插件系统管理模块引用和可选热重载，也保留 `RasterScene` 场景接口。不解析 HTML 或 Markdown，配置见[Python 绘图](docs/configuration/graphics/index.md)。
 
 ### 数学公式
@@ -70,6 +70,8 @@ HTML、纯文本和模板分别使用 `rasterize_html()`、`rasterize_text()`、
 Markdown 公式通过 KaTeX 渲染，目前需要选择 **Playwright**。行内公式可写为 `$x$` 或 `\(x\)`；块级公式使用独占段落的 `$$...$$` 或 `\[...\]`。`$ x $` 会保留为普通文本。
 
 **Takumi 目前不能直接渲染 Markdown 数学公式。** 这条渲染流程依赖 JavaScript，使用 Takumi 渲染含公式的 Markdown 会抛出 `UnsupportedDocumentFeatureError`。插件尚未提供将公式自动转换成静态 SVG 或图片的功能。
+
+`takumi-py` 上游 `dev` 分支中的 `Document`、`RasterImage` 与 MathJax 仍在开发，尚未随 PyPI 0.4.0 发布，因此当前插件的 Markdown 公式仍使用 Playwright 的 KaTeX 渲染。
 
 其他差异见[后端选择](docs/start/choosing-provider.md)，Takumi 的详细说明见 [Takumi 配置](docs/configuration/providers/takumi.md)。
 

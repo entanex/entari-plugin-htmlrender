@@ -3,24 +3,32 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
-and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
+and versioning follows the [release policy](docs/project/release.md).
 
 <!-- insertion marker -->
-## [v0.2.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0) - 2026-11-08
+## [v0.2.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0) - Unreleased
 
 <small>[Compare with v0.1.0](https://github.com/entanex/entari-plugin-htmlrender/compare/v0.1.0...v0.2.0)</small>
 
 ### Added
 
+- expose managed `cache_font`, `cached_fonts`, `unregister_font`, and `clear_fonts` through `TakumiAPI`, and support `unicode_range` in both capability leases and configured fonts.
+- render named Python drawing functions through `DrawingRenderer` and `graphics.drawings`, with native Pillow/Skia canvases and optional source reload.
+- load standalone drawing sources in isolated module generations, and use Entari's plugin system for canonical imports, shared helpers, dependency reloads, and drawing lifecycle ownership.
 - add the plugin-scoped `HtmlPreparer` caller contract through `service.preparation`, with explicit `prepare_html`, `prepare_text`, `prepare_markdown`, and `prepare_template` stages feeding `rasterize_prepared()`.
 - expose complete managed Takumi compile, measure, SVG, node, animation, frame, and font operations through `lease_api()`, with lease and compiled-document ownership guards.
 - support simultaneous Pillow and Skia backends with typed capabilities and independent budgets.
 - expose independent template-variable and URL resolution with immutable, exact URL authorization mappings.
 - forward custom Jinja filters and extensions through template rendering and preparation.
-- inject `HtmlRenderer`, `TemplateRenderer`, `HtmlPreparer`, `ResourceAccess`, and `GraphicsRenderer` directly in Entari handlers and refresh them with the plugin lifecycle.
+- inject `HtmlRenderer`, `TemplateRenderer`, `HtmlPreparer`, `ResourceAccess`, `GraphicsRenderer`, and `DrawingRenderer` directly in Entari handlers and refresh them with the plugin lifecycle.
 
 ### Changed
 
+- pin the optional Takumi backend to the published `takumi-py==0.4.0`, with Takumi 2.17 rendering behavior and removal of upstream's deprecated resource APIs.
+- expose native resource and font-cache budgets through `provider_config.cache_max_bytes` and `provider_config.font_cache_max_bytes`. `null` retains upstream defaults: 64 MiB for resource caching and no limit for the evictable font cache.
+- register font subsets under a shared `name` with inclusive `unicode_range` codepoint pairs. Existing `subset_of` configuration remains compatible and takes precedence over `name`.
+- retain separate native resource, native font, and compiled HTML/CSS caches. Native resource caching includes repeated `data:` URI images; the font-cache budget guides eviction rather than bounding peak memory, and fonts added by the current call or pinned by registration are not evicted for space.
+- enforce upstream animation limits of 90 fps for WebP/APNG and 50 fps for GIF.
 - retain native Playwright and Takumi static types without eagerly importing optional engines.
 - use Python 3.11 built-in exception groups and string enums.
 - require Python `>=3.11,<4.0` and Entari `>=0.19.4,<0.20.0`, with release validation across Python 3.11–3.14.
@@ -36,6 +44,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - preserve resource URL fragments and decode local URL paths before authorization, while keeping filehost request headers scoped to the exact fragment-free request URL.
 - harden release workflow dispatch ([d224199](https://github.com/entanex/entari-plugin-htmlrender/commit/d2241991fd2428fa259f685d72982428834766a1) by Tacrolimus).
 - strengthen distribution metadata and CI contracts for the Python/Entari support matrix and pinned native extras.
+
+### Documentation
+
+- document Takumi 0.4.0's supported wheel platforms, Unicode font subsets, cache and release lifecycles, and animation limits.
+- distinguish published Takumi capabilities from the upstream `dev` previews of `Document`, `RasterImage`, and MathJax. This release still uses Playwright for Markdown formulas.
+- include named drawings, shared-package imports, and initializer-only packages in the 0.2 migration and service documentation.
 
 <!-- insertion marker -->
 ## [v0.1.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.1.0) - 2026-08-14
