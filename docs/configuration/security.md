@@ -12,6 +12,7 @@ htmlrender 会处理不可信 HTML、模板变量、文件路径和 URL。安全
 - 保持 `resources.local_access.allow_any_path: false`。
 - `allowed_paths` 只加入业务所需的最小只读目录。
 - `template_base` 只定位相对路径，不授予目录权限。
+- 文件系统模板会在每次读取前校验解析符号链接后的实际文件，包含 `include`、`extends` 与 `import`；可重载模板的缓存也会重新校验链接目标。
 - 不把调用方输入直接拼接为模板名或本地路径。
 
 ## 网络
