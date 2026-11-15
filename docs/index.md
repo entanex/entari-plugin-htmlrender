@@ -10,6 +10,12 @@ hide:
 
 <div class="htmlrender-home">
 
+<a class="htmlrender-announcement" href="configuration/providers/takumi/">
+  <strong>新增 Takumi 支持</strong>
+  <span>静态内容渲染，无需浏览器。</span>
+  <span class="htmlrender-announcement__link">了解详情</span>
+</a>
+
 <section class="htmlrender-hero" aria-labelledby="htmlrender-hero-title">
   <div class="htmlrender-hero__graphic" aria-hidden="true">
     <svg viewBox="0 0 1440 760" preserveAspectRatio="xMidYMid slice">
@@ -44,23 +50,19 @@ hide:
 
   <div class="htmlrender-hero__inner">
     <div class="htmlrender-hero__content">
-      <p class="htmlrender-eyebrow">
-        <span></span>
-        Entari rendering infrastructure
-      </p>
       <h1 id="htmlrender-hero-title">
-        把内容渲染成<strong>图片。</strong>
+        把内容渲染成图片。
       </h1>
       <p class="htmlrender-hero__lead">
-        用 Takumi 将 HTML、Markdown、纯文本与 Jinja 模板渲染成图片，无需安装浏览器。需要脚本或网页截图时，连接远程 Playwright。
+        为 Entari 渲染 HTML、Markdown、文本与模板，也支持用 Pillow 和 Skia 绘图。
       </p>
       <div class="htmlrender-hero__actions">
         <a class="md-button md-button--primary" href="start/quickstart/">
-          开始第一次渲染
+          快速开始
           <span aria-hidden="true">→</span>
         </a>
         <a class="md-button" href="guides/">
-          浏览使用指南
+          使用指南
         </a>
       </div>
       <ul class="htmlrender-hero__facts" aria-label="项目能力概览">
@@ -112,24 +114,3 @@ hide:
 </section>
 
 </div>
-
-## 从 Takumi 开始
-
-[快速开始](start/quickstart.md)使用 Takumi 生成第一张图片。[Takumi 配置](configuration/providers/takumi.md)说明中文字体、缓存、SVG、测量与动画接口；需要 JavaScript、网页导航或 Markdown 数学公式时，使用[远程 Playwright](configuration/remote-playwright.md)。
-
-!!! warning "本地 Playwright 弃用计划"
-
-    本地 Playwright 浏览器安装、管理与启动将在不久的将来弃用，后续仅保留 remote support。当前版本仍支持本地模式，尚未确定移除版本或日期。远程连接仍需 `[playwright]` Python 客户端，但 Bot 环境无需安装浏览器。
-
-## 按任务进入
-
-| 现在要做什么 | 从这里开始 |
-| --- | --- |
-| 安装插件并完成第一张图片 | [开始使用](start/index.md) |
-| 渲染 HTML、Markdown、文本、模板或图形场景 | [使用指南](guides/index.md) |
-| 配置 Provider、资源策略并部署到生产环境 | [配置与部署](configuration/index.md) |
-| 核对类型、方法、返回值与失败语义 | [API 参考](reference/index.md) |
-| 实现第三方 Provider 或理解资源管线 | [扩展开发](extensions/index.md) |
-| 贡献代码、维护 CI 或发布版本 | [维护者指南](project/index.md) |
-
-首次使用时依次阅读“开始使用”和“使用指南”；其余章节按任务查阅，不需要线性通读。
