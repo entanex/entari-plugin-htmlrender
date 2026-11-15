@@ -1,6 +1,7 @@
 ---
 title: 资源管线
 description: 从 parse/preparation 到 fetch、materialize、publish 与 executor
+icon: lucide/git-fork
 ---
 
 # 资源管线

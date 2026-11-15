@@ -1,6 +1,7 @@
 ---
 title: 渲染内容
 description: 通过 HtmlRenderer rasterize HTML、Markdown、文本和 Jinja 模板
+icon: lucide/layout-template
 ---
 
 # 渲染内容

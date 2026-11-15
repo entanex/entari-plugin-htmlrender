@@ -1,6 +1,7 @@
 ---
 title: 术语表
 description: htmlrender 的唯一领域词汇
+icon: lucide/book-a
 ---
 
 # 术语表

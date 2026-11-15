@@ -1,6 +1,7 @@
 ---
 title: 最佳实践
 description: 显式 contract、稳定错误、资源边界与 capability 租约
+icon: lucide/badge-check
 ---
 
 # 最佳实践

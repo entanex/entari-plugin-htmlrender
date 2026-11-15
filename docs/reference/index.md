@@ -1,15 +1,18 @@
 ---
 title: API 参考
 description: 公共类型、方法、返回值、能力与失败语义的稳定契约
+icon: lucide/book-marked
 ---
 
 # API 参考
 
+按“取得运行时 → 准备内容与资源 → 执行渲染 → 使用后端专属能力”的调用顺序查阅。只需要某个对象的签名或失败语义时，可以直接进入对应页面。
+
 | 主题 | 页面 |
 | --- | --- |
 | Runtime、Entari service 与生命周期 | [Runtime API](runtime.md) |
-| 内容、模板与图片产物 | [渲染 API](rendering.md) |
 | `HtmlPreparer`、`PreparedHtml` 与资源访问 | [Preparation 与资源 API](preparation.md) |
+| 内容、模板与图片产物 | [渲染 API](rendering.md) |
 | 专属能力 | [Capability 参考](capabilities.md) |
 | 术语 | [术语表](glossary.md) |
 

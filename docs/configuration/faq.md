@@ -1,6 +1,7 @@
 ---
 title: 常见问题
 description: Provider、service、capability 与部署边界的常见选择
+icon: lucide/circle-question-mark
 ---
 
 # 常见问题

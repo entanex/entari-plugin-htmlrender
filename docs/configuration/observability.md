@@ -1,6 +1,7 @@
 ---
 title: 可选依赖与可观测性
 description: 直接 Sentry SDK 与 Prometheus client 集成
+icon: lucide/activity
 ---
 
 # 可选依赖与可观测性

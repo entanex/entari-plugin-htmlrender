@@ -1,6 +1,7 @@
 ---
 title: 快速开始
 description: 使用 Takumi 在 Entari 中完成第一次无浏览器渲染
+icon: lucide/zap
 ---
 
 # 快速开始

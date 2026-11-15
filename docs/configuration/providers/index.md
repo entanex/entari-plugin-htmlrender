@@ -1,6 +1,7 @@
 ---
 title: HTML Provider
 description: Takumi、远程 Playwright 与第三方 Provider 的选择和配置入口
+icon: lucide/boxes
 ---
 
 # HTML Provider

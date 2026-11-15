@@ -1,6 +1,7 @@
 ---
 title: 安全须知
 description: 本地文件、远程资源、浏览器导航与输出预算的信任边界
+icon: lucide/shield-alert
 ---
 
 # 安全须知

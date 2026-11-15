@@ -1,6 +1,7 @@
 ---
 title: Preparation 与资源 API
 description: HtmlPreparer、PreparedHtml、ResourceAccess 与 scoped publication
+icon: lucide/list-tree
 ---
 
 # Preparation 与资源 API

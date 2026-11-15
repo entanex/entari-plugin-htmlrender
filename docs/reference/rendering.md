@@ -1,6 +1,7 @@
 ---
 title: 渲染 API
 description: HtmlRenderer、TemplateRenderer、artifact 与稳定错误
+icon: lucide/monitor-down
 ---
 
 # 渲染 API

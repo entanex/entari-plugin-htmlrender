@@ -11,10 +11,10 @@ Skia 能绘制与 Pillow 相同的 `RasterScene`，也会给 Python 绘图函数
 ## 安装
 
 ```bash
-uv add "entari-plugin-htmlrender[skia]>=0.2.0,<0.3"
+uv add "entari-plugin-htmlrender[skia]>=0.2.0"
 ```
 
-`skia` extra 安装 `skia-python>=144.0.post2`。缺少依赖却启用了 Skia 时，渲染会抛出带安装提示的 `GraphicsBackendUnavailableError`，不会改用 Pillow。Entari 会预加载配置的绘图源码；如果源码本身导入了缺失的 Skia，错误会提前发生在插件加载阶段。
+`skia` extra 安装 `skia-python>=144.0.post2`。缺少依赖却启用了 Skia 时，渲染会抛出带安装提示的 `GraphicsBackendUnavailableError`，不会改用 Pillow。绘图源码导入 `skia` 时，缺失依赖也可能提前在 HTMLRender 加载阶段报错。
 
 ## 平台约束
 
@@ -54,10 +54,15 @@ uv run python3 -c "import skia"
 ## 启用
 
 ```yaml
+basic:
+  external_dirs:
+    - examples/graphics_render
+
 plugins:
   htmlrender:
     provider: null
     graphics:
+      backends: [skia]
       drawings:
         skia-profile:
           backend: skia
@@ -68,7 +73,14 @@ plugins:
 
 ## Python 绘图
 
-绘图函数接收 `SkiaCanvas`，必须是同步函数 `draw(canvas, data) -> None`：
+绘图函数接收 `SkiaCanvas`，必须同步执行并返回 `None`。回调可用的精确公开上下文如下：
+
+| 属性 | 类型 | 语义 |
+| --- | --- | --- |
+| `canvas.canvas` | `skia.Canvas` | 当前 raster surface 的绘图画布，已填充调用方给出的背景 |
+| `canvas.surface` | `skia.Surface` | 用于本次编码的 raster surface |
+| `canvas.width` | `int` | 本次调用的物理像素宽度 |
+| `canvas.height` | `int` | 本次调用的物理像素高度 |
 
 ```python
 from __future__ import annotations
@@ -83,6 +95,7 @@ if TYPE_CHECKING:
     from entari_plugin_htmlrender.adapters.skia import SkiaCanvas
 
 def draw(canvas: SkiaCanvas, data: Mapping[str, object]) -> None:
+    title = str(data.get("title", "Skia"))
     paint = skia.Paint(AntiAlias=True)
     paint.setColor(skia.ColorSetARGB(255, 139, 92, 246))
     canvas.canvas.drawCircle(
@@ -91,14 +104,29 @@ def draw(canvas: SkiaCanvas, data: Mapping[str, object]) -> None:
         48,
         paint,
     )
+    text_paint = skia.Paint(AntiAlias=True)
+    text_paint.setColor(skia.ColorSetARGB(255, 249, 250, 251))
+    typeface = skia.Typeface.MakeFromName(None)
+    blob = skia.TextBlob.MakeFromString(title, skia.Font(typeface, 28))
+    canvas.canvas.drawTextBlob(blob, 40, 64, text_paint)
 ```
 
-`canvas.canvas` 是当前 `skia.Surface` 的绘图画布，`canvas.surface` 是这次渲染用的 surface。可以直接使用 `Paint`、`Rect`、`Path`、`Font` 等 Skia 接口，但不要把本次画布保存为模块级全局值。完整代码见 `examples/graphics_render/skia_card.py`，调用方式见 `examples/graphics_render/render_drawing.py`。
+上例的配置键是 `skia-profile`，调用方使用 `await drawings.render("skia-profile", data, width=640, height=360)` 执行它。函数必须声明至少两个位置参数，并能只用两个位置参数完成调用，第二个参数是本次 `Mapping[str, object]`。不能把回调写成 `async def`，也不要用返回值传递 surface 或 image；图片编码由 `DrawingRenderer` 完成。业务代码应从 `entari_plugin_htmlrender.adapters.skia` 导入 `SkiaCanvas`，不要依赖 renderer 内部的 facade。
+
+`canvas.canvas` 可以调用 Skia 公开的 `Paint`、`Rect`、`Path`、`Font` 等 native API，且应保留 surface 的宽高。一次渲染的 canvas 与 surface 只在该回调期间有效，不要保存为模块级全局值，也不要在回调返回后继续由后台线程修改。完整示例见仓库的 `examples/graphics_render/skia_card.py`；该文件还演示圆角矩形、描边和文本绘制。
+
+配置既可使用 `path`，也可使用 `module`，但不能同时提供两者。路径、模块加载、多个绘图名称和源码重载的完整步骤见 [Python 绘图](../../guides/python-drawing.md)；同时启用 Pillow 与 Skia 并按名称选择的方式见[多引擎与切换](../../guides/switching-engines.md)。
 
 ## 运行规则
 
-Skia 不进入 `provider`。调用方可以使用 `service.graphics`、`service.capabilities.skia`、`service.drawings`，也可以注入 `GraphicsRenderer` 或 `DrawingRenderer`。`graphics.max_pixels` 限制场景和绘图画布的像素数，`graphics.max_concurrency` 限制 Skia 的并发任务数；`graphics.max_commands` 只用于 `RasterScene`。
+Skia 不进入 HTML 的 `provider`。调用方可以使用 `service.graphics`、`service.capabilities.skia`、`service.drawings`，也可以注入 `GraphicsRenderer` 或 `DrawingRenderer`。`graphics.max_pixels` 限制场景和绘图画布的像素数，`graphics.max_concurrency` 限制 Skia 的场景与回调合计并发数，Pillow 单独计数；`graphics.max_commands` 只用于 `RasterScene`。
 
-固定场景不会自动改用其他后端：Skia 是默认后端但依赖不可用时，通过 `service.graphics` 调用会抛出 `GraphicsBackendUnavailableError`；Skia 只作为次级后端且不可用时，`service.capabilities.skia` 会抛出 `CapabilityUnavailableError`。固定场景执行失败会转换为 `RasterBackendExecutionError`，Python 绘图或其编码失败会转换为 `DrawingBackendExecutionError`；绘图函数是异步函数、返回非 `None` 值或无法加载时，会产生对应的绘图错误。
+固定场景不会自动改用其他后端：Skia 是默认后端但依赖不可用时，通过 `service.graphics` 调用会抛出 `GraphicsBackendUnavailableError`；Skia 只作为次级后端且不可用时，`service.capabilities.skia` 会抛出 `CapabilityUnavailableError`。Python 绘图绑定自己的 `backend`，也不会回退到 Pillow。固定场景执行失败会转换为 `RasterBackendExecutionError`，Python 回调、尺寸检查或编码失败会转换为 `DrawingBackendExecutionError`。入口函数加载失败使用 `DrawingLoadError`。
 
-固定场景的调用示例见[绘制 RasterScene](../../guides/raster-scenes.md)，配置、共享包与重载规则见[绘图后端总览](index.md)。
+输出沿用共享的 RGBA、source-over、PNG/JPEG 编码、JPEG 质量与 matte 规则。`RenderedImage.data` 或 `bytes(image)` 提供编码字节。Pillow 与 Skia 可能使用不同的 premultiplication、抗锯齿和编码器，因此不要要求两个后端对同一输入生成相同像素或相同字节。两个 native 后端共用的场景入口与逐次 capability 选择见[多引擎与切换](../../guides/switching-engines.md)。
+
+## 错误与限制
+
+加载 `skia` 失败时先运行前文的 `uv run python3 -c "import skia"`，优先排查 wheel 平台或动态库，而不是调整 `provider`。Skia 的文本整形、字体 fallback 和中日韩字形覆盖取决于 `skia-python` 与宿主字体；`Typeface.MakeFromName(None)` 得到默认字体，不代表任意语言都有完整字形。需要固定字体时，应显式选择 typeface，并在目标镜像中安装或打包相应字体。
+
+`graphics.max_concurrency` 限制宿主接纳的 native 绘图任务数，不自动同步绘图模块中的共享状态。回调运行在工作线程中，不要启动后台线程继续使用本次 surface。插件关闭或卸载时，宿主等待已接纳的绘图结束，自动或显式重载的失败回退规则见 [Python 绘图](../../guides/python-drawing.md#common-errors)。固定场景的调用和像素语义见[绘制 RasterScene](../../guides/raster-scenes.md)。

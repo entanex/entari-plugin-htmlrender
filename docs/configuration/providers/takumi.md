@@ -1,5 +1,5 @@
 ---
-title: Takumi 配置
+title: Takumi 配置与能力
 description: 用 Takumi 渲染静态内容，配置字体并调用 SVG、测量和动画接口
 icon: lucide/gauge
 ---

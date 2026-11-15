@@ -1,6 +1,7 @@
 ---
 title: 操作浏览器页面
 description: 通过 PlaywrightCapability 租用 Page 与 Browser
+icon: lucide/mouse-pointer-click
 ---
 
 # 操作浏览器页面

@@ -1,6 +1,7 @@
 ---
 title: 远程 Playwright
 description: 通过 CDP 或 Playwright WebSocket 使用独立浏览器服务
+icon: lucide/cloud-cog
 ---
 
 # 远程 Playwright

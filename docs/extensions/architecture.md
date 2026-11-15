@@ -1,6 +1,7 @@
 ---
 title: 分层架构
 description: caller contracts、host-neutral composition、Provider adapters 与 Entari service
+icon: lucide/network
 ---
 
 # 分层架构
@@ -29,8 +30,7 @@ flowchart LR
 
 `preparation`、`rendering`、`resources`、`graphics` 与 `runtime` 不导入 Entari。`parse_html` 是 markup 唯一解析点；`HtmlPreparer.prepare_*()` 在 runtime admission boundary 内组合 template、worker 与 resource access，产出中立 `PreparedHtml`。convenience raster methods 复用同一 preparation pipeline，分离调用则通过 `rasterize_prepared()` 执行。绘图源码加载由 composition 边界的 `DrawingSourceRegistry` 提供，使 `graphics` 领域 contract 不反向依赖 Entari 插件系统。
 
-框架无关的 `composition.build_runtime_plan()` 只解析配置、选择一个 Provider 并固定resource strategy，不执行外部 I/O。测试或 embedding 可通过 kw-only
-`provider_override=` 注入这一个 Provider。`RuntimePlan` 是 one-shot ownership value：`build_runtime()` 恰好调用一次；再次构建应创建新 plan。Provider 拥有的 parsed config 不复制，计划持有的 filehost server/store 与生成的唯一 runtime 同寿命。`RenderRuntime` 聚合 caller services 与 `OPEN` / `CLOSING` / `CLOSED` lifecycle controller。
+框架无关的 `composition.build_runtime_plan()` 只解析配置、选择一个 Provider 并固定 resource strategy，不启动 transport 或获取 runtime resource。测试或 embedding 可通过 kw-only `provider_override=` 注入这一个 Provider。`RuntimePlan` 是 one-shot ownership value：`build_runtime()` 恰好调用一次；再次构建应创建新 plan。runtime construction 可以读取、import 配置的 drawing source，但不会启动 HTML Provider 或 host transport。Provider 拥有的 parsed config 不复制，计划持有的 filehost server/store 与生成的唯一 runtime 同寿命。`RenderRuntime` 聚合 caller services 与 `OPEN` / `CLOSING` / `CLOSED` lifecycle controller。
 
 ## Provider 与 adapter
 
@@ -40,9 +40,8 @@ Playwright 与 Takumi 实现 `PreparedHtmlExecutor`。Pillow/Skia 实现独立�
 
 ## Entari integration
 
-Entari loader 激活包时，`entari.plugin.register_plugin()` 声明 metadata/config，调用`build_runtime_plan()`，再通过 `add_service` 注册 `HtmlRenderService`。配置了 Python 绘图时，宿主提供源码注册表，把模块生命周期与重载交给 Entari；`DrawingRenderer` 仍通过相同的 runtime admission 边界执行。普通 import不加载 Entari integration、adapter 或 composition root。
+Entari loader 激活包时，`entari.plugin.register_plugin()` 声明 metadata/config，创建并消费一次 `RuntimePlan`，再通过 `add_service` 注册 `HtmlRenderService`。配置了 Python 绘图时，plugin-load runtime 可以读取并加载 drawing source，宿主提供源码注册表，把后续模块生命周期与重载交给 Entari；`DrawingRenderer` 仍通过相同的 runtime admission 边界执行。普通 import 不加载 Entari integration、adapter 或 composition root。
 
-Launart `preparing` / `blocking` / `cleanup` 是唯一的 Entari 生命周期。显式 aiohttp
-filehost、runtime drain、错误聚合与热卸载都在 service 边界完成。
+Launart `preparing` / `blocking` / `cleanup` 是唯一的 Entari service 生命周期。显式 aiohttp filehost、runtime drain、错误聚合、DI generation 解析与热卸载的完整边界见[插件生命周期与重载](entari-lifecycle.md)。
 
 其他宿主可显式导入 `entari_plugin_htmlrender.config.HtmlRenderConfig` 与`entari_plugin_htmlrender.composition.build_runtime_plan`。创建方必须按依赖顺序管理runtime 与可选 `plan.hosted_asset_server`；这组 advanced API 不进入 package root。

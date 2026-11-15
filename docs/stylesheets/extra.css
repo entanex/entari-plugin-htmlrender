@@ -92,6 +92,11 @@
   float: right
 }
 
+/* Section labels stay textual; every leaf page uses its Lucide icon. */
+.md-sidebar--primary .md-nav__item--nested > .md-nav__container > a.md-nav__link > svg {
+  display: none;
+}
+
 /* Documentation homepage */
 body:has(.htmlrender-home) {
   --htmlrender-home-bg: #09090b;

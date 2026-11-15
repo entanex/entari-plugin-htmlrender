@@ -1,6 +1,7 @@
 ---
 title: HTML 渲染预算
 description: 跨 Provider 一致实施的 HTML 输入与并发限制
+icon: lucide/scan
 ---
 
 # HTML 渲染预算

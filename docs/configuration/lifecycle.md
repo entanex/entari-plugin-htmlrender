@@ -1,6 +1,7 @@
 ---
 title: 启动与生命周期
 description: Entari add_service、Launart stages、热卸载与关闭语义
+icon: lucide/power
 ---
 
 # 启动与生命周期
@@ -18,8 +19,7 @@ plugins:
 | `startup` | `off` | `OFF` 首次 operation lazy acquire；`WARMUP` eager startup；`PROBE` 再验证就绪 |
 | `provider_config` | `{}` | 只交给选定 Provider 解析的配置 |
 
-插件入口读取 `HtmlRenderConfig`，调用 `build_runtime_plan()` 完成一次无 I/O
-composition，再通过 Entari `add_service` 注册 concrete `HtmlRenderService`。普通Python import 不注册服务，也不加载 Entari integration 或启动 adapter。
+插件入口读取 `HtmlRenderConfig`，通过 `build_runtime_plan()` 完成配置解析和后端选择，再构建运行时并通过 Entari `add_service` 注册 `HtmlRenderService`。首次构建运行时可能读取、加载配置的 Python 绘图模块，但不会启动 HTML 后端。普通包导入不注册服务，也不启动渲染后端。开发者侧的阶段顺序、对象归属和重载边界见[插件生命周期与重载](../extensions/entari-lifecycle.md)。
 
 ## Launart stages
 

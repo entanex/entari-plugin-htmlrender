@@ -1,20 +1,22 @@
 ---
 title: 配置与部署
 description: 配置后端、生命周期、资源边界与生产运行环境
+icon: lucide/settings-2
 ---
 
 # 配置与部署
 
-本章回答“怎样让既定渲染任务在目标环境中可靠运行”。先选择需要决策的边界，再查阅具体字段：
+本章按“加载配置 → 设置后端 → 约束资源与预算 → 诊断问题”的顺序组织。先通过下方的完整配置了解入口，再按需要查阅字段；具体调用方法见[使用指南](../guides/index.md)。
 
-| 决策 | 入口 |
+| 分组 | 阅读顺序 |
 | --- | --- |
-| 选择 HTML Provider 或 Graphics 后端 | [HTML Provider](providers/index.md) · [Graphics 后端](graphics/index.md) |
-| 决定启动时机、关闭顺序与失败行为 | [启动与生命周期](lifecycle.md) |
-| 设置 HTML、图形、缓存与并发预算 | [HTML 渲染预算](html-rendering.md) · [缓存组件与调优](../guides/cache-lifecycle.md) |
-| 授权本地、远程与模板资源 | [资源与访问策略](resources.md) · [安全须知](security.md) |
-| 连接远程浏览器 | [远程 Playwright](remote-playwright.md) |
-| 建立生产诊断能力 | [可选依赖与可观测性](observability.md) · [故障排查](troubleshooting.md) |
+| 基础配置 | [环境变量与配置文件](dotenv.md) · [启动与生命周期](lifecycle.md) |
+| HTML Provider | [Provider 总览](providers/index.md) · [Takumi](providers/takumi.md) · [Playwright](providers/playwright.md) · [远程 Playwright](remote-playwright.md) |
+| 绘图后端 | [绘图后端总览](graphics/index.md) · [Pillow](graphics/pillow.md) · [Skia](graphics/skia.md) |
+| 资源与预算 | [资源与访问策略](resources.md) · [安全须知](security.md) · [HTML 渲染预算](html-rendering.md) · [缓存组件与调优](../guides/cache-lifecycle.md) |
+| 诊断与排障 | [可选依赖与可观测性](observability.md) · [故障排查](troubleshooting.md) · [常见问题](faq.md) |
+
+要更换已有项目的引擎或同时启用多个绘图后端，按[多引擎与切换](../guides/switching-engines.md)操作。
 
 ## 配置入口
 
@@ -54,7 +56,7 @@ plugins:
 
 所有 plugin-owned 模型均使用 `extra="forbid"`。未知键、拼写错误与类型错误会在Entari 配置阶段失败；Provider 专属键只能放在 `provider_config` 中。
 
-框架无关的高级嵌入也复用同一个 `HtmlRenderConfig`，通过`entari_plugin_htmlrender.composition.build_runtime_plan()` 构建 one-shot `RuntimePlan`。`build_runtime()` 恰好消费一次；构建 plan/runtime 不执行外部 I/O，生命周期仍由创建它的宿主负责。测试可用 kw-only `provider_override=` 注入配置所选的单个 Provider。
+框架无关的高级嵌入也复用同一个 `HtmlRenderConfig`，通过 `entari_plugin_htmlrender.composition.build_runtime_plan()` 构建一次性的 `RuntimePlan`。创建 plan 完成配置解析和后端选择，不启动服务器或渲染引擎；`build_runtime()` 恰好消费一次，宿主传入的绘图注册表工厂可以在此时读取、加载源码。运行时的启动和关闭仍由创建它的宿主负责。Entari 的归属和重载流程见[插件生命周期与重载](../extensions/entari-lifecycle.md)。测试可用 kw-only `provider_override=` 注入配置所选的单个 Provider。
 
 ## 下一步
 
