@@ -14,6 +14,7 @@ copyright: "&copy; 2026 Tacrolimus"
 
 # Configuration
 theme:
+  language: zh
   variant: modern
   custom_dir: docs/overrides
   features:
@@ -38,23 +39,23 @@ theme:
     - media: "(prefers-color-scheme)"
       toggle:
         icon: lucide/sun-moon
-        name: Switch to light mode
+        name: 切换到浅色模式
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: red
-      accent: red
+      primary: custom
+      accent: custom
       toggle:
         icon: lucide/sun
-        name: Switch to dark mode
+        name: 切换到深色模式
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: red
-      accent: red
+      primary: custom
+      accent: custom
       toggle:
         icon: lucide/moon-star
-        name: Switch to system preference
-  favicon: assets/logo.png
-  logo: assets/entari_plugin.svg
+        name: 跟随系统主题
+  favicon: assets/logo.svg
+  logo: assets/logo.svg
   icon:
     tag:
       default: lucide/hash
@@ -146,8 +147,8 @@ extra:
   annotate:
     json: [.s2]
   status:
-    new: Recently added
-    deprecated: Deprecated
+    new: 新增
+    deprecated: 已弃用
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/entanex/entari-plugin-htmlrender
