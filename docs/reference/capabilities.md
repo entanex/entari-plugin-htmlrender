@@ -1,6 +1,7 @@
 ---
 title: Capability 参考
 description: RuntimeCapabilities、Playwright、Takumi 与第三方 typed capability
+icon: lucide/puzzle
 ---
 
 # Capability 参考

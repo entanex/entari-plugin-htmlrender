@@ -1,6 +1,7 @@
 ---
 title: Provider 开发指南
 description: 构建并验证第三方 HTML Provider distribution
+icon: lucide/hammer
 ---
 
 # Provider 开发指南

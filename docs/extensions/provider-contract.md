@@ -1,6 +1,7 @@
 ---
 title: Provider 契约
 description: 第三方 HTML Provider 的发现、配置、资源策略与 composition 协议
+icon: lucide/file-check-2
 ---
 
 # Provider 契约
@@ -26,12 +27,13 @@ HTTP(S) 资源不能把 `allow_hosts` 当作私网绕过。主机名白名单为
 
 ## Lifecycle
 
-- discovery、availability 与 compose 不执行 I/O、不获得 runtime resource。
+- Provider discovery 可以 import 被配置选中的模块，但 import 与 availability、resource strategy、compose 都不应启动原生引擎、访问网络或获得 runtime resource。
 - `startup()` 或第一个已获准 Provider operation 可以 lazy acquire；因此`startup: off` 表示 lazy，而不是永久禁用 Provider。
-- `startup()` failure-atomic、并发安全且在成功回滚后可重试；回滚失败会 poison
-  composition。
+- `startup()` failure-atomic、并发安全且在成功回滚后可重试；回滚失败会 poison composition。
 - `probe()` 只验证已启动 runtime，不改变 ownership。
 - `aclose()` 对未启动、部分启动、已启动和 poisoned 状态幂等，并尽力释放所有已获资源。
+
+Provider lifecycle 是单次 generation 的一个组成层；Launart stage、promote 边界、DI 切换与 cleanup 重试由 `HtmlRenderService` 统一拥有，见[插件生命周期与重载](entari-lifecycle.md)。
 
 ## 发现
 
@@ -42,4 +44,4 @@ echo = "htmlrender_echo_provider:PROVIDER"
 
 entry point 名必须等于 `provider.id`。`playwright` 与 `takumi` 是第一方保留 ID；重复 ID、保留 ID 覆盖或加载对象不满足 runtime-checkable protocol 都会在 composition 失败。
 
-`build_runtime_plan(config, provider_override=provider)` 只覆盖配置所选的这一个Provider，不接受候选 Provider sequence。完整最小实现见仓库的[`examples/echo-provider`](../../examples/echo-provider/)。
+`build_runtime_plan(config, provider_override=provider)` 只覆盖配置所选的这一个 Provider，不接受候选 Provider sequence，也不是业务 render call 的逐次后端参数。该 override 用于测试或 embedding；Entari 运行时应通过 plugin config reload 选择 Provider。完整最小实现见仓库的[`examples/echo-provider`](../../examples/echo-provider/)。

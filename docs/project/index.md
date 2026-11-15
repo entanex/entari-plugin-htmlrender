@@ -8,21 +8,25 @@ icon: lucide/construction
 
 本章描述仓库协作和发布职责；运行时设计与第三方扩展统一放在[扩展开发](../extensions/index.md)。普通插件调用方不需要阅读本章。
 
-## 贡献流程
+## 贡献与设计
 
 1. [贡献指南](contributing.md)
 2. [工程协作流程](engineering-workflow.md)
 3. [编码规范](coding-standards.md)
-4. [提交消息指南](commit-messages.md)
-5. [Pull Request 生命周期](pull-requests.md)
+4. [语义 API 设计](semantic-api.md)
 
-## 质量与发布
+## 检查与提交
 
-- [测试矩阵](testing.md)
-- [CI Actions](ci.md)
-- [仓库治理与保护](governance.md)
-- [发布流程](release.md)
-- [文档版本管理](documentation-versioning.md)
+1. [测试矩阵](testing.md)
+2. [CI Actions](ci.md)
+3. [提交消息指南](commit-messages.md)
+4. [Pull Request 生命周期](pull-requests.md)
+
+## 发布与维护
+
+1. [仓库治理与保护](governance.md)
+2. [发布流程](release.md)
+3. [文档版本管理](documentation-versioning.md)
 
 ## 本地入口
 

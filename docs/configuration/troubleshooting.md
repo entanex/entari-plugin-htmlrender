@@ -1,6 +1,7 @@
 ---
 title: 故障排查
 description: 从配置、runtime、Provider、资源与关闭阶段定位失败
+icon: lucide/search-x
 ---
 
 # 故障排查

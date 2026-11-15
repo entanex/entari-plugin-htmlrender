@@ -1,6 +1,7 @@
 ---
 title: 资源与访问策略
 description: 缓存、路径白名单、网络策略与显式 aiohttp filehost
+icon: lucide/folder-lock
 ---
 
 # 资源与访问策略

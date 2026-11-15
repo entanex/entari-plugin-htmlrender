@@ -1,6 +1,7 @@
 ---
 title: Entari 0.2 能力概览与升级
 description: Python 与 Entari 基线、0.1 升级步骤、0.2 公共能力与 Takumi 0.4
+icon: lucide/arrow-up-circle
 ---
 
 # Entari 0.2 能力概览与升级

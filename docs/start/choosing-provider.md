@@ -1,6 +1,7 @@
 ---
 title: 选择 Provider
 description: 从 Takumi 静态渲染开始，按需选择远程 Playwright 或 Python 绘图
+icon: lucide/git-compare-arrows
 ---
 
 # 选择 Provider
@@ -36,3 +37,5 @@ plugins:
 ```
 
 Takumi 的字体、缓存和高级接口见 [Takumi 配置与能力](../configuration/providers/takumi.md)。选择 extra 只安装 Python distribution；远程服务版本、浏览器二进制、native wheel 平台与系统动态库仍需分别验证。
+
+配置切换、逐次选择 Pillow/Skia 和多个绘图名称的完整示例见[多引擎与切换](../guides/switching-engines.md)。需要编写绘图函数、加载文件或模块并启用源码重载时，进入 [Python 绘图](../guides/python-drawing.md)。

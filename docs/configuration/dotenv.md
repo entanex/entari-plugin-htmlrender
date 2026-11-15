@@ -1,6 +1,7 @@
 ---
 title: 环境变量与配置文件
 description: Entari 配置文件中的环境插值边界
+icon: lucide/braces
 ---
 
 # 环境变量与配置文件

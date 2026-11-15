@@ -1,6 +1,7 @@
 ---
 title: 模板与资源
 description: TemplateRef、ResourceRef、受控本地路径与 scoped publication
+icon: lucide/files
 ---
 
 # 模板与资源

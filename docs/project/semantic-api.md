@@ -1,6 +1,7 @@
 ---
 title: 语义 API 设计
 description: caller-first 调用面、领域词汇、失败语义与模块边界
+icon: lucide/book-open-check
 ---
 
 # 语义 API 设计

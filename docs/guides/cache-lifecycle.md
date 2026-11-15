@@ -1,6 +1,7 @@
 ---
 title: 缓存组件与调优
 description: Resource、Jinja、filehost 与 native runtime 缓存的所有权
+icon: lucide/database
 ---
 
 # 缓存组件与调优

@@ -1,6 +1,7 @@
 ---
 title: 运行环境与 Entari 服务
 description: 插件服务、手动组装与生命周期归属
+icon: lucide/server-cog
 ---
 
 # 运行环境与 Entari 服务
@@ -49,6 +50,8 @@ async def render_profile(drawings: DrawingRenderer):
 
 源码预加载、共享模块、`reload` 语义、显式 `await drawings.reload("profile")`、画布类型和代码安全说明见 [绘图后端配置](../configuration/graphics/index.md)。
 
+canonical module、dependency reload、reference lease 与跨 generation 引用的实现细节见[插件生命周期与重载](../extensions/entari-lifecycle.md)。
+
 Entari 事件处理函数也可以直接注入这些接口，而不必先接收整个服务：
 
 ```python
@@ -59,6 +62,8 @@ async def prepare_status(preparation: HtmlPreparer):
 ```
 
 插件加载时会把 `HtmlRenderer`、`TemplateRenderer`、`HtmlPreparer`、`ResourceAccess`、`GraphicsRenderer` 与 `DrawingRenderer` 注册到 Letoderea DI。依赖提供器从 Launart 当前活动服务取得对应实例，因此已编译 handler 在插件重载后仍会取得新实例；插件卸载时对应提供器也会移除。
+
+DI 的 current-generation 查找、disabled/failed 行为和六个直接 contract 的完整边界见[插件生命周期与重载](../extensions/entari-lifecycle.md)。
 
 ## 绘图模块的生命周期
 
@@ -96,7 +101,7 @@ finally:
             await server.aclose()
 ```
 
-默认构建过程不执行外部 I/O；自定义绘图注册表工厂可以在构建时读取源码并加载插件。`RuntimePlan` 是 one-shot ownership value，`build_runtime()` 恰好调用一次；第二次调用抛出 `InvalidRenderInputError(operation="runtime.build", field="plan")`，需要另一个 runtime 时应重建 plan。Provider-owned parsed config 在 plan → availability → compose 期间保持同一 identity。若 resource strategy 需要 filehost，计划持有的 server 与生成的唯一 runtime 同寿命：创建方先启动 `hosted_asset_server`，关闭时先排空 runtime，再关闭 server。
+`build_runtime_plan()` 不启动 transport 或获取 runtime resource；`build_runtime()` 会消费 plan 并建立完整内存图，配置了 Python drawing 时还会读取源码摘要、加载 canonical module 并校验入口，但不会启动 HTML Provider 或 host transport。自定义 drawing registry 也可能在构建时读取源码并加载 plugin。`RuntimePlan` 是 one-shot ownership value，`build_runtime()` 恰好调用一次；第二次调用抛出 `InvalidRenderInputError(operation="runtime.build", field="plan")`，需要另一个 runtime 时应重建 plan。Provider-owned parsed config 在 plan → availability → compose 期间保持同一 identity。若 resource strategy 需要 filehost，计划持有的 server 与生成的唯一 runtime 同寿命：创建方先启动 `hosted_asset_server`，关闭时先排空 runtime，再关闭 server。
 
 测试或 embedding 若要绕过 entry-point discovery，可传配置所选的单个 Provider：
 
@@ -124,3 +129,5 @@ runtime = plan.build_runtime(
 - 排空或关闭被取消/失败时保持 `CLOSING`，后续 `aclose()` 可重试；runtime 不会重新开放。
 
 Entari 中不要手工驱动 service 内部 runtime。`HtmlRenderService` 没有公共 `startup()` / `probe()` / `aclose()`；Launart stages 与插件热卸载拥有其生命周期。关闭开始后，`preparation`、`renderer`、`resources`、`graphics`、`drawings` 与 capability leases 都按同一 admission boundary 拒绝新工作并排空已接纳工作。
+
+pre-promote import/validation failure、post-promote startup failure、disable/enable generation 与 cleanup retry 的完整状态机见[插件生命周期与重载](../extensions/entari-lifecycle.md)。
