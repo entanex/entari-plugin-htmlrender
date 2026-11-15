@@ -58,7 +58,7 @@ dev = [
     "ty>=0.0.34",
 ]
 docs = [
-    "zensical>=0.0.51",
+    "zensical>=0.1.1",
     "mike @ git+https://github.com/squidfunk/mike.git",
     "mkdocstrings-python>=2.0.1",
 ]
