@@ -7,7 +7,7 @@ site_description: >-
 # Repository
 repo_name: entanex/entari-plugin-htmlrender
 repo_url: https://github.com/entanex/entari-plugin-htmlrender
-edit_uri: https://github.com/entanex/entari-plugin-htmlrender/docs/edit/main/docs/
+edit_uri: edit/main/docs/
 
 # Copyright
 copyright: "&copy; 2026 Tacrolimus"
@@ -18,6 +18,7 @@ theme:
   custom_dir: docs/overrides
   features:
     - announce.dismiss
+    - content.action.copy
     - content.action.edit
     - content.action.view
     - content.code.annotate
@@ -68,6 +69,68 @@ extra_javascript:
 plugins:
   - search
   - tags
+  - llmstxt:
+      full_output: llms-full.txt
+      # Keep chapter membership and reading order aligned with nav.
+      sections:
+        首页:
+          - index.md
+        开始使用:
+          - start/index.md
+          - start/quickstart.md
+          - start/choosing-provider.md
+          - start/migration-v0.2.md
+        使用指南:
+          - guides/index.md
+          - guides/rendering-content.md
+          - guides/templates-and-resources.md
+          - guides/browser-automation.md
+          - guides/raster-scenes.md
+          - guides/best-practices.md
+        配置与部署:
+          - configuration/index.md
+          - configuration/dotenv.md
+          - configuration/lifecycle.md
+          - configuration/html-rendering.md
+          - configuration/resources.md
+          - configuration/observability.md
+          - configuration/providers/index.md
+          - configuration/providers/playwright.md
+          - configuration/providers/takumi.md
+          - configuration/graphics/index.md
+          - configuration/graphics/pillow.md
+          - configuration/graphics/skia.md
+          - configuration/remote-playwright.md
+          - guides/cache-lifecycle.md
+          - configuration/security.md
+          - configuration/troubleshooting.md
+          - configuration/faq.md
+        API 参考:
+          - reference/index.md
+          - reference/rendering.md
+          - reference/preparation.md
+          - reference/runtime.md
+          - reference/capabilities.md
+          - reference/glossary.md
+        扩展开发:
+          - extensions/index.md
+          - extensions/provider-contract.md
+          - extensions/provider-development.md
+          - extensions/architecture.md
+          - extensions/resource-pipeline.md
+        维护者指南:
+          - project/index.md
+          - project/semantic-api.md
+          - project/contributing.md
+          - project/engineering-workflow.md
+          - project/coding-standards.md
+          - project/commit-messages.md
+          - project/pull-requests.md
+          - project/testing.md
+          - project/ci.md
+          - project/governance.md
+          - project/release.md
+          - project/documentation-versioning.md
 
 # Additional configuration
 extra:
@@ -118,9 +181,11 @@ markdown_extensions:
   - pymdownx.magiclink:
       normalize_issue_symbols: true
       repo_url_shorthand: true
-      user: zensical
-      repo: zensical
+      user: entanex
+      repo: entari-plugin-htmlrender
   - pymdownx.mark
+  - pymdownx.quotes:
+      callouts: true
   - pymdownx.smartsymbols
   - pymdownx.superfences:
       custom_fences:

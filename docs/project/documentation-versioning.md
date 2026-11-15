@@ -1,6 +1,6 @@
 ---
 title: 文档版本管理
-description: mike 版本目录、PR 预览与 gh-pages 并发写入策略
+description: Zensical 文档框架、Markdown 导出、mike 版本目录与 PR 预览
 icon: lucide/git-branch
 status: new
 tags:
@@ -12,6 +12,19 @@ tags:
 # 文档版本管理
 
 正式文档使用 [`mike`](https://github.com/jimporter/mike) 在 `gh-pages` 上维护多版本目录；PR preview 在同一分支的独立 umbrella directory 下短期存在。软件版本发布见 [发布流程](release.md)。
+
+## 文档框架与写作约定
+
+站点使用 `zensical>=0.1.1`，配置入口仍是 `mkdocs.yml`。构建继续沿用 `make docs-build`、`mike` 和现有 PR preview 流程；无需另起一份 `zensical.toml`。依赖下限保存在 `pyproject.toml` 的 `docs` group，CI 使用 `uv.lock` 中的具体版本。
+
+- 页面操作区提供“复制 Markdown”，代码块仍有独立复制按钮。
+- Pillow/Skia 等可替代实现使用内容标签页；相同标签名会同步选择，便于依次阅读安装命令和对应代码。
+- 短提示可以使用 GitHub 风格的 `> [!NOTE]`、`> [!TIP]` 或 `> [!IMPORTANT]`；站点通过 `pymdownx.quotes` 渲染，已有 `!!! note` 写法也继续支持。
+- 文件示例可给代码块添加 `title="drawings/card.py"`。标题仅说明保存位置，块内代码仍必须能够解析并对应仓库公开 API。
+
+Zensical 的内置 `llmstxt` 支持生成 `llms.txt` 导航、`llms-full.txt` 完整文本和各页面的 Markdown 副本；不需要额外安装同名 MkDocs 插件。`mkdocs.yml` 的 `llmstxt.sections` 按首页和六个章节显式列出页面，与 `nav` 保持相同的章节归属和阅读顺序。缓存页虽然保留在 `guides/` 目录，导出时也归“配置与部署”；新增页面或调整导航时同步维护这两处配置。生成物跟随当前构建的 `DOCS_SITE_URL`，因此正式版本和 PR preview 各自保留自己的地址，不写入独立版本索引。
+
+框架升级后，除 strict build 外，还需检查页面标签切换、提示框、Markdown 复制入口以及导出链接在 preview 子路径下是否正确。`zensical serve` 只用于本地预览；正式部署仍发布静态 `site/` 产物。
 
 ## 正式版本目录
 
