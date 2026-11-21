@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeAlias
 
+import anyio
+
 from entari_plugin_htmlrender.errors import (
     RuntimeUnavailableError,
 )
@@ -31,6 +33,24 @@ def _require(*, condition: bool, message: str) -> None:
         raise ProviderConformanceError(message)
 
 
+async def _shielded_aclose(runtime: RenderRuntime) -> None:
+    with anyio.CancelScope(shield=True):
+        await runtime.aclose()
+
+
+async def _close_after_failure(
+    runtime: RenderRuntime,
+    primary_error: BaseException,
+) -> None:
+    try:
+        await _shielded_aclose(runtime)
+    except BaseException as cleanup_error:
+        raise BaseExceptionGroup(
+            "Provider conformance failed and runtime cleanup also failed.",
+            [primary_error, cleanup_error],
+        ) from primary_error
+
+
 async def run_provider_lifecycle_conformance(
     provider: RenderProvider[Any],
     compose: RuntimeFactory,
@@ -47,37 +67,40 @@ async def run_provider_lifecycle_conformance(
         condition=isinstance(runtime, RenderRuntime),
         message="compose must return a RenderRuntime",
     )
-
-    # Idempotent startup.
-    await runtime.startup()
-    await runtime.startup()
-
-    # Probe does not change ownership and can be repeated.
-    await runtime.probe()
-    await runtime.probe()
-
-    artifact = await runtime.renderer.rasterize_html("<p>conformance</p>")
-    _require(
-        condition=isinstance(artifact, RenderedImage),
-        message="render_html must return a typed RenderedImage artifact",
-    )
-    _require(
-        condition=bool(bytes(artifact)),
-        message="the rendered artifact must carry bytes",
-    )
-
-    # Idempotent shutdown.
-    await runtime.aclose()
-    await runtime.aclose()
-
-    # A closed runtime refuses to start again.
     try:
+        # Idempotent startup.
         await runtime.startup()
-    except RuntimeUnavailableError:
-        return
-    raise ProviderConformanceError(
-        "a closed runtime must reject a fresh startup with RuntimeUnavailableError"
-    )
+        await runtime.startup()
+
+        # Probe does not change ownership and can be repeated.
+        await runtime.probe()
+        await runtime.probe()
+
+        artifact = await runtime.renderer.rasterize_html("<p>conformance</p>")
+        _require(
+            condition=isinstance(artifact, RenderedImage),
+            message="render_html must return a typed RenderedImage artifact",
+        )
+        _require(
+            condition=bool(bytes(artifact)),
+            message="the rendered artifact must carry bytes",
+        )
+
+        # Idempotent shutdown.
+        await _shielded_aclose(runtime)
+        await _shielded_aclose(runtime)
+
+        # A closed runtime refuses to start again.
+        try:
+            await runtime.startup()
+        except RuntimeUnavailableError:
+            return
+        raise ProviderConformanceError(
+            "a closed runtime must reject a fresh startup with RuntimeUnavailableError"
+        )
+    except BaseException as primary_error:
+        await _close_after_failure(runtime, primary_error)
+        raise
 
 
 async def run_provider_startup_retry_conformance(
@@ -93,22 +116,29 @@ async def run_provider_startup_retry_conformance(
     a second startup must succeed.
     """
     runtime = compose(provider)
-
-    fail_once()
-    try:
-        await runtime.startup()
-    except Exception:  # noqa: S110 -- provider-defined error type
-        pass
-    else:
-        raise ProviderConformanceError(
-            "the armed one-shot startup failure did not surface"
-        )
+    _require(
+        condition=isinstance(runtime, RenderRuntime),
+        message="compose must return a RenderRuntime",
+    )
 
     try:
+        fail_once()
+        try:
+            await runtime.startup()
+        except Exception:  # noqa: S110 -- provider-defined error type
+            pass
+        else:
+            raise ProviderConformanceError(
+                "the armed one-shot startup failure did not surface"
+            )
+
         await runtime.startup()
         await runtime.renderer.rasterize_html("<p>ok</p>")
-    finally:
-        await runtime.aclose()
+    except BaseException as primary_error:
+        await _close_after_failure(runtime, primary_error)
+        raise
+
+    await _shielded_aclose(runtime)
 
 
 __all__ = [

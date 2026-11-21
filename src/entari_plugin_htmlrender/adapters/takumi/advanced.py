@@ -136,8 +136,12 @@ def _static_raster_kwargs(
     ratio = validate_device_pixel_ratio(options.get("device_pixel_ratio", 1.0))
     native = render_defaults(state, images=images)
     native.update(
-        width=device_dimension(options.get("width", 1200), ratio),
-        height=device_dimension(options.get("height", default_height), ratio),
+        width=device_dimension(options.get("width", 1200), ratio, field="width"),
+        height=device_dimension(
+            options.get("height", default_height),
+            ratio,
+            field="height",
+        ),
         format=options.get("format", "png"),
         font_size=options.get("font_size", 16.0),
         device_pixel_ratio=ratio,
@@ -161,8 +165,12 @@ def _measure_kwargs(
     ratio = validate_device_pixel_ratio(options.get("device_pixel_ratio", 1.0))
     native = render_defaults(state, images=images)
     native.update(
-        width=device_dimension(options.get("width", 1200), ratio),
-        height=device_dimension(options.get("height", default_height), ratio),
+        width=device_dimension(options.get("width", 1200), ratio, field="width"),
+        height=device_dimension(
+            options.get("height", default_height),
+            ratio,
+            field="height",
+        ),
         font_size=options.get("font_size", 16.0),
         device_pixel_ratio=ratio,
         draw_debug_border=options.get("draw_debug_border", False),
@@ -182,8 +190,8 @@ def _svg_kwargs(
 ) -> dict[str, object]:
     native = render_defaults(state, images=images)
     native.update(
-        width=options.get("width", 1200),
-        height=options.get("height", 630),
+        width=device_dimension(options.get("width", 1200), 1.0, field="width"),
+        height=device_dimension(options.get("height", 630), 1.0, field="height"),
         font_size=options.get("font_size", 16.0),
         time_ms=options.get("time_ms", 0),
     )
@@ -211,8 +219,8 @@ def _animation_kwargs(
     ratio = validate_device_pixel_ratio(options.get("device_pixel_ratio", 1.0))
     native = render_defaults(state, images=images)
     native.update(
-        width=device_dimension(options.get("width", 1200), ratio),
-        height=device_dimension(options.get("height", 630), ratio),
+        width=device_dimension(options.get("width", 1200), ratio, field="width"),
+        height=device_dimension(options.get("height", 630), ratio, field="height"),
         font_size=options.get("font_size", 16.0),
         device_pixel_ratio=ratio,
         draw_debug_border=options.get("draw_debug_border", False),

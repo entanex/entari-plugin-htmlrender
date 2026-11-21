@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Literal
 
+from .errors import TakumiInputError
 from .runtime import TakumiRuntimeState, render_defaults
 from .source import materialize_takumi_document
 
@@ -15,20 +16,38 @@ if TYPE_CHECKING:
     from .types import StaticImageFormat, TakumiImageInput
 
 
-def device_dimension(value: int | None, device_pixel_ratio: float) -> int | None:
+def device_dimension(
+    value: int | None,
+    device_pixel_ratio: float,
+    *,
+    field: str = "width",
+) -> int | None:
     """Map a CSS-pixel dimension to Takumi's device-pixel canvas dimension."""
     if value is None:
         return None
-    if value <= 0:
-        raise ValueError("render dimensions must be greater than zero")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise TakumiInputError(field, "must be a positive integer or None")
     return math.ceil(value * device_pixel_ratio)
 
 
 def validate_device_pixel_ratio(value: float) -> float:
-    ratio = float(value)
+    if isinstance(value, bool):
+        raise TakumiInputError(
+            "device_pixel_ratio",
+            "must be a finite number greater than zero",
+        )
+    try:
+        ratio = float(value)
+    except (TypeError, ValueError) as error:
+        raise TakumiInputError(
+            "device_pixel_ratio",
+            "must be a finite number greater than zero",
+            source=error,
+        ) from error
     if not math.isfinite(ratio) or ratio <= 0:
-        raise ValueError(
-            "device_scale_factor must be a finite number greater than zero"
+        raise TakumiInputError(
+            "device_pixel_ratio",
+            "must be a finite number greater than zero",
         )
     return ratio
 
@@ -65,8 +84,8 @@ async def render_prepared_html(
     )
     native_options = render_defaults(state, images=document.images)
     native_options.update(
-        width=device_dimension(width, ratio),
-        height=device_dimension(height, ratio),
+        width=device_dimension(width, ratio, field="width"),
+        height=device_dimension(height, ratio, field="height"),
         format=image_format,
         font_size=font_size,
         device_pixel_ratio=ratio,

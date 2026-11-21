@@ -55,10 +55,11 @@ tags:
 | ----------------------- | ---------------------- |
 | `CI`                    | `Required Checks`      |
 | `Coverage`              | `Coverage Matrix`      |
+| `Entari Compatibility`  | `Entari Compatibility Matrix` |
 | `Prek`                  | `Prek`                 |
 | `Docs PR Preview Build` | `Docs Preview`         |
 
-不要绑定矩阵内部 job，也不要把只在 `main` push 上运行的 `Docs` 设为 PR required check。四个汇总 job 对所有目标为 `main` 的 PR 都会产生确定结论，包括“不涉及文档”的 PR。
+不要绑定矩阵内部 job，也不要把只在 `main` push 上运行的 `Docs` 设为 PR required check。五个汇总 job 对所有目标为 `main` 的 PR 都会产生确定结论，包括“不涉及文档”的 PR。
 
 Ruleset 不配置日常 bypass。管理员仍能编辑 Ruleset，但这应被视为显式的事故恢复操作，而不是正常合并路径。仓库设置同时应只启用 squash merge、启用 Update branch，并在合并后自动删除 head branch。
 
@@ -92,7 +93,7 @@ publishing 的 OIDC 身份。
 required check context 必须先由 GitHub Actions 实际产生。错误的启用顺序会让 GitHub 永久等待一个不存在的 check：
 
 1. 先合入新增汇总 job 和本页对应的 workflow 改动；
-1. 发起一个普通 PR，确认合并框中准确出现四个汇总 context，来源均为 GitHub Actions；
+1. 发起一个普通 PR，确认合并框中准确出现五个汇总 context，来源均为 GitHub Actions；
 1. 在 **Settings → Rules → Rulesets** 依次导入两个 JSON，复核目标和规则后设为 Active；
 1. 在 **Settings → Environments** 配置上表的 branch/tag policy；
 1. 在 **Settings → General → Pull Requests** 只保留 squash merge，启用 Update branch 和automatically delete head branches；

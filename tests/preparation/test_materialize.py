@@ -10,7 +10,7 @@ from entari_plugin_htmlrender.adapters.resources import (
     RemoteTransportExecutor,
     build_resource_fetcher,
 )
-from entari_plugin_htmlrender.preparation import parse_html
+from entari_plugin_htmlrender.preparation import PreparedStylesheet, parse_html
 from entari_plugin_htmlrender.preparation.materialize import (
     AssetMaterializationError,
     materialize_local_assets,
@@ -69,6 +69,108 @@ async def test_materialize_strict_and_tolerant_modes(
     assert (
         await materialize_local_assets(prepared, resources=resources, strict=False)
     ).assets == ()
+
+
+@pytest.mark.parametrize(
+    "filename",
+    (
+        "literal%20name.png",
+        "中文 空格.png",
+        "hash#fragment.png",
+        "literal%25name.png",
+    ),
+)
+async def test_materialize_decodes_file_url_path_once(
+    tmp_path: Path,
+    resources: ResourceService,
+    filename: str,
+) -> None:
+    image = tmp_path / filename
+    image.write_bytes(filename.encode())
+    prepared = parse_html(f'<img src="{image.as_uri()}">')
+
+    materialized = await materialize_local_assets(prepared, resources=resources)
+
+    assert [asset.source for asset in materialized.assets] == [image.as_uri()]
+    assert [asset.data for asset in materialized.assets] == [filename.encode()]
+    assert [asset.media_type for asset in materialized.assets] == ["image/png"]
+
+
+async def test_materialize_preserves_file_url_authority_limits(
+    tmp_path: Path,
+    resources: ResourceService,
+) -> None:
+    image = tmp_path / "authority.png"
+    image.write_bytes(b"localhost")
+    file_url = image.as_uri()
+    localhost_url = file_url.replace("file://", "file://localhost", 1)
+    remote_url = file_url.replace("file://", "file://assets.example", 1)
+
+    local = await materialize_local_assets(
+        parse_html(f'<img src="{localhost_url}">'),
+        resources=resources,
+    )
+    assert local.assets[0].data == b"localhost"
+
+    with pytest.raises(
+        AssetMaterializationError,
+        match="Remote file URL authorities are not supported",
+    ):
+        await materialize_local_assets(
+            parse_html(f'<img src="{remote_url}">'),
+            resources=resources,
+        )
+
+
+@pytest.mark.parametrize("strict", (True, False))
+async def test_materialize_ignores_fragment_only_references_before_base_resolution(
+    tmp_path: Path,
+    resources: ResourceService,
+    mocker,
+    *,
+    strict: bool,
+) -> None:
+    document_dir = tmp_path / "documents"
+    declared_base = tmp_path / "declared"
+    stylesheet_base = tmp_path / "stylesheets"
+    document_dir.mkdir()
+    declared_base.mkdir()
+    stylesheet_base.mkdir()
+    sprite = declared_base / "sprite.svg"
+    sprite.write_bytes(b"<svg/>")
+    prepared = parse_html(
+        (
+            f'<base href="{declared_base.as_uri()}/">'
+            '<img src="#html-fragment">'
+            '<svg><use href="#svg-fragment"></use>'
+            '<use href="sprite.svg#icon"></use></svg>'
+            "<style>.inline { fill: url(#inline-css-fragment) }</style>"
+        ),
+        base_url=(document_dir / "document.html").as_uri(),
+        stylesheets=(
+            PreparedStylesheet(
+                css='.external { mask: url("#external-css-fragment") }',
+                base_url=f"{stylesheet_base.as_uri()}/",
+            ),
+        ),
+    )
+    authorize_local = mocker.spy(resources, "authorize_local")
+    fetch_bytes = mocker.patch.object(
+        resources,
+        "fetch_bytes",
+        new=mocker.AsyncMock(wraps=resources.fetch_bytes),
+    )
+
+    materialized = await materialize_local_assets(
+        prepared,
+        resources=resources,
+        strict=strict,
+    )
+
+    assert [asset.source for asset in materialized.assets] == [sprite.as_uri()]
+    assert [asset.data for asset in materialized.assets] == [b"<svg/>"]
+    authorize_local.assert_called_once_with(sprite.resolve())
+    fetch_bytes.assert_awaited_once_with(FileResourceRef(sprite.resolve()))
 
 
 async def test_worker_executor_forwards_keyword_arguments() -> None:

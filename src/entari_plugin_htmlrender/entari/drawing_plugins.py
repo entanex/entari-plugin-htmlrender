@@ -325,6 +325,7 @@ class EntariDrawingPool:
         registry._claimed.clear()
         self._registries.discard(registry)
         self._prune_paths()
+        self._prune_fingerprints()
 
     def _prune_paths(self) -> None:
         retained = [
@@ -341,25 +342,49 @@ class EntariDrawingPool:
             del self._paths[root]
         importlib.invalidate_caches()
 
+    def _prune_fingerprints(self) -> None:
+        retained = {
+            module
+            for registry in self._registries
+            for module in registry._tracked_files()
+        }
+        for name in tuple(self._fingerprints):
+            if name not in retained:
+                del self._fingerprints[name]
+        for name in tuple(self._failed):
+            if name not in retained:
+                del self._failed[name]
+
     def _release_now(self, registry: EntariDrawingRegistry) -> None:
-        for name in sorted(self._release_candidates(registry), reverse=True):
-            Context().run(unload_plugin, name)
-            self._owned.pop(name, None)
+        try:
+            for name in sorted(self._release_candidates(registry), reverse=True):
+                Context().run(unload_plugin, name)
+                self._owned.pop(name, None)
+        except BaseException:
+            self._prune_fingerprints()
+            raise
         self._release_paths(registry)
 
     async def _release(self, registry: EntariDrawingRegistry) -> None:
-        for name in sorted(self._release_candidates(registry), reverse=True):
-            await _independent(unload_plugin_async(name))
-            self._owned.pop(name, None)
+        try:
+            for name in sorted(self._release_candidates(registry), reverse=True):
+                await _independent(unload_plugin_async(name))
+                self._owned.pop(name, None)
+        except BaseException:
+            self._prune_fingerprints()
+            raise
         self._release_paths(registry)
 
     async def aclose(self) -> None:
         for registry in tuple(self._registries):
             await registry.aclose()
         async with self._lock:
-            for name in sorted(self._release_candidates(), reverse=True):
-                await _independent(unload_plugin_async(name))
-                self._owned.pop(name, None)
+            try:
+                for name in sorted(self._release_candidates(), reverse=True):
+                    await _independent(unload_plugin_async(name))
+                    self._owned.pop(name, None)
+            finally:
+                self._prune_fingerprints()
             self._prune_paths()
 
 

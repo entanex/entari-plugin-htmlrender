@@ -95,14 +95,14 @@ class HostedAssetStore:
     async def startup(self) -> None:
         """Create transient storage during the owning lifecycle's startup."""
         async with self._lock:
-            if self._directory is not None:
-                return
             if self._closed:
                 raise ProviderLifecycleError(
                     "The hosted asset store is closed.",
                     provider_id=None,
                     operation="startup",
                 )
+            if self._directory is not None:
+                return
             self._directory = await run_sync(_create_temp_directory)
 
     def open_namespace(
@@ -305,15 +305,16 @@ class HostedAssetStore:
     async def aclose(self) -> None:
         """Driver-shutdown hook: drop every asset and the temp directory."""
         async with self._lock:
-            if self._closed:
+            if self._closed and self._directory is None:
                 return
             self._closed = True
             self._entries.clear()
             self._resident_bytes = 0
             directory = self._directory
+            if directory is None:
+                return
+            await run_sync(_remove_tree, directory)
             self._directory = None
-        if directory is not None:
-            await run_sync(_remove_tree_quietly, directory)
 
 
 @final
@@ -430,8 +431,15 @@ def _unlink_quietly(path: Path) -> None:
         logger.warning("Could not delete a hosted asset file.")
 
 
-def _remove_tree_quietly(path: Path) -> None:
-    shutil.rmtree(path, ignore_errors=True)
+def _remove_tree(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        try:
+            path.stat()
+        except FileNotFoundError:
+            return
+        raise
 
 
 @final
@@ -455,6 +463,7 @@ class HostedAssetHttpServer:
         self._runner: AppRunner | None = None
         self._lock = anyio.Lock()
         self._closed = False
+        self._started = False
 
     @property
     def store(self) -> HostedAssetStore:
@@ -462,11 +471,17 @@ class HostedAssetHttpServer:
 
     async def startup(self) -> None:
         async with self._lock:
-            if self._runner is not None:
-                return
             if self._closed:
                 raise ProviderLifecycleError(
                     "The hosted asset server is closed.",
+                    provider_id=None,
+                    operation="startup",
+                )
+            if self._started:
+                return
+            if self._runner is not None:
+                raise ProviderLifecycleError(
+                    "The hosted asset server has an incomplete startup awaiting cleanup.",
                     provider_id=None,
                     operation="startup",
                 )
@@ -508,6 +523,7 @@ class HostedAssetHttpServer:
                 serve,
             )
             runner = web.AppRunner(app)
+            self._runner = runner
             try:
                 await runner.setup()
                 site = web.TCPSite(runner, self._bind_host, self._bind_port)
@@ -520,8 +536,9 @@ class HostedAssetHttpServer:
                         "Hosted asset server startup and rollback failed.",
                         [error, cleanup_error],
                     ) from error
+                self._runner = None
                 raise
-            self._runner = runner
+            self._started = True
             logger.info(
                 "Hosted asset server listening on %s:%d%s/.",
                 self._bind_host,
@@ -531,6 +548,8 @@ class HostedAssetHttpServer:
 
     async def aclose(self) -> None:
         async with self._lock:
+            self._closed = True
+            self._started = False
             runner = self._runner
             errors: list[BaseException] = []
             if runner is not None:
@@ -545,7 +564,6 @@ class HostedAssetHttpServer:
             except BaseException as error:
                 errors.append(error)
             if not errors:
-                self._closed = True
                 return
             if len(errors) == 1:
                 raise errors[0]

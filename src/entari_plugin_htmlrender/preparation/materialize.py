@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import replace
+from html import unescape
 import mimetypes
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 from urllib.request import url2pathname
 
 from entari_plugin_htmlrender._logging import logger
@@ -47,7 +48,13 @@ def _file_url_path(url: str) -> Path:
         raise AssetMaterializationError(
             f"Remote file URL authorities are not supported: {parsed.netloc!r}"
         )
-    return Path(url2pathname(unquote(parsed.path))).expanduser()
+    # url2pathname already performs the platform-specific single UTF-8 decode.
+    return Path(url2pathname(parsed.path)).expanduser()
+
+
+def _is_fragment_only_reference(reference: str) -> bool:
+    normalized = unescape(reference).strip().strip("'\"")
+    return normalized.startswith("#")
 
 
 def _validate_local_path(
@@ -108,6 +115,8 @@ async def materialize_local_assets(
     expanded_stylesheets: set[str] = set()
     while pending:
         reference, base_url = pending.popleft()
+        if _is_fragment_only_reference(reference):
+            continue
         canonical = resolve_document_reference(base_url, reference)
         existing = index.match(reference, base_url=base_url)
         if existing is not None:

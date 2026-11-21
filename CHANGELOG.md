@@ -40,6 +40,15 @@ and versioning follows the [release policy](docs/project/release.md).
 
 ### Fixed
 
+- preserve bracketed IPv6 identities when matching published browser-resource authorization, so a host/port pair cannot share credentials with a different IPv6 address.
+- report expired rendering deadlines after cancellation-shielded workers drain, instead of returning a late successful result.
+- decode local file URLs once, retain literal percent-encoded filename characters, and avoid fetching document-local SVG/CSS fragment references.
+- reject further native calls on a poisoned Takumi lease, keep font-family state accurate after partial registration failures, and inherit document bases for prepared stylesheets.
+- classify managed Takumi input validation failures consistently while preserving native execution error semantics.
+- retain filehost listener and temporary-directory ownership until cleanup succeeds, allowing failed or cancelled cleanup to be retried.
+- isolate cancellation between Entari DI callers and release unused drawing module fingerprints without disturbing active or borrowed plugins.
+- guarantee runtime cleanup when Provider conformance checks fail or are cancelled.
+- require real browser-test execution in the Entari compatibility workflow and include that workflow in exact-source release gates and the main protection template.
 - preserve resource URL fragments and decode local URL paths before authorization, while keeping filehost request headers scoped to the exact fragment-free request URL.
 - harden release workflow dispatch ([d224199](https://github.com/entanex/entari-plugin-htmlrender/commit/d2241991fd2428fa259f685d72982428834766a1) by Tacrolimus).
 - strengthen distribution metadata and CI contracts for the Python/Entari support matrix and minimum versions for native extras.

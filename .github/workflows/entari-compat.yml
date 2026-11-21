@@ -157,6 +157,9 @@ jobs:
     name: Browser integration (Python 3.12)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      HTMLRENDER_TEST_PROFILE: local
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.artifacts/playwright-browsers
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -171,16 +174,46 @@ jobs:
           dependency-scope: all
 
       - name: Install Chromium
-        env:
-          HTMLRENDER_TEST_PROFILE: local
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
         run: uv run playwright install --with-deps chromium
+
+      - name: Verify project-local Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          browser_directories=(
+            "${PLAYWRIGHT_BROWSERS_PATH}"/chromium-*
+            "${PLAYWRIGHT_BROWSERS_PATH}"/chromium_headless_shell-*
+          )
+          if (( ${#browser_directories[@]} == 0 )); then
+            echo "::error::Chromium was not installed under ${PLAYWRIGHT_BROWSERS_PATH}."
+            exit 1
+          fi
+          printf 'Found Chromium installation: %s\n' "${browser_directories[@]}"
 
       - name: Run real-browser integration
         env:
-          HTMLRENDER_TEST_PROFILE: local
-          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/playwright-browsers
-        run: uv run pytest tests/adapters/playwright/test_browser_integration.py -q --no-cov
+          HTMLRENDER_REQUIRE_BROWSER: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          browser_results="${RUNNER_TEMP}/browser-integration.xml"
+          uv run pytest tests/adapters/playwright/test_browser_integration.py \
+            -q --no-cov --junitxml="${browser_results}"
+          uv run --no-project python3 - "${browser_results}" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          root = ET.parse(Path(sys.argv[1])).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          assert suite is not None
+          tests = int(suite.attrib["tests"])
+          skipped = int(suite.attrib["skipped"])
+          assert tests > 0
+          assert skipped == 0
+          print(f"Executed {tests} real-browser tests with zero skips.")
+          PY
 
   result:
     name: Entari Compatibility Matrix
@@ -214,4 +247,4 @@ jobs:
             echo "::error::At least one Entari compatibility layer did not succeed."
             exit 1
           fi
-          echo "The installed-load and real-browser compatibility layers succeeded."
+          echo "All installed-load, real-browser, and checker compatibility layers succeeded."

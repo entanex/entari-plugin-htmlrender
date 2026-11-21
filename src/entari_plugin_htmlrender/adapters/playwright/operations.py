@@ -4,7 +4,7 @@ from html import unescape
 import mimetypes
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urldefrag, urlsplit, urlunsplit
+from urllib.parse import urldefrag, urlsplit
 
 from anyio import CancelScope
 
@@ -39,6 +39,7 @@ from ._page import (
     PageContext,
     _setup_page_logging,
 )
+from ._url import normalize_request_url
 from .models import (
     ContentConfig,
     JpegScreenshotOptions,
@@ -165,22 +166,6 @@ def _asset_suffix(asset: PreparedAsset) -> str | None:
     return source_suffix or None
 
 
-def _normalize_authorized_url(url: str) -> str:
-    """Canonical identity for matching a published URL against a request.
-
-    Only scheme/host case, the default port and the fragment are normalized;
-    path and query stay part of the identity so a different query or a
-    redirect target does not inherit another resource's authorization.
-    """
-    split = urlsplit(url)
-    scheme = split.scheme.lower()
-    host = (split.hostname or "").lower()
-    default_port = {"http": 80, "https": 443}.get(scheme)
-    port = split.port
-    netloc = host if port is None or port == default_port else f"{host}:{port}"
-    return urlunsplit((scheme, netloc, split.path, split.query, ""))
-
-
 async def _publish_prepared_assets(
     prepared: PreparedHtml,
     *,
@@ -243,7 +228,7 @@ async def _publish_prepared_assets(
             lease_id=lease_id,
             suffix=_asset_suffix(asset),
         )
-        authorization[_normalize_authorized_url(result.url)] = result.request_headers
+        authorization[normalize_request_url(result.url)] = result.request_headers
         published[asset_id] = result.url
         visiting.remove(asset_id)
         return result.url

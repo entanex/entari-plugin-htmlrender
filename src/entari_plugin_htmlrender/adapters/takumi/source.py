@@ -21,7 +21,7 @@ from entari_plugin_htmlrender.preparation.references import (
 )
 from entari_plugin_htmlrender.resources.config import ResourceMaterializationPolicy
 
-from .errors import TakumiResourceError, TakumiUnsupportedError
+from .errors import TakumiInputError, TakumiResourceError, TakumiUnsupportedError
 from .types import (
     ImageCacheMode,
     TakumiImageResource,
@@ -209,7 +209,10 @@ def _inspect_document(
 ) -> tuple[DocumentStructureSnapshot, str | None]:
     ensure_utf8(prepared.html, field="prepared.html")
     if not prepared.html.strip():
-        raise ValueError("HTML content cannot be empty")
+        raise TakumiInputError(
+            "prepared.html",
+            "HTML content must not be empty",
+        )
     snapshot = prepared.structure
     document_base = prepared.document_base.resolve()
     if snapshot.has_script or DocumentRequirement.JAVASCRIPT in prepared.requirements:
@@ -339,7 +342,7 @@ def _build_takumi_document(
         references.extend(
             (
                 reference,
-                stylesheet.base_url,
+                stylesheet.base_url or document_base,
                 f"stylesheets[{stylesheet_index}].references[{reference_index}]",
             )
             for reference_index, reference in enumerate(

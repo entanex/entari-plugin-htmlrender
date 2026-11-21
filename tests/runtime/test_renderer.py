@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from inspect import signature
 from pathlib import Path
+from time import sleep
 from typing import TYPE_CHECKING, cast, get_type_hints
 
 import anyio
+from anyio.to_thread import run_sync
 import pytest
 
 from entari_plugin_htmlrender.errors import (
@@ -68,6 +70,7 @@ class _FakeExecutor:
     )
     calls: list[_ExecutorCall] = field(default_factory=list)
     delay: float = 0
+    worker_delay: float = 0
     failure: BaseException | None = None
 
     async def execute(
@@ -80,6 +83,8 @@ class _FakeExecutor:
     ) -> RenderedImage:
         if self.delay:
             await anyio.sleep(self.delay)
+        if self.worker_delay:
+            await run_sync(sleep, self.worker_delay)
         if self.failure is not None:
             raise self.failure
         self.calls.append(
@@ -94,6 +99,7 @@ class _FakePreparer:
     html_content: str = "<p>template html</p>"
     calls: list[tuple[str, dict[str, object]]] = field(default_factory=list)
     delay: float = 0
+    worker_delay: float = 0
     template_options: (
         tuple[Mapping[str, FilterCallable] | None, Sequence[ExtensionSpec]] | None
     ) = None
@@ -101,6 +107,8 @@ class _FakePreparer:
     async def _wait(self) -> None:
         if self.delay:
             await anyio.sleep(self.delay)
+        if self.worker_delay:
+            await run_sync(sleep, self.worker_delay)
 
     async def prepare_html(
         self,
@@ -360,6 +368,35 @@ async def test_inner_timeout_is_not_misclassified_as_public_deadline() -> None:
 
     with pytest.raises(TimeoutError, match="provider timeout"):
         await renderer.rasterize_html("<p>failure</p>", timeout_seconds=1)
+
+
+@pytest.mark.parametrize("phase", ["preparation", "execution", "template"])
+async def test_deadline_rejects_result_after_shielded_worker_finishes(
+    phase: str,
+) -> None:
+    renderer, templates, preparer, executor = _full_renderers()
+    if phase == "execution":
+        executor.worker_delay = 0.1
+    else:
+        preparer.worker_delay = 0.1
+
+    with pytest.raises(RenderTimeoutError) as captured:
+        if phase == "template":
+            await templates.render(
+                TemplateRef(Path("templates"), "card.html"),
+                {},
+                timeout_seconds=0.02,
+            )
+        else:
+            await renderer.rasterize_html("<p>slow worker</p>", timeout_seconds=0.02)
+
+    assert captured.value.timeout_seconds == 0.02
+    # The worker is drained before reporting the timeout, so no late work
+    # can outlive the operation's resource admission.
+    if phase == "execution":
+        assert len(executor.calls) == 1
+    else:
+        assert len(preparer.calls) == 1
 
 
 async def test_missing_binding_preserves_provider_identity() -> None:

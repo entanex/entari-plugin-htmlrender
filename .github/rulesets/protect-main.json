@@ -50,6 +50,10 @@
           {
             "context": "Docs Preview",
             "integration_id": 15368
+          },
+          {
+            "context": "Entari Compatibility Matrix",
+            "integration_id": 15368
           }
         ],
         "strict_required_status_checks_policy": true

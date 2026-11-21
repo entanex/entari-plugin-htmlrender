@@ -30,16 +30,18 @@ tags:
 
 `make test-local` 前先运行 `make install-browser`。`make remote-smoke-build` 会强制重建镜像；普通迭代优先使用可复用缓存的 `make remote-smoke`，完成后可用 `make remote-smoke-down` 清理。
 
+`Entari Compatibility` 的 browser job 使用 `local` profile 并设置 `HTMLRENDER_REQUIRE_BROWSER=1`。严格模式要求 Chromium 位于项目的 `.artifacts/playwright-browsers`，实际收集到 `requires_browser` 用例，并由 JUnit 结果证明执行数大于零且 skip 数为零。严格模式与 `ci` profile 同时设置会直接产生 pytest 配置错误，不会回退为 CI profile 的统一跳过。
+
 ## Python 版本矩阵
 
-项目支持 Python 3.11–3.14。`Coverage` 和 Entari load 都覆盖完整版本范围：
+项目支持 Python 3.11–3.14。`Coverage` 和 `Entari Compatibility` 的 installed-load 矩阵都覆盖完整版本范围：
 
-| Python | pytest + coverage | Entari load | 角色                  |
-| ------ | ----------------- | ---------- | --------------------- |
-| 3.11   | 是                | 是         | 最低支持版本          |
-| 3.12   | 是                | 是         | 固定工具链 / 文档版本 |
-| 3.13   | 是                | 是         | 新版运行时兼容        |
-| 3.14   | 是                | 是         | 最新稳定版前向兼容    |
+| Python | pytest + coverage | Entari installed-load | 角色                  |
+| ------ | ----------------- | --------------------- | --------------------- |
+| 3.11   | 是                | 是                    | 最低支持版本          |
+| 3.12   | 是                | 是                    | 固定工具链 / 文档版本 |
+| 3.13   | 是                | 是                    | 新版运行时兼容        |
+| 3.14   | 是                | 是                    | 最新稳定版前向兼容    |
 
 Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，减少工具自身版本差异；`basedpyright.pythonVersion` 保持为最低支持版本 3.11，以便静态契约不会误用较新语法或标准库。这不缩小运行时支持范围，运行时兼容性由两个矩阵承担。
 
@@ -56,17 +58,15 @@ Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，�
 
 每个矩阵项生成独立 coverage XML、pytest log 与 Codecov flag，并要求总覆盖率不低于 90%。某一个版本或架构失败时，不得用其他矩阵项通过来抵消。
 
-## Entari load 矩阵
+## Entari Compatibility 矩阵
 
-该矩阵对 `entari_plugin_htmlrender` 执行：
+`Entari Compatibility` workflow 对 `entari_plugin_htmlrender` 执行三层验证：
 
-1. 在隔离环境安装当前 package；
-1. 验证普通 import 不注册宿主 service；
-1. 让 Entari loader 实际加载插件；
-1. 检查 plugin metadata、配置模型、`HtmlRenderService` 注册与卸载；
-1. 在任一 Python 版本失败时令 job 失败。
+1. installed-load 在 Python 3.11–3.14 上分别安装 core、`[takumi]` 与 `[pillow,skia]` profile；每项验证普通 import 不注册宿主 service、Entari loader 实际加载、plugin metadata/config、`HtmlRenderService` 注册与卸载；
+1. checker-tests 运行 `.github/entari-load-check` 的 checker 与 runner 自测；
+1. browser-integration 在项目内 Chromium 上执行真实 Playwright 用例，并拒绝零执行或任意 skip。
 
-当前只检查核心依赖，不遍历全部 optional dependency 组合；extras 的依赖解析、Provider 专属能力与真实浏览器启动分别由 package、pytest 和 smoke 层承担。Entari load 通过不意味着渲染功能已经执行。
+installed-load 不遍历全部 optional dependency 组合；其余 extras 的依赖解析、Provider 专属能力与远程浏览器启动仍由 package、pytest 和 smoke 层承担。`Entari Compatibility Matrix` 汇总 job 只有在三层全部 `success` 时通过，任一层失败、取消或跳过都会阻止 PR 合并和 Auto Tag 发布。
 
 ## 浏览器覆盖决策
 
@@ -87,7 +87,7 @@ Ruff、`ty`、`basedpyright`、package 与 docs 工具固定在 Python 3.12，�
 - wheel/`RECORD` 检查 package resources 均存在且非空；bare-core smoke 断言 Playwright、Takumi、Pillow、Skia 与宿主框架插件依赖均未安装；`[takumi]` 校验最低版本要求并执行真实 native PNG，`[pillow,skia]` 验证独立 `RasterScene` 能力；
 - `[all]` 隔离安装后扫描完整 distribution 集合，确认可选能力及传递依赖不含 NoneBot；metadata 校验同样覆盖所有 extra，归档检查拒绝已移除的 backend 文件；
 - 修改文档、MkDocs/Zensical 配置、文档依赖、Make target 或 docs workflow：运行 `make docs-build`，该 target 执行 strict build；
-- 修改插件入口、metadata、config 或依赖：除单测外必须等待完整 Entari load 矩阵；
+- 修改插件入口、metadata、config 或依赖：除单测外必须等待完整 `Entari Compatibility` 矩阵；
 - 修改公开行为：同步更新使用指南或 API 参考、回归测试和必要的兼容性说明。
 
 Documentation contract 属于 pytest 门禁，而不只是站点构建：
