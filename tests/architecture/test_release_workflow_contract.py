@@ -1,8 +1,12 @@
 """Contracts shared by release and distribution verification workflows."""
 
+import json
 from pathlib import Path
 import re
+import runpy
 import tomllib
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -188,8 +192,75 @@ def test_required_check_contexts_remain_stable() -> None:
     assert "name: Coverage Matrix" in _workflow("coverage.yml")
     assert "name: Prek" in _workflow("prek.yml")
     assert "name: Docs Preview" in _workflow("docs-pr-preview.yml")
-    for context in ("Required Checks", "Coverage Matrix", "Prek", "Docs Preview"):
+    assert "name: Entari Compatibility Matrix" in _workflow("entari-compat.yml")
+    for context in (
+        "Required Checks",
+        "Coverage Matrix",
+        "Prek",
+        "Docs Preview",
+        "Entari Compatibility Matrix",
+    ):
         assert f'"context": "{context}"' in ruleset
+
+
+def test_entari_compatibility_gates_main_and_release_merges() -> None:
+    auto_tag = _workflow("auto-tag.yml")
+    ruleset = json.loads((RULESETS / "protect-main.json").read_text(encoding="utf-8"))
+
+    assert (
+        "      - Entari Compatibility\n"
+        in auto_tag.partition("  workflow_dispatch:")[0]
+    )
+    assert '"Entari Compatibility:entari-compat.yml"' in auto_tag
+
+    required_checks = next(
+        rule["parameters"]["required_status_checks"]
+        for rule in ruleset["rules"]
+        if rule["type"] == "required_status_checks"
+    )
+    assert "Entari Compatibility Matrix" in {
+        check["context"] for check in required_checks
+    }
+
+
+def test_browser_compatibility_uses_project_local_browser_and_rejects_skips() -> None:
+    workflow = _workflow("entari-compat.yml")
+    browser_job = workflow.split("  browser-integration:\n", 1)[1].split(
+        "  result:\n", 1
+    )[0]
+    project_browser_path = "${{ github.workspace }}/.artifacts/playwright-browsers"
+
+    assert "PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}" not in browser_job
+    assert f"PLAYWRIGHT_BROWSERS_PATH: {project_browser_path}" in browser_job
+    assert "uv run playwright install --with-deps chromium" in browser_job
+    assert "Verify project-local Chromium" in browser_job
+    assert (
+        "uv run pytest tests/adapters/playwright/test_browser_integration.py"
+        in browser_job
+    )
+    assert 'HTMLRENDER_REQUIRE_BROWSER: "1"' in browser_job
+    assert "--junitxml=" in browser_job
+    for result_contract in (
+        'tests = int(suite.attrib["tests"])',
+        'skipped = int(suite.attrib["skipped"])',
+        "assert tests > 0",
+        "assert skipped == 0",
+    ):
+        assert result_contract in browser_job
+
+
+def test_strict_browser_mode_rejects_ci_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HTMLRENDER_TEST_PROFILE", "ci")
+    monkeypatch.setenv("HTMLRENDER_REQUIRE_BROWSER", "1")
+    conftest = runpy.run_path(str(ROOT / "tests" / "conftest.py"))
+
+    with pytest.raises(
+        pytest.UsageError,
+        match="requires HTMLRENDER_TEST_PROFILE=local",
+    ):
+        conftest["pytest_configure"](object())
 
 
 def test_local_and_remote_coverage_gates_share_the_release_threshold() -> None:

@@ -44,7 +44,7 @@ make build-artifacts
 1. 准备发版时，只把已经可发布的变更合入 `main`，未完成分支继续保持开放或放在 feature flag 后；
 1. 从选定的 `main` 快照创建短生命周期 `release/v<version>`，集中完成 `uv version <version>`、锁文件、变更说明和 release notes；
 1. release PR 使用与普通 PR 相同的 review、preview 和 required checks，最终 squash merge；不要在 PR 合并前手工创建 tag；
-1. 合并后的四条 main workflow 按精确 source SHA 保留运行。后续 PR 即使很快合并，也不会取消或混入本次版本门禁；
+1. 合并后的五条 main workflow 按精确 source SHA 保留运行。后续 PR 即使很快合并，也不会取消或混入本次版本门禁；
 1. Auto Tag 只给版本变化的 trusted main SHA 打 tag，因此版本边界由该提交确定，而不是由发布 workflow 启动时仍在移动的 `main` 决定。
 
 当前自动发布只授权 `main` 历史。若未来需要维护已分叉的稳定线，应先设计受保护的 maintenance branch、回合并规则和 tag 授权，再扩展 ancestry gate；不要临时从维护分支打 tag 后绕过校验。
@@ -53,8 +53,8 @@ make build-artifacts
 
 ```mermaid
 flowchart LR
-    A["版本 PR squash merge"] --> B["同一 main SHA 的<br/>CI + Coverage + Docs + Prek"]
-    B --> R["workflow_run 汇合门禁<br/>四条全部 completed/success"]
+    A["版本 PR squash merge"] --> B["同一 main SHA 的<br/>CI + Coverage + Entari Compatibility + Docs + Prek"]
+    B --> R["workflow_run 汇合门禁<br/>五条全部 completed/success"]
     R --> P["比较 first parent/current version<br/>PEP 440 + package preflight"]
     P --> C["创建 v&lt;version&gt; tag<br/>指向 trusted main SHA"]
     C --> D["Publish: resolve + verify"]
@@ -67,10 +67,10 @@ flowchart LR
 
 ### Auto Tag on Version Change
 
-`Auto Tag on Version Change` 监听 `CI`、`Coverage`、`Docs`、`Prek` 的 `workflow_run: completed` 事件。每个完成事件都只在受信任的 `main` push 上参与汇合，因此版本 PR 可以来自 fork，不需要让 fork PR workflow 持有写权限。
+`Auto Tag on Version Change` 监听 `CI`、`Coverage`、`Entari Compatibility`、`Docs`、`Prek` 的 `workflow_run: completed` 事件。每个完成事件都只在受信任的 `main` push 上参与汇合，因此版本 PR 可以来自 fork，不需要让 fork PR workflow 持有写权限。
 
-1. 以 `workflow_run.head_sha` 为唯一 source SHA，通过 Actions API 查询同一 SHA、`main`、`push` 事件的四条 required workflow；任一缺失、未完成、失败或取消时正常结束且不创建 tag；required workflows 不会用后续 main push 取消旧 source SHA；
-1. 四条全部成功后检出该精确 SHA，并确认它位于 `origin/main`；同一 SHA 的多个完成事件按 concurrency key 串行化；
+1. 以 `workflow_run.head_sha` 为唯一 source SHA，通过 Actions API 查询同一 SHA、`main`、`push` 事件的五条 required workflow；任一缺失、未完成、失败或取消时正常结束且不创建 tag；required workflows 不会用后续 main push 取消旧 source SHA；
+1. 五条全部成功后检出该精确 SHA，并确认它位于 `origin/main`；同一 SHA 的多个完成事件按 concurrency key 串行化；
 1. 从 source SHA 第一父提交的 `pyproject.toml` 读取旧版本，再与当前项目版本比较；版本相同则正常结束；
 1. 只有版本实际变化时才用 pinned `packaging` 验证 PEP 440：新旧版本必须使用 canonical spelling，新版本必须严格递增，且不能带 PyPI 不接受的 local segment；
 1. 在 tag 产生前确认 `Publish` 已在默认分支登记且处于 active 状态，再检查锁文件、构建唯一 wheel/sdist 并执行 pinned Twine 校验；workflow 或 package preflight 失败都不会占用版本号；
@@ -79,7 +79,7 @@ flowchart LR
 
 普通 PR、只修改依赖配置的 PR 或未改变 `project.version` 的 main commit 都不会创建 tag。版本更新必须位于最终 squash/merge commit，确保第一父提交与 gated source 的版本差异可审计。
 
-如果 Auto Tag 的构建 preflight 因 workflow 基础设施缺陷失败且尚未创建 tag，先通过 PR 修复基础设施，并等待修复后当前 `main` SHA 的 CI、Coverage、Docs、Prek 全部成功。随后从默认分支手动运行 `Auto Tag on Version Change`，输入该完整 `source_sha`。恢复入口只接受当前 `main` tip、重新汇合该精确 SHA 的四条门禁、要求目标 tag 尚不存在，并再次执行完整 package preflight；它不能用于已有 tag 的发布恢复，也不能选择历史 commit。已有 tag 应直接按下文重跑 `Publish`。
+如果 Auto Tag 的构建 preflight 因 workflow 基础设施缺陷失败且尚未创建 tag，先通过 PR 修复基础设施，并等待修复后当前 `main` SHA 的 CI、Coverage、Entari Compatibility、Docs、Prek 全部成功。随后从默认分支手动运行 `Auto Tag on Version Change`，输入该完整 `source_sha`。恢复入口只接受当前 `main` tip、重新汇合该精确 SHA 的五条门禁、要求目标 tag 尚不存在，并再次执行完整 package preflight；它不能用于已有 tag 的发布恢复，也不能选择历史 commit。已有 tag 应直接按下文重跑 `Publish`。
 
 由 `GITHUB_TOKEN` push 产生的事件不会再次触发普通 downstream workflow；显式 `workflow_dispatch` 是发布契约的一部分，也使同一 tag 的恢复可重复执行。
 
@@ -128,7 +128,7 @@ TestPyPI 用于安装行为或包元数据的人工验收，不是 PR 必需 che
 
 | 状态                                         | 恢复方式                                                                                                                                      |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auto Tag package preflight 失败，尚未创建 tag | 基础设施缺陷先通过 PR 修复；四条 required workflow 在修复后的当前 `main` SHA 全部成功后，以该完整 SHA 手动运行 `Auto Tag on Version Change`；产物或 metadata 缺陷则提升版本并走新的版本 PR |
+| Auto Tag package preflight 失败，尚未创建 tag | 基础设施缺陷先通过 PR 修复；五条 required workflow 在修复后的当前 `main` SHA 全部成功后，以该完整 SHA 手动运行 `Auto Tag on Version Change`；产物或 metadata 缺陷则提升版本并走新的版本 PR |
 | tag/source/version 不变量校验失败            | 停止发布并核对 tag 来源；代码或版本确有错误时发起新的版本 PR。除非维护者确认 tag 从未对外发布且明确承担历史变更风险，否则不要移动或重建原 tag |
 | build / `twine check` 失败，尚未上传 PyPI    | 基础设施瞬时故障可对同一 tag 重跑；产物或 metadata 确有错误时提升版本并走新的版本 PR                                                          |
 | 校验和构建成功，PyPI 因临时故障失败          | 对同一已验证 tag 重新运行 `Publish`                                                                                                           |

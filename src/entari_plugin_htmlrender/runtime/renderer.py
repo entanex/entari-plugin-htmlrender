@@ -201,6 +201,11 @@ def _operation_deadline(
             timeout_seconds,
             source=error,
         ) from error
+    # Non-abandoning worker calls shield cancellation until their work ends.
+    # Without another checkpoint fail_after can exit normally past its deadline.
+    # Drain the worker, but never report its late result as a successful call.
+    if cancel_scope is not None and anyio.current_time() >= cancel_scope.deadline:
+        raise RenderTimeoutError(operation, timeout_seconds)
 
 
 @final

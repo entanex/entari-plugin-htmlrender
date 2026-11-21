@@ -5,6 +5,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import logging
+from pathlib import Path
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,7 +16,6 @@ from entari_plugin_htmlrender._logging import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 _SECRET = "sentinel-Sup3rSecret-秘密-value"
 
@@ -62,7 +64,7 @@ class _ResponseStub:
     request: _RequestStub
 
 
-def test_page_logging_handlers_never_emit_console_or_error_payload() -> None:
+def _check_page_logging_handlers_never_emit_payload() -> None:
     from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
         log_console_event,
         log_page_error_event,
@@ -93,6 +95,24 @@ def test_page_logging_handlers_never_emit_console_or_error_payload() -> None:
     assert "type=error" in joined
     assert "resource_type=image" in joined
     assert "status=500" in joined
+
+
+def test_page_logging_handlers_never_emit_console_or_error_payload() -> None:
+    # Entari's process-global importer treats adapter names as plugins. Exercise
+    # the library logging contract without depending on another test's host loop.
+    source = (
+        "import runpy; "
+        f"checks = runpy.run_path({str(Path(__file__).resolve())!r}); "
+        "checks['_check_page_logging_handlers_never_emit_payload']()"
+    )
+    result = subprocess.run(  # noqa: S603 -- fixed interpreter and local test source
+        [sys.executable, "-c", source],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.anyio

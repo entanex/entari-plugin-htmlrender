@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import anyio
+from anyio.lowlevel import checkpoint
 from anyio.to_thread import run_sync as run_sync_in_worker
 from pydantic import ValidationError
 import pytest
@@ -507,6 +508,67 @@ async def test_panic_poisons_runtime_health(
         await state.call_renderer("where")
 
     assert not state.healthy
+    with pytest.raises(TakumiRuntimeError, match="poisoned"):
+        await state.call_renderer("where")
+
+
+@pytest.mark.anyio
+async def test_queued_call_rejects_poisoned_runtime_before_reentry(
+    fake_takumi_module: None,
+) -> None:
+    del fake_takumi_module
+    panic_type = type(
+        "PanicException",
+        (BaseException,),
+        {"__module__": "pyo3_runtime"},
+    )
+
+    class BlockingPanicRenderer(_FakeRenderer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.where_calls = 0
+
+        def render_node(self, node: object, **kwargs: object) -> bytes:
+            del node, kwargs
+            self.started.set()
+            if not self.release.wait(timeout=5):
+                raise TimeoutError("test did not release the panicking render")
+            raise panic_type("panic")
+
+        def where(self) -> int:
+            self.where_calls += 1
+            return super().where()
+
+    renderer = BlockingPanicRenderer()
+    state = _state(renderer)
+    state.limiter = anyio.Semaphore(1)
+    queued_completed = False
+
+    async def panic_first() -> None:
+        with pytest.raises(TakumiBackendError, match="panic"):
+            await state.call_renderer("render_node", {"type": "container"})
+
+    async def run_queued() -> None:
+        nonlocal queued_completed
+        try:
+            await state.call_renderer("where")
+        except TakumiRuntimeError as error:
+            assert "poisoned" in str(error)
+        else:
+            queued_completed = True
+
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(panic_first)
+        await run_sync_in_worker(renderer.started.wait)
+        task_group.start_soon(run_queued)
+        await checkpoint()
+        renderer.release.set()
+
+    assert not state.healthy
+    assert not queued_completed
+    assert renderer.where_calls == 0
 
 
 @pytest.mark.anyio
@@ -657,6 +719,36 @@ async def test_dynamic_font_strings_are_validated_before_native_registration(
 
     assert exc_info.value.field == "font.name"
     assert renderer.font_registrations == []
+
+
+@pytest.mark.anyio
+async def test_partial_font_registration_exposes_only_successful_native_state(
+    fake_takumi_module: None,
+) -> None:
+    del fake_takumi_module
+
+    class PartiallyFailingRenderer(_FontCacheRenderer):
+        def register_font(self, font: object) -> tuple[str, ...]:
+            if getattr(font, "data", None) == b"invalid":
+                raise RuntimeError("invalid native font bytes")
+            return super().register_font(font)
+
+    renderer = PartiallyFailingRenderer()
+    state = _state(renderer)
+    successes = (_FontResource(b"valid", name="Successful"),)
+    attempted = (*successes, _FontResource(b"invalid", name="Failed"))
+
+    with pytest.raises(RuntimeError, match="invalid native font bytes"):
+        await state.register_fonts(
+            attempted,
+            sources=("memory:successful", "memory:failed"),
+        )
+
+    assert renderer.families == {"Successful"}
+    assert state.registered_font_families == ("Successful",)
+    assert await state.unregister_font("Successful") is True
+    assert renderer.families == set()
+    assert state.registered_font_families == ()
 
 
 @pytest.mark.anyio

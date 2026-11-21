@@ -18,13 +18,14 @@ tags:
 | --- | --- | --- | --- |
 | CI | `.github/workflows/ci.yml` | Ruff format/check、类型检查、分发安装矩阵、远程浏览器 smoke、Entari load | push `main`、PR、手动 |
 | Coverage | `.github/workflows/coverage.yml` | Python 3.11–3.14 × x64/arm64 pytest/coverage | push `main`、PR、手动 |
+| Entari Compatibility | `.github/workflows/entari-compat.yml` | Python 3.11–3.14 隔离安装/加载矩阵、checker 自测与真实 Chromium；汇总为 `Entari Compatibility Matrix` | push `main`、PR、手动 |
 | Prek | `.github/workflows/prek.yml` | 仓库级 prek hooks | push `main`、PR、手动 |
 | Docs PR Preview Build | `.github/workflows/docs-pr-preview.yml` | 检测文档相关变更，以只读权限严格构建静态站 | PR open/sync/reopen |
 | Docs PR Preview Deploy | `.github/workflows/docs-pr-preview-deploy.yml` | 校验并发布 build artifact，更新 PR 预览评论 | preview build 完成 |
 | Docs PR Preview Cleanup | `.github/workflows/docs-pr-preview-cleanup.yml` | 删除已关闭 PR 的 Pages 预览 | PR closed |
 | Docs | `.github/workflows/docs.yml` | 对每个可能成为 release source 的 `main` SHA 执行严格文档构建，不写 Pages | push `main`、手动 |
 | Publish (TestPyPI) | `.github/workflows/publish-test.yml` | 构建唯一 dev version 并 trusted publish 到 TestPyPI | **仅手动** |
-| Auto Tag on Version Change | `.github/workflows/auto-tag.yml` | 汇合同一 main SHA 的 CI/Coverage/Docs/Prek，验证版本递增后 tag 并 dispatch `Publish`；也提供受同等门禁约束的 pre-tag recovery | 四条 required workflow 完成、受约束的手动恢复 |
+| Auto Tag on Version Change | `.github/workflows/auto-tag.yml` | 汇合同一 main SHA 的 CI/Coverage/Entari Compatibility/Docs/Prek，验证版本递增后 tag 并 dispatch `Publish`；也提供受同等门禁约束的 pre-tag recovery | 五条 required workflow 完成、受约束的手动恢复 |
 | Publish | `.github/workflows/publish.yml` | 校验 tag/source/version，发布并回读 PyPI、创建 GitHub Release，最后部署对应 tag 的版本文档 | `v*` tag、受约束的手动恢复 |
 
 ## PR 必需质量层
@@ -56,6 +57,14 @@ pytest-py<python-version>-<arch>.log
 XML 上传 Codecov，日志与 XML 同时作为 `coverage-debug-*` artifact 保留。每个矩阵项要求总覆盖率不低于 90%；不应用排除新代码或删除有效测试来规避阈值。
 
 `Coverage Matrix` 汇总完整矩阵，只在所有版本与架构均成功时通过，并为 Ruleset 提供稳定 check 名称。
+
+### Entari Compatibility
+
+`Entari Compatibility` 在 Python 3.11–3.14 上隔离安装 core、Takumi 与 graphics 配置，并验证包内 Entari 注册、插件加载与卸载。checker 自测覆盖安装检查器本身；真实浏览器层只使用项目的 `.artifacts/playwright-browsers`，安装、检测和测试启动共享同一路径。
+
+浏览器测试启用严格执行模式：没有 Chromium、没有收集到 `requires_browser` case、出现任意 skip 或测试进程失败，都会使 job 失败。workflow 从 JUnit 结果验证执行数大于零且 skip 数为零，而不依赖手工维护的用例数量。
+
+`Entari Compatibility Matrix` 是 always-run 汇总 job；任一 Python/profile、checker 或真实浏览器层不是 `success`，它都会失败。该稳定名称既用于 PR Ruleset，也用于 Auto Tag 的同 SHA 汇合。
 
 ### Prek
 
@@ -128,7 +137,7 @@ PR preview 只是同一 GitHub Pages origin 下的路径命名空间，并不是
 
 ## 正式文档部署
 
-`Docs` 对每个 `main` push 执行 strict build，不使用 paths filter。它的成功结果作为同一 source SHA 的发布门禁，但不会提前创建正式版本目录或移动 `latest`；这样即使文档未变化，Auto Tag 也始终能汇合同一 SHA 的四条门禁。
+`Docs` 对每个 `main` push 执行 strict build，不使用 paths filter。它的成功结果作为同一 source SHA 的发布门禁，但不会提前创建正式版本目录或移动 `latest`；这样即使文档未变化，Auto Tag 也始终能汇合同一 SHA 的五条门禁。
 
 只有 `Publish` 完成 PyPI hash 回读与 GitHub Release 后，`Publish versioned documentation` 才重新检出经过验证的 tag、再次 strict build，并调用 `mike` 写入正式版本目录。这样 `/0.2.0/` 表示该版本已经存在可安装产物，而不是“某个版本 PR 已合并”。
 
@@ -140,7 +149,7 @@ PR preview 只是同一 GitHub Pages origin 下的路径命名空间，并不是
 
 `Publish (TestPyPI)` 仅供维护者手动运行。它不是 PR workflow，不会自动评论安装命令，也不会给 fork 或同仓库 PR 自动发布 dev package。
 
-`Auto Tag on Version Change` 只在同一 source SHA 的 `CI`、`Coverage`、`Docs`、`Prek` 全部成功后继续。三条通用 required workflow 对 `main` push 使用 source SHA 作为 concurrency key，不会因为后续 PR 很快合并而取消版本提交的门禁；PR 更新仍会取消自身的过期 run。
+`Auto Tag on Version Change` 只在同一 source SHA 的 `CI`、`Coverage`、`Entari Compatibility`、`Docs`、`Prek` 全部成功后继续。这些 required workflows 对 `main` push 使用 source SHA 作为 concurrency key，不会因为后续 PR 很快合并而取消版本提交的门禁；PR 更新仍会取消自身的过期 run。
 
 版本差异检测、tag/source/version 不变量、trusted publishing 权限拆分及部分失败恢复见 [发布流程](release.md)。普通 `pyproject.toml` 配置变更在版本未变化时不会发布。发布 workflow 的写权限按 job 收窄，不允许构建步骤同时持有 PyPI OIDC 和仓库写权限。
 
@@ -195,4 +204,4 @@ Composite action 不负责 checkout、job permissions、environment、artifact �
 - 发布后的版本文档失败：下载 `release-docs-build-log` / `release-docs-deploy-log`；确认 PyPI 与 GitHub Release 已正确后，对同一 tag 重跑 `Publish`，不得从 release 分支手工复制 `site/`；
 - 打包失败：下载 package dist/build logs，并用 `make build-artifacts` 本地重现完整构建与 pinned `twine` 校验；
 - 发布失败：先判断 PyPI 是否已经产生不可逆上传，再核对 PyPI verification 的 filename/hash 结果，并按 [部分失败恢复](release.md#partial-failure-recovery)处理；
-- Auto Tag 未创建 tag：先核对同一 `workflow_run.head_sha` 的 CI/Coverage/Docs/Prek 是否全部 completed/success，再检查第一父提交与当前 `project.version`、trusted main SHA 和 tag 指向；禁止直接移动已发布 tag。
+- Auto Tag 未创建 tag：先核对同一 `workflow_run.head_sha` 的 CI/Coverage/Entari Compatibility/Docs/Prek 是否全部 completed/success，再检查第一父提交与当前 `project.version`、trusted main SHA 和 tag 指向；禁止直接移动已发布 tag。

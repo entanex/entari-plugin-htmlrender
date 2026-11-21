@@ -53,6 +53,8 @@ async def render_prepared(
 
 所有方法的 `raster`、`materialization_policy` 与 `timeout_seconds` 都是 kw-only。Markdown `str` 永远是 inline 内容；文件、包或远端文档必须传入对应 `ResourceRef`，不会按字符串形状猜测来源。
 
+`timeout_seconds` 是整个调用的截止时间，包括 preparation 与后端执行。无法安全抢占的同步 worker 会先排空，因此调用可能在截止时间之后才结束；即使 worker 正常返回，超过截止时间也会抛出 `RenderTimeoutError`，不会把迟到的结果作为成功返回。这个约定同样适用于 `TemplateRenderer.render()`。
+
 `supported_operations` 返回 `frozenset[RenderOperation]`，`supports(operation)`用于探测当前 composition。`RenderOperation` 同时描述输入领域与输出 artifact，例如`HTML_TO_IMAGE`、`TEMPLATE_TO_HTML` 与 `RASTER_SCENE_TO_IMAGE`；它不是 Python
 method name。
 

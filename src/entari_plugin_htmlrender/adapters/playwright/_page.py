@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, final
-from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
+from urllib.parse import urldefrag, urljoin, urlsplit
 from urllib.request import url2pathname
 
 import anyio
@@ -26,6 +26,7 @@ from entari_plugin_htmlrender.resources.models import (
     ResourceContent,
 )
 
+from ._url import normalize_request_url
 from .telemetry import detach_page, instrument_page
 
 if TYPE_CHECKING:
@@ -127,22 +128,6 @@ def _setup_page_logging(page: Page) -> None:
     page.on("response", log_response_event)
 
 
-def _normalize_request_url(url: str) -> str:
-    """Canonical identity for matching a request against published URLs.
-
-    Mirrors the publisher-side normalization: scheme/host case, default port
-    and fragment only. Path and query stay significant, so a different query
-    or a redirect target never matches another resource's authorization.
-    """
-    split = urlsplit(url)
-    scheme = split.scheme.lower()
-    host = (split.hostname or "").lower()
-    default_port = {"http": 80, "https": 443}.get(scheme)
-    port = split.port
-    netloc = host if port is None or port == default_port else f"{host}:{port}"
-    return urlunsplit((scheme, netloc, split.path, split.query, ""))
-
-
 def _file_url_path(url: str) -> Path:
     split = urlsplit(url)
     if split.netloc not in {"", "localhost"}:
@@ -208,7 +193,7 @@ class ManagedRequestGuard:
             split = urlsplit(request.url)
             if split.scheme in {"http", "https"}:
                 publication_headers = self._authorization.get(
-                    _normalize_request_url(request.url)
+                    normalize_request_url(request.url)
                 )
                 request_headers = merge_request_headers(
                     self._preset_request_headers,

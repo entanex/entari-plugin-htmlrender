@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from entari_plugin_htmlrender.adapters.takumi.errors import TakumiInputError
 from entari_plugin_htmlrender.adapters.takumi.operations import (
     rasterize_html,
     render_prepared_html,
@@ -69,20 +70,28 @@ async def test_rasterize_html_maps_logical_dimensions_and_keeps_auto_height() ->
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("width", "ratio"),
-    [(0, 1.0), (-1, 1.0), (10, 0.0), (10, float("inf")), (10, float("nan"))],
+    ("width", "ratio", "field"),
+    [
+        (0, 1.0, "width"),
+        (-1, 1.0, "width"),
+        (10, 0.0, "device_pixel_ratio"),
+        (10, float("inf"), "device_pixel_ratio"),
+        (10, float("nan"), "device_pixel_ratio"),
+    ],
 )
 async def test_invalid_dimensions_and_device_ratios_are_rejected(
     width: int,
     ratio: float,
+    field: str,
 ) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(TakumiInputError) as raised:
         await render_prepared_html(
             _runtime_state(_FakeState()),
             parse_html("<div>ok</div>"),
             width=width,
             device_pixel_ratio=ratio,
         )
+    assert raised.value.field == field
 
 
 @pytest.mark.anyio

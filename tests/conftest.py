@@ -5,6 +5,7 @@ import pytest
 
 _TEST_PROFILE_ENV = "HTMLRENDER_TEST_PROFILE"
 _TEST_ANYIO_BACKEND_ENV = "HTMLRENDER_TEST_ANYIO_BACKEND"
+_REQUIRE_BROWSER_ENV = "HTMLRENDER_REQUIRE_BROWSER"
 _LOCAL_TEST_PROFILE = "local"
 _CI_TEST_PROFILE = "ci"
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,22 @@ def _is_ci_test_profile() -> bool:
     return _TEST_PROFILE == _CI_TEST_PROFILE
 
 
+def _requires_strict_browser_execution() -> bool:
+    return os.environ.get(_REQUIRE_BROWSER_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _validate_browser_execution_configuration() -> None:
+    if _requires_strict_browser_execution() and _TEST_PROFILE != _LOCAL_TEST_PROFILE:
+        raise pytest.UsageError(
+            "Strict browser execution requires HTMLRENDER_TEST_PROFILE=local; "
+            f"got {_TEST_PROFILE!r}."
+        )
+
+
 def _has_test_browser_installation() -> bool:
     if not _TEST_PLAYWRIGHT_BROWSERS_PATH.exists():
         return False
@@ -46,7 +63,7 @@ def _configure_playwright_test_env() -> None:
     os.environ.pop("PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT", None)
     os.environ.pop("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", None)
 
-    if _is_ci_test_profile():
+    if _is_ci_test_profile() and not _requires_strict_browser_execution():
         os.environ.pop("PLAYWRIGHT_BROWSERS_PATH", None)
         return
 
@@ -55,7 +72,13 @@ def _configure_playwright_test_env() -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    _validate_browser_execution_configuration()
     _configure_playwright_test_env()
+    if _requires_strict_browser_execution() and not _has_test_browser_installation():
+        raise pytest.UsageError(
+            "Strict browser execution requires a Chromium installation under "
+            f"{_TEST_PLAYWRIGHT_BROWSERS_PATH}."
+        )
     del config
 
 
@@ -64,6 +87,14 @@ def pytest_collection_modifyitems(
     items: list[pytest.Item],
 ) -> None:
     del config
+    if _requires_strict_browser_execution():
+        browser_items = [item for item in items if "requires_browser" in item.keywords]
+        if not browser_items:
+            raise pytest.UsageError(
+                "Strict browser execution collected no requires_browser tests."
+            )
+        return
+
     if not _is_ci_test_profile():
         if _has_test_browser_installation():
             return

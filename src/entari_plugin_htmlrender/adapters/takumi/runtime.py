@@ -340,6 +340,11 @@ class TakumiRuntimeState:
 
     def _renderer_for_admitted_call(self) -> NativeRenderer:
         with self._lifecycle_lock:
+            if self._poisoned.is_set():
+                raise TakumiRuntimeError(
+                    "Takumi runtime is poisoned after a native panic; "
+                    "this lease cannot issue another native call."
+                )
             renderer = self.renderer
         if renderer is None:
             raise TakumiRuntimeError("Takumi renderer has already been released.")
@@ -585,12 +590,9 @@ class TakumiRuntimeState:
                         families=families,
                     )
                     self._font_registrations[source] = existing
+                    self.add_registered_font_families(existing.families)
                 result.extend(existing.families)
-            unique = tuple(dict.fromkeys(result))
-            self.registered_font_families = tuple(
-                dict.fromkeys((*self.registered_font_families, *unique))
-            )
-            return unique
+            return tuple(dict.fromkeys(result))
 
     async def register_font(
         self,
@@ -615,7 +617,10 @@ class TakumiRuntimeState:
         sources: Sequence[str | None] | None = None,
     ) -> tuple[str, ...]:
         if sources is not None and len(sources) != len(fonts):
-            raise ValueError("sources must contain one entry for each font")
+            raise TakumiInputError(
+                "fonts.sources",
+                "must contain one entry for each font",
+            )
         registrations: list[tuple[str | None, _FontSpec]] = []
         for index, font in enumerate(fonts):
             spec = _coerce_font_spec(font, field_name=f"fonts[{index}]")
