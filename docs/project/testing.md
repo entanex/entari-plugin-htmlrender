@@ -20,6 +20,14 @@ tags:
 
 新增 case 应能说明它防止哪一种本仓库回归，同一行为选择一个主要层级验证。不要把上游 API 清单、实现代码的字符串或 AST 切片当成行为契约。静态守卫只用于明确的仓库边界，例如模块依赖方向、公开导出和打包资源；真实入口已有验证时，不再断言它的内部写法。
 
+## Entari 对照基线
+
+本轮核对的最新正式版为 `arclet-entari 0.19.4`，对应官方 `main` / `v0.19.4` 提交 `d8aa1ef16e7f355726783158efbafbe096181c33`。`pyproject.toml` 与 `uv.lock` 已使用这一基线；插件加载、服务等待和卸载实现均与该提交对照。核对时 `dev/0.19.0` 指向更早的 `0c4c5fd6de5d65288dc6af165839dafd431afc3b`，因此本轮不切换到旧开发分支。后续升级应先确认实际发布版和源码提交，不以分支名称推断新旧。
+
+上游源码用于理解依赖边界，不复制其内部测试。Entari 集成只验证本插件的注册、DI、重载与释放；等待者、模块加载器和调度器本身的行为由上游负责。需要模拟共享 Future 时，只构造能触发插件回归的最小替身。
+
+Python、CPU 架构和隔离安装矩阵统一在 CI runner 执行。本地迭代仅运行当前环境下与修改直接相关的少量测试及静态检查；不在开发机重复安装并运行完整版本矩阵。
+
 ## 本地 profile
 
 | 入口                         | profile        | `requires_browser` | 并发           | 用途                                |
@@ -92,14 +100,11 @@ installed-load 不遍历全部 optional dependency 组合；其余 extras 的依
 
 Documentation contract 属于 pytest 门禁，而不只是站点构建：
 
-- README/docs/examples 禁止未发布或已删除的契约；
-- 当前公共顶层导出必须有文档覆盖；
-- `render` schema 的全部 leaf 使用完整 dotted path；
 - 所有 Python fence 与 examples Python 文件必须可解析；
 - 顶层示例 import 必须存在于 `__all__`；
 - examples 纳入 basedpyright、ty 与 Ruff 检查。
 
-`make docs-build` 另外验证导航、链接、anchor、引用和静态站渲染，两层都必须通过。
+不再通过 pytest 固定文案、主题样式、段落拼接或上游静态库字节内容。导航、链接、anchor、引用和静态站渲染交给 strict docs build，格式交给已有 lint；公开行为的准确性通过代码回归与文档评审维护。
 
 远程 Docker `connect_ws` smoke 依次覆盖 `memory` 与 `filehost` transport 下的text、Markdown 相对图片、CSS 字体和模板资源，并且不得要求调用方手工提供 HTTP
 base URL。Markdown 使用哨兵像素证明相对图片确实加载；filehost 还必须观察远程Chromium 发起的 CSS、PNG、WOFF2 请求，并验证请求头守卫、通配 CORS 和未认证403。测试必须断言 Bot 侧 `file://` 从未作为远程文档导航目标。

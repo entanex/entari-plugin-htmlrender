@@ -167,5 +167,5 @@ make test-ci
 
 任何新增组件都必须在窄屏下保持主叙事顺序，并通过 `make docs-build` 的 strict链接、anchor、引用和配置验证。
 
-当前 Mermaid runtime 固定为 `11.16.0`，来自 npm 发布包的`dist/mermaid.min.js`；原始 MIT 许可证位于[`docs/assets/licenses/mermaid-11.16.0.txt`](../assets/licenses/mermaid-11.16.0.txt)。升级时使用 `npm pack mermaid@<version>` 提取发布产物，同时更新文件名、配置引用、许可证与 documentation contract 中的 SHA-256；不得改回 `mermaid@11` 这类 moving
+当前 Mermaid runtime 固定为 `11.16.0`，来自 npm 发布包的`dist/mermaid.min.js`；原始 MIT 许可证位于[`docs/assets/licenses/mermaid-11.16.0.txt`](../assets/licenses/mermaid-11.16.0.txt)。升级时使用 `npm pack mermaid@<version>` 提取发布产物，同时更新文件名、配置引用与许可证；不得改回 `mermaid@11` 这类 moving
 major CDN URL。
