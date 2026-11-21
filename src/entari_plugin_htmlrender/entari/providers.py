@@ -36,6 +36,28 @@ class _ContractProvider(Provider[Any]):
     def __init__(self, contract: type[Any]) -> None:
         self.contract = contract
         self.origin = contract
+        self._registration_task: asyncio.Task[Any] | None = None
+
+    def _registration_done(self, task: asyncio.Task[Any]) -> None:
+        if not task.cancelled():
+            task.exception()
+        if self._registration_task is task:
+            self._registration_task = None
+
+    def _registration_waiter(self, service_id: str) -> asyncio.Task[Any]:
+        task = self._registration_task
+        if task is not None:
+            if not task.done():
+                return task
+            self._registration_done(task)
+        task = asyncio.create_task(plugin_service.service_waiter.wait_for(service_id))
+        task.add_done_callback(self._registration_done)
+        self._registration_task = task
+        return task
+
+    async def _wait_for_service(self, service_id: str) -> None:
+        """Wait for registration without owning the framework's shared future."""
+        await asyncio.shield(self._registration_waiter(service_id))
 
     @staticmethod
     async def _wait_for_prepared(
@@ -99,7 +121,7 @@ class _ContractProvider(Provider[Any]):
                     raise RuntimeError("Entari HTMLRender is not loaded.") from None
                 if not plugin.is_available:
                     raise RuntimeError("Entari HTMLRender is disabled.") from None
-                await plugin_service.service_waiter.wait_for(service_id)
+                await self._wait_for_service(service_id)
                 continue
 
             lifecycle = component

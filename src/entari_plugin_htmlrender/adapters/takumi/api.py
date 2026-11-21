@@ -39,7 +39,7 @@ from .errors import (
     TakumiRuntimeError,
     TakumiUnsupportedError,
 )
-from .operations import render_prepared_html
+from .operations import device_dimension, render_prepared_html
 from .runtime import TakumiRuntimeState, render_defaults
 from .source import materialize_takumi_document
 from .types import TakumiImageResource
@@ -255,8 +255,8 @@ class TakumiSessionAdapter:
         )
         native = render_defaults(self._state, images=document.images)
         native.update(
-            width=options.get("width", 1200),
-            height=options.get("height", 630),
+            width=device_dimension(options.get("width", 1200), 1.0, field="width"),
+            height=device_dimension(options.get("height", 630), 1.0, field="height"),
             font_size=options.get("font_size", 16.0),
             time_ms=options.get("time_ms", 0),
         )

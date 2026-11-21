@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from errno import ENOENT
 from hashlib import sha256
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import anyio
 from anyio import wait_all_tasks_blocked
+from anyio.to_thread import run_sync as anyio_run_sync
 import pytest
 
 from entari_plugin_htmlrender.adapters.resources import (
@@ -16,6 +18,7 @@ from entari_plugin_htmlrender.adapters.resources import (
     HostedAssetHttpServer,
     HostedAssetStore,
 )
+from entari_plugin_htmlrender.adapters.resources import hosted as hosted_module
 from entari_plugin_htmlrender.adapters.resources import publisher as publisher_module
 from entari_plugin_htmlrender.errors import InvalidRenderInputError
 from entari_plugin_htmlrender.rendering.errors import ProviderLifecycleError
@@ -31,6 +34,7 @@ from entari_plugin_htmlrender.resources.models import (
 from entari_plugin_htmlrender.resources.observation import NoopCacheObserver
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from pytest_mock import MockerFixture
@@ -867,6 +871,76 @@ async def test_hosted_http_server_enforces_guards_404_and_lifecycle() -> None:
 
 
 @pytest.mark.anyio
+async def test_hosted_http_server_retries_failed_startup_cleanup(
+    mocker: MockerFixture,
+) -> None:
+    from aiohttp import web  # noqa: PLC0415
+
+    real_app_runner = web.AppRunner
+    real_tcp_site = web.TCPSite
+    runners: list[Any] = []
+    cleanup_calls = 0
+
+    class FailingCleanupRunner(real_app_runner):
+        def __init__(self, app: web.Application) -> None:
+            super().__init__(app)
+            runners.append(self)
+
+        async def cleanup(self) -> None:
+            nonlocal cleanup_calls
+            cleanup_calls += 1
+            if cleanup_calls == 1:
+                raise RuntimeError("runner cleanup failed")
+            await super().cleanup()
+
+    class FailingAfterBindSite(real_tcp_site):
+        async def start(self) -> None:
+            await super().start()
+            raise RuntimeError("site start failed")
+
+    mocker.patch.object(web, "AppRunner", FailingCleanupRunner)
+    mocker.patch.object(web, "TCPSite", FailingAfterBindSite)
+
+    store = HostedAssetStore(max_entries=8, max_bytes=1024)
+    server = HostedAssetHttpServer(store, bind_host="127.0.0.1", bind_port=0)
+
+    with pytest.raises(BaseExceptionGroup) as captured:
+        await server.startup()
+
+    assert [str(error) for error in captured.value.exceptions] == [
+        "site start failed",
+        "runner cleanup failed",
+    ]
+    assert len(runners) == 1
+    runner = runners[0]
+    try:
+        assert runner.addresses
+        assert server._runner is runner
+        assert not server._started
+
+        with pytest.raises(ProviderLifecycleError, match="incomplete startup"):
+            await server.startup()
+
+        directory = store._directory
+        assert directory is not None
+        assert directory.exists()
+
+        await server.aclose()
+
+        assert cleanup_calls == 2
+        assert not runner.addresses
+        assert server._runner is None
+        assert not server._started
+        assert store._directory is None
+        assert not directory.exists()
+    finally:
+        await server.aclose()
+        if runner.addresses:
+            await runner.cleanup()
+        await store.aclose()
+
+
+@pytest.mark.anyio
 async def test_hosted_store_capacity_evicts_lease_free_and_rejects_when_pinned() -> (
     None
 ):
@@ -939,6 +1013,230 @@ async def test_hosted_store_rejects_symlinked_namespace_escape(tmp_path: Path) -
 
     assert not (outside / "asset.css").exists()
     await store.aclose()
+
+
+@pytest.mark.anyio
+async def test_hosted_store_cancelled_close_keeps_directory_for_retry(
+    mocker: MockerFixture,
+) -> None:
+    store = HostedAssetStore(max_entries=8, max_bytes=1024)
+    await store.startup()
+    namespace = store.open_namespace(
+        headers={},
+        public_base_url="http://public.example/a/",
+    )
+    directory = store._directory
+    assert directory is not None
+    delete_started = anyio.Event()
+    delete_enabled = False
+    original_run_sync = hosted_module.run_sync
+
+    async def controlled_run_sync(
+        function: Callable[..., Any],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        if not delete_enabled:
+            delete_started.set()
+            await anyio.sleep_forever()
+        return await original_run_sync(function, *args, **kwargs)
+
+    mocker.patch.object(
+        hosted_module,
+        "run_sync",
+        side_effect=controlled_run_sync,
+    )
+    close_scope: list[anyio.CancelScope] = []
+    close_finished = anyio.Event()
+
+    async def close() -> None:
+        with anyio.CancelScope() as scope:
+            close_scope.append(scope)
+            await store.aclose()
+        close_finished.set()
+
+    try:
+        async with anyio.create_task_group() as group:
+            group.start_soon(close)
+            await delete_started.wait()
+
+            assert store._closed
+            assert store._directory == directory
+            assert directory.exists()
+
+            close_scope[0].cancel()
+            await close_finished.wait()
+
+        assert store._closed
+        assert store._directory == directory
+        assert directory.exists()
+
+        with pytest.raises(ProviderLifecycleError, match="closed"):
+            await store.startup()
+        with pytest.raises(ResourcePublishError, match="closed"):
+            await namespace.put("asset", b"value")
+
+        delete_enabled = True
+        await store.aclose()
+
+        assert store._closed
+        assert store._directory is None
+        assert not directory.exists()
+    finally:
+        delete_enabled = True
+        if directory.exists():
+            await anyio_run_sync(hosted_module.shutil.rmtree, directory)
+
+
+@pytest.mark.anyio
+async def test_hosted_store_close_failure_is_visible_and_retryable(
+    mocker: MockerFixture,
+) -> None:
+    store = HostedAssetStore(max_entries=8, max_bytes=1024)
+    await store.startup()
+    directory = store._directory
+    assert directory is not None
+    original_rmtree = hosted_module.shutil.rmtree
+    attempts = 0
+
+    def flaky_rmtree(path: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("directory cleanup failed")
+        original_rmtree(path)
+
+    mocker.patch.object(hosted_module.shutil, "rmtree", side_effect=flaky_rmtree)
+
+    try:
+        with pytest.raises(OSError, match="directory cleanup failed"):
+            await store.aclose()
+
+        assert store._closed
+        assert store._directory == directory
+        assert directory.exists()
+
+        with pytest.raises(ProviderLifecycleError, match="closed"):
+            await store.startup()
+
+        await store.aclose()
+
+        assert attempts == 2
+        assert store._closed
+        assert store._directory is None
+        assert not directory.exists()
+    finally:
+        if directory.exists():
+            original_rmtree(directory, ignore_errors=True)
+
+
+@pytest.mark.anyio
+async def test_hosted_store_missing_child_does_not_hide_remaining_root(
+    mocker: MockerFixture,
+) -> None:
+    store = HostedAssetStore(max_entries=8, max_bytes=1024)
+    await store.startup()
+    directory = store._directory
+    assert directory is not None
+    missing_child = directory / "vanished-during-rmtree"
+    missing_child.write_bytes(b"value")
+    original_rmtree = hosted_module.shutil.rmtree
+    attempts = 0
+
+    def child_vanished_rmtree(path: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            missing_child.unlink()
+            raise FileNotFoundError(
+                ENOENT,
+                "child disappeared while root remains",
+                missing_child,
+            )
+        original_rmtree(path)
+
+    mocker.patch.object(
+        hosted_module.shutil,
+        "rmtree",
+        side_effect=child_vanished_rmtree,
+    )
+
+    try:
+        with pytest.raises(FileNotFoundError) as captured:
+            await store.aclose()
+
+        assert captured.value.filename == missing_child
+        assert store._closed
+        assert store._directory == directory
+        assert directory.exists()
+
+        with pytest.raises(ProviderLifecycleError, match="closed"):
+            await store.startup()
+
+        await store.aclose()
+
+        assert attempts == 2
+        assert store._closed
+        assert store._directory is None
+        assert not directory.exists()
+    finally:
+        if directory.exists():
+            original_rmtree(directory, ignore_errors=True)
+
+
+@pytest.mark.anyio
+async def test_hosted_store_concurrent_close_waits_for_single_cleanup(
+    mocker: MockerFixture,
+) -> None:
+    store = HostedAssetStore(max_entries=8, max_bytes=1024)
+    await store.startup()
+    directory = store._directory
+    assert directory is not None
+    delete_started = anyio.Event()
+    allow_delete = anyio.Event()
+    original_run_sync = hosted_module.run_sync
+    delete_attempts = 0
+
+    async def blocked_run_sync(
+        function: Callable[..., Any],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        nonlocal delete_attempts
+        delete_attempts += 1
+        delete_started.set()
+        await allow_delete.wait()
+        return await original_run_sync(function, *args, **kwargs)
+
+    mocker.patch.object(hosted_module, "run_sync", side_effect=blocked_run_sync)
+    finished: list[str] = []
+
+    async def close(label: str) -> None:
+        await store.aclose()
+        finished.append(label)
+
+    try:
+        async with anyio.create_task_group() as group:
+            group.start_soon(close, "first")
+            await delete_started.wait()
+            group.start_soon(close, "second")
+            await wait_all_tasks_blocked()
+
+            assert finished == []
+
+            allow_delete.set()
+
+        assert sorted(finished) == ["first", "second"]
+        assert delete_attempts == 1
+        assert store._closed
+        assert store._directory is None
+        assert not directory.exists()
+    finally:
+        allow_delete.set()
+        if directory.exists():
+            await anyio_run_sync(hosted_module.shutil.rmtree, directory)
 
 
 @pytest.mark.anyio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
@@ -10,6 +11,7 @@ from anyio.lowlevel import checkpoint
 from pydantic import ValidationError
 import pytest
 
+from entari_plugin_htmlrender.adapters._lease import ExecutionLeaseProvider
 from entari_plugin_htmlrender.adapters.takumi import (
     capabilities as capabilities_module,
 )
@@ -17,6 +19,7 @@ from entari_plugin_htmlrender.adapters.takumi import provider as provider_module
 from entari_plugin_htmlrender.adapters.takumi import render as render_module
 from entari_plugin_htmlrender.adapters.takumi.config import TakumiConfig
 from entari_plugin_htmlrender.adapters.takumi.errors import (
+    TakumiBackendError,
     TakumiRuntimeError,
     TakumiUnsupportedError,
 )
@@ -24,6 +27,7 @@ from entari_plugin_htmlrender.adapters.takumi.provider import (
     PROVIDER,
     TakumiProvider,
 )
+from entari_plugin_htmlrender.adapters.takumi.runtime import TakumiRuntimeState
 from entari_plugin_htmlrender.capabilities import TAKUMI
 from entari_plugin_htmlrender.errors import (
     ProviderConfigurationError,
@@ -52,8 +56,10 @@ from entari_plugin_htmlrender.resources.config import (
 from tests.image_fixtures import encoded_image
 
 if TYPE_CHECKING:
+    from pytest import MonkeyPatch
     from pytest_mock import MockerFixture
 
+    from entari_plugin_htmlrender.adapters.takumi.types import NativeRenderer
     from entari_plugin_htmlrender.resources.ports import ProviderResourceAccess
     from tests.adapters.conftest import RecordingOperationObserver
 
@@ -406,6 +412,67 @@ async def test_executor_rebuilds_after_runtime_poisoning(
 
     assert len(created) == 2
     assert rendered[-1][0] is created[1]
+
+
+async def test_native_panic_rejects_same_lease_and_rebuilds_next_lease(
+    monkeypatch: MonkeyPatch,
+    mocker: MockerFixture,
+    operation_observer: RecordingOperationObserver,
+) -> None:
+    panic_type = type(
+        "PanicException",
+        (BaseException,),
+        {"__module__": "pyo3_runtime"},
+    )
+
+    class PanickingRenderer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def where(self) -> int:
+            self.calls += 1
+            raise panic_type("panic")
+
+    monkeypatch.setitem(sys.modules, "takumi_py", SimpleNamespace())
+    dependencies = _dependencies(operation_observer)
+    config = TakumiConfig()
+    created: list[tuple[TakumiRuntimeState, PanickingRenderer]] = []
+
+    async def create_state(
+        runtime_config: TakumiConfig,
+        *,
+        resources: ProviderResourceAccess,
+        cache_observer: object | None = None,
+    ) -> TakumiRuntimeState:
+        del cache_observer
+        renderer = PanickingRenderer()
+        state = TakumiRuntimeState(
+            renderer=cast("NativeRenderer", renderer),
+            limiter=anyio.Semaphore(1),
+            config=runtime_config,
+            resources=resources,
+        )
+        created.append((state, renderer))
+        return state
+
+    mocker.patch.object(render_module, "create_runtime_state", new=create_state)
+    bindings = PROVIDER.compose(config, dependencies)
+    lifecycle = bindings.lifecycle
+    assert isinstance(lifecycle, ExecutionLeaseProvider)
+
+    async with lifecycle.lease() as first:
+        assert first is created[0][0]
+        with pytest.raises(TakumiBackendError, match="panic"):
+            await first.call_renderer("where")
+        with pytest.raises(TakumiRuntimeError, match="poisoned"):
+            await first.call_renderer("where")
+
+    async with lifecycle.lease() as second:
+        assert second is created[1][0]
+        assert second is not first
+
+    assert created[0][1].calls == 1
+    assert created[1][1].calls == 0
 
 
 async def test_concurrent_leases_build_single_runtime(

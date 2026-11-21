@@ -58,10 +58,11 @@ PR 描述至少包含：
 
 - `CI`：Ruff format/check、`ty`、`basedpyright`、包构建、远程浏览器 smoke 与 Entari load；
 - `Coverage`：Python 3.11–3.14 的 x64 / arm64 测试矩阵；
+- `Entari Compatibility`：Python 3.11–3.14 的 core、Takumi、graphics 隔离安装矩阵、checker 自测与真实 Chromium；
 - `Prek`：仓库级 hooks；
 - 文档相关 PR：`Docs PR Preview Build` 严格构建成功，并确认预览评论中的页面可访问。
 
-Ruleset 应绑定不会随矩阵扩展而改名的汇总 job：`CI` 的 `Required Checks`、`Coverage` 的 `Coverage Matrix`、`Prek` 的 `Prek`，以及 `Docs PR Preview Build` 的 `Docs Preview`。前三者汇总各自的全部内部 job；`Docs Preview` 在没有文档变更时正常通过，在有文档变更时要求 strict build 成功。
+Ruleset 应绑定不会随矩阵扩展而改名的汇总 job：`CI` 的 `Required Checks`、`Coverage` 的 `Coverage Matrix`、`Entari Compatibility` 的 `Entari Compatibility Matrix`、`Prek` 的 `Prek`，以及 `Docs PR Preview Build` 的 `Docs Preview`。`Required Checks`、`Coverage Matrix` 与 `Entari Compatibility Matrix` 各自汇总内部 job 或矩阵；`Docs Preview` 在没有文档变更时正常通过，在有文档变更时要求 strict build 成功。
 
 跳过的 job 必须能够由触发条件解释。例如没有文档相关变更时，文档预览的 build job 可以跳过。取消、超时、基础设施故障或“允许失败”不等于通过。
 
@@ -90,7 +91,7 @@ Ruleset 启用后只允许 squash merge。不要使用 merge commit 或 rebase m
 
 1. 删除远程功能分支；fork 贡献者同时清理自己的分支。
 2. 确认 `main` 上的 CI 没有出现仅在合并后暴露的失败。
-3. 如果 `project.version` 确实变化，继续观察同一 source SHA 的 CI/Coverage/Docs/Prek 汇合门禁、`Auto Tag on Version Change` 与[发布流程](release.md)；仅修改依赖或其他 `pyproject.toml` 配置的普通 PR 会因第一父提交与当前版本相同而跳过发布。
+3. 如果 `project.version` 确实变化，继续观察同一 source SHA 的 CI/Coverage/Entari Compatibility/Docs/Prek 汇合门禁、`Auto Tag on Version Change` 与[发布流程](release.md)；仅修改依赖或其他 `pyproject.toml` 配置的普通 PR 会因第一父提交与当前版本相同而跳过发布。
 4. 如果发现回归，优先发起新的修复或 revert PR；不要移动已发布 tag，也不要直接重写 `main` 历史。
 
 多个 PR 可以连续合并到 `main`。required workflows 会保留每个 main SHA 的运行，Auto Tag 只汇合同一 source SHA；后续合并不会改变已经确定的 release cut。反过来，不要通过提前打 tag、暂停其他分支或把生成后的 Pages 文件提交进 release 分支来制造发布边界。
@@ -102,7 +103,7 @@ Ruleset 启用后只允许 squash merge。不要使用 merge commit 或 rebase m
 - 禁止直接 push 和 force push 到 `main`；
 - 要求 PR、至少一名有效 approval，并在新提交后撤销过期 approval；
 - 要求分支在合并前更新；
-- 将上文四个稳定汇总 job 设为 required status checks；
+- 将上文五个稳定汇总 job 设为 required status checks；
 - 要求所有 review conversations 已解决；
 - 只允许 squash merge，并要求线性历史。
 

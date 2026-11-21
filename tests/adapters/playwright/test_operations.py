@@ -115,6 +115,91 @@ def _write_font_stylesheet(root: Path) -> Path:
     return stylesheet
 
 
+@pytest.mark.parametrize(
+    ("published_url", "same_target", "other_target"),
+    [
+        (
+            "http://[2001:db8::1]:8443/asset.svg?v=1#icon",
+            "http://[2001:db8::1]:8443/asset.svg?v=1",
+            "http://[2001:db8::1:8443]/asset.svg?v=1",
+        ),
+        (
+            "HTTPS://[2001:DB8::1]:443/asset.svg?v=1#icon",
+            "https://[2001:db8::1]/asset.svg?v=1",
+            "https://[2001:db8::1]/asset.svg?v=2",
+        ),
+        (
+            "https://ASSETS.example:443/asset.svg?v=1#icon",
+            "https://assets.example/asset.svg?v=1",
+            "https://assets.example:8443/asset.svg?v=1",
+        ),
+        (
+            "http://127.0.0.1:80/asset.svg?v=1#icon",
+            "http://127.0.0.1/asset.svg?v=1",
+            "http://127.0.0.1/Asset.svg?v=1",
+        ),
+    ],
+)
+async def test_publication_authorization_keeps_distinct_request_targets(
+    mocker: MockerFixture,
+    published_url: str,
+    same_target: str,
+    other_target: str,
+) -> None:
+    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
+        ManagedRequestGuard,
+    )
+    from entari_plugin_htmlrender.adapters.playwright.operations import (  # noqa: PLC0415
+        _publish_prepared_assets,
+    )
+    from entari_plugin_htmlrender.preparation import (  # noqa: PLC0415
+        PreparedAsset,
+        parse_html,
+    )
+
+    headers = {"X-HTMLRender-Filehost-Request": "unit-token"}
+    publisher = mocker.Mock()
+    publisher.publish = mocker.AsyncMock(
+        return_value=_published(published_url, headers)
+    )
+    prepared = parse_html(
+        '<img src="memory:asset">',
+        assets=(PreparedAsset("memory:asset", b"image", "image/png"),),
+    )
+    _, authorization = await _publish_prepared_assets(
+        prepared,
+        publisher=publisher,
+        lease_id=PublicationLeaseId("ipv6-regression"),
+    )
+    resources = _resources()
+    content = SimpleNamespace(data=b"image", media_type="image/png", final_url=None)
+    resources.fetch_published = mocker.AsyncMock(return_value=content)
+    resources.fetch = mocker.AsyncMock(return_value=content)
+    guard = ManagedRequestGuard(resources, authorization=authorization)
+
+    exact = _route(mocker, same_target)
+    await guard._handle_route(cast("Route", exact))
+    guard.raise_if_failed()
+    resources.fetch_published.assert_awaited_once()
+    captured = resources.fetch_published.await_args
+    assert captured is not None
+    capability = captured.args[0]
+    assert capability.url == same_target
+    assert capability.request_headers == headers
+    resources.fetch.assert_not_awaited()
+
+    resources.fetch_published.reset_mock()
+    other = _route(mocker, other_target)
+    await guard._handle_route(cast("Route", other))
+    guard.raise_if_failed()
+    resources.fetch_published.assert_not_awaited()
+    resources.fetch.assert_awaited_once()
+    fetched = resources.fetch.await_args
+    assert fetched is not None
+    assert fetched.args[0].url == other_target
+    other.abort.assert_not_awaited()
+
+
 def test_page_config_roundtrips_document_url() -> None:
     from entari_plugin_htmlrender.adapters.playwright.models import (  # noqa: PLC0415
         PageConfig,
@@ -1204,15 +1289,15 @@ async def test_page_context_detaches_telemetry_on_error_and_cancellation(
 
 
 def test_normalize_request_url_drops_default_port_and_fragment() -> None:
-    from entari_plugin_htmlrender.adapters.playwright._page import (  # noqa: PLC0415
-        _normalize_request_url,
+    from entari_plugin_htmlrender.adapters.playwright._url import (  # noqa: PLC0415
+        normalize_request_url,
     )
 
     assert (
-        _normalize_request_url("HTTP://Render:80/filehost/a?v=1#frag")
+        normalize_request_url("HTTP://Render:80/filehost/a?v=1#frag")
         == "http://render/filehost/a?v=1"
     )
     assert (
-        _normalize_request_url("https://render:8443/filehost/a")
+        normalize_request_url("https://render:8443/filehost/a")
         == "https://render:8443/filehost/a"
     )

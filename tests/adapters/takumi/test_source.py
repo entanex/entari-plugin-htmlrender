@@ -165,6 +165,75 @@ def test_document_and_stylesheet_bases_select_only_referenced_assets() -> None:
     ]
 
 
+def test_stylesheet_without_own_base_uses_document_base() -> None:
+    prepared = parse_html(
+        '<div class="cover"></div>',
+        base_url="https://example.test/cards/card.html",
+        stylesheets=(
+            PreparedStylesheet(
+                css=".cover { background-image: url(../images/cover.png) }",
+            ),
+        ),
+        assets=(
+            PreparedAsset(
+                "https://example.test/images/cover.png",
+                b"cover",
+            ),
+        ),
+    )
+
+    shared = prepare_takumi_document(prepared)
+    explicit = prepare_takumi_document(
+        parse_html(
+            '<div class="cover"></div>',
+            base_url="https://example.test/cards/card.html",
+            assets=(
+                PreparedAsset(
+                    "https://example.test/images/cover.png",
+                    b"cover",
+                ),
+            ),
+        ),
+        stylesheets=(".cover { background-image: url(../images/cover.png) }",),
+    )
+
+    assert shared.images == explicit.images
+    assert shared.images == (TakumiImageResource("../images/cover.png", b"cover"),)
+
+
+@pytest.mark.anyio
+async def test_materialization_uses_document_base_for_shared_stylesheet() -> None:
+    prepared = parse_html(
+        '<div class="cover"></div>',
+        base_url="https://example.test/cards/card.html",
+        stylesheets=(
+            PreparedStylesheet(
+                css=".cover { background-image: url(../images/cover.png) }",
+            ),
+        ),
+        assets=(
+            PreparedAsset(
+                "https://example.test/images/cover.png",
+                b"cover",
+            ),
+        ),
+    )
+
+    for policy in (
+        ResourceMaterializationPolicy.AUTO,
+        ResourceMaterializationPolicy.STRICT,
+    ):
+        document = await materialize_takumi_document(
+            prepared,
+            resources=resource_service(
+                strategy=LocalResourceStrategy(materialization_policy=policy),
+            ),
+        )
+        assert document.images == (
+            TakumiImageResource("../images/cover.png", b"cover"),
+        )
+
+
 def test_canonical_asset_alias_conflicts_are_rejected() -> None:
     prepared = parse_html(
         '<img src="./avatar.png">',

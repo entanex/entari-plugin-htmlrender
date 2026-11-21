@@ -6,6 +6,7 @@ import subprocess
 import sys
 import textwrap
 from typing import TYPE_CHECKING, ParamSpec, TypeVar
+import weakref
 
 import pytest
 
@@ -31,7 +32,7 @@ from arclet.entari.plugin import (
     unload_plugin_async,
 )
 from arclet.entari.plugin.service import plugin_service
-from arclet.letoderea.utils import set_event_loop
+from arclet.letoderea.utils import _EventSystem, set_event_loop
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -263,6 +264,7 @@ async def pool(
         EntariConfig, "instance", getattr(EntariConfig, "instance", None), raising=False
     )
     monkeypatch.setattr(EntariConfig, "_inited", EntariConfig._inited)
+    monkeypatch.setattr(_EventSystem, "loop", _EventSystem.loop)
     EntariConfig(tmp_path / "entari.yml")
     set_event_loop(asyncio.get_running_loop())
     result = EntariDrawingPool()
@@ -372,9 +374,89 @@ async def test_direct_borrowed_plugins_and_config_overlap(
         await second.aclose()
         assert find_plugin("direct_retained") is None
         assert find_plugin("direct_borrowed") is borrowed
+        assert not pool._fingerprints
+        assert not pool._failed
         assert str(tmp_path) in sys.path
+        third = pool.registry(
+            {"borrowed": DrawingSpec("pillow", module="direct_borrowed")},
+            worker=_Worker(),
+        )
+        assert await _value(third, "borrowed") == 5
+        await third.aclose()
+        assert find_plugin("direct_borrowed") is borrowed
+        assert not pool._fingerprints
     finally:
         await unload_plugin_async("direct_borrowed")
+
+
+def test_fingerprints_are_reclaimed_across_real_config_reloads() -> None:
+    _run_isolated(
+        """
+        import gc
+        import weakref
+        from arclet.entari.plugin import unload_plugin_async
+
+        def config(*names):
+            return {"graphics": {"drawings": {
+                name: {"backend": "pillow", "module": name} for name in names
+            }}}
+
+        for name in ("a13_first", "a13_shared", "a13_second"):
+            (base / f"{name}.py").write_text(
+                "def draw(canvas, data):\\n    data['value'] = 1\\n",
+                encoding="utf-8",
+            )
+        sys.path.insert(0, str(base))
+        loaded = load_plugin(
+            "entari_plugin_htmlrender",
+            config("a13_first", "a13_shared"),
+        )
+        assert loaded, loaded
+        service = loaded.plugin._services["htmlrender.runtime"]
+        drawing_pool = service.drawings._registry._pool
+        first_ref = weakref.ref(find_plugin("a13_first").module)
+        shared_ref = weakref.ref(find_plugin("a13_shared").module)
+        try:
+            result = await reload_plugin(
+                "entari_plugin_htmlrender",
+                config("a13_shared", "a13_second"),
+            )
+            assert result, result
+            service = result.plugin._services["htmlrender.runtime"]
+            assert service.drawings._registry._pool is drawing_pool
+            second_ref = weakref.ref(find_plugin("a13_second").module)
+            for _ in range(3):
+                gc.collect()
+            assert first_ref() is None
+            assert "a13_first" not in drawing_pool._fingerprints
+            assert "a13_shared" in drawing_pool._fingerprints
+            assert find_plugin("a13_shared") is not None
+
+            result = await reload_plugin(
+                "entari_plugin_htmlrender",
+                config("a13_second"),
+            )
+            assert result, result
+            service = result.plugin._services["htmlrender.runtime"]
+            assert service.drawings._registry._pool is drawing_pool
+            for _ in range(3):
+                gc.collect()
+            assert shared_ref() is None
+            assert second_ref() is not None
+            assert set(drawing_pool._fingerprints) == {"a13_second"}
+            assert not drawing_pool._failed
+        finally:
+            assert await unload_plugin_async("entari_plugin_htmlrender")
+        for _ in range(3):
+            gc.collect()
+        assert second_ref() is None
+        assert not drawing_pool._fingerprints
+        assert not drawing_pool._failed
+        assert not any(
+            name.startswith("a13_") for name in plugin_service.plugins
+        )
+        """
+    )
 
 
 async def test_direct_cycle_lease_drain_and_aliases(
@@ -698,11 +780,21 @@ async def test_refresh_does_not_adopt_unrelated_plugin_loaded_while_paused(
 async def test_close_retries_failed_unload_without_losing_bookkeeping(
     pool: EntariDrawingPool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    path = _write(tmp_path, "direct_retry.py", "def draw(canvas, data):\n    pass\n")
+    path = _write(
+        tmp_path,
+        "direct_retry.py",
+        "def draw(canvas, data):\n    data['value'] = 1\n",
+    )
     original_path = list(sys.path)
     registry = pool.registry(
-        {"drawing": DrawingSpec("pillow", path=path)}, worker=_Worker()
+        {"drawing": DrawingSpec("pillow", path=path, reload=True)}, worker=_Worker()
     )
+    retry_plugin = find_plugin("direct_retry")
+    assert retry_plugin is not None
+    retry_ref = weakref.ref(retry_plugin.module)
+    path.write_text("not valid Python!\n", encoding="utf-8")
+    assert await _value(registry, "drawing") == 1
+    assert "direct_retry" in pool._failed
     native_unload = drawing_plugins.unload_plugin_async
     calls = 0
 
@@ -721,7 +813,10 @@ async def test_close_retries_failed_unload_without_losing_bookkeeping(
     assert registry._roots
     assert registry._claimed == {"direct_retry"}
     assert "direct_retry" in pool._owned
+    assert "direct_retry" in pool._fingerprints
+    assert "direct_retry" in pool._failed
     assert find_plugin("direct_retry") is not None
+    assert retry_ref() is not None
     assert str(tmp_path) in sys.path
     with pytest.raises(DrawingLoadError, match="closed"):
         await _value(registry, "drawing")
@@ -730,6 +825,8 @@ async def test_close_retries_failed_unload_without_losing_bookkeeping(
     assert registry._closed
     assert registry not in pool._registries
     assert find_plugin("direct_retry") is None
+    assert not pool._fingerprints
+    assert not pool._failed
     assert sys.path == original_path
 
 

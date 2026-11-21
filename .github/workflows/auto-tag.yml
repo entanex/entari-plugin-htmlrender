@@ -7,6 +7,7 @@ on:
       - Coverage
       - Docs
       - Prek
+      - Entari Compatibility
     types:
       - completed
     branches:
@@ -74,6 +75,7 @@ jobs:
             "Coverage:coverage.yml"
             "Docs:docs.yml"
             "Prek:prek.yml"
+            "Entari Compatibility:entari-compat.yml"
           )
           ready=true
 

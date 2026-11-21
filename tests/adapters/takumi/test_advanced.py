@@ -10,6 +10,7 @@ import pytest
 
 from entari_plugin_htmlrender.adapters.takumi import advanced as advanced_module
 from entari_plugin_htmlrender.adapters.takumi.advanced import TakumiAPIAdapter
+from entari_plugin_htmlrender.adapters.takumi.api import TakumiSessionAdapter
 from entari_plugin_htmlrender.adapters.takumi.config import TakumiConfig
 from entari_plugin_htmlrender.adapters.takumi.errors import (
     TakumiInputError,
@@ -583,6 +584,98 @@ async def test_managed_font_cache_operations_translate_errors(
         {"render.backend": "takumi"},
         "error",
     )
+
+
+@pytest.mark.parametrize("field", ["width", "device_pixel_ratio"])
+async def test_invalid_dimensions_use_the_managed_input_error_boundary(
+    mocker: MockerFixture,
+    field: str,
+) -> None:
+    call_renderer = mocker.patch.object(
+        TakumiRuntimeState,
+        "call_renderer",
+        new=mocker.AsyncMock(),
+    )
+    api = TakumiAPIAdapter(_state())
+
+    with pytest.raises(InvalidRenderInputError) as raised:
+        if field == "width":
+            await api.render_node({"type": "container"}, width=0)
+        else:
+            await api.render_node({"type": "container"}, device_pixel_ratio=0)
+
+    assert raised.value.operation == "takumi.api.render_node"
+    assert raised.value.field == field
+    call_renderer.assert_not_awaited()
+
+
+async def test_empty_html_uses_the_managed_input_error_boundary() -> None:
+    api = TakumiAPIAdapter(_state())
+
+    with pytest.raises(InvalidRenderInputError) as raised:
+        await api.render_html("")
+
+    assert raised.value.operation == "takumi.api.render_html"
+    assert raised.value.field == "prepared.html"
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_operation"),
+    [
+        ("api", "takumi.api.render_svg_node"),
+        ("session", "takumi.render_svg_html"),
+    ],
+)
+async def test_invalid_svg_dimension_uses_the_managed_input_error_boundary(
+    operation: str,
+    expected_operation: str,
+) -> None:
+    state = _state()
+
+    with pytest.raises(InvalidRenderInputError) as raised:
+        if operation == "api":
+            await TakumiAPIAdapter(state).render_svg_node(
+                {"type": "container"},
+                width=0,
+            )
+        else:
+            await TakumiSessionAdapter(state).render_svg_html(
+                "<div>svg</div>",
+                width=0,
+            )
+
+    assert raised.value.operation == expected_operation
+    assert raised.value.field == "width"
+
+
+async def test_font_source_count_mismatch_uses_the_managed_input_error_boundary() -> (
+    None
+):
+    api = TakumiAPIAdapter(_state())
+
+    with pytest.raises(InvalidRenderInputError) as raised:
+        await api.register_fonts([b"font"], sources=())
+
+    assert raised.value.operation == "takumi.api.register_fonts"
+    assert raised.value.field == "fonts.sources"
+
+
+async def test_native_fps_limit_failure_remains_a_provider_error(
+    mocker: MockerFixture,
+) -> None:
+    native_error = ValueError("fps exceeds the native format limit")
+    mocker.patch.object(
+        TakumiRuntimeState,
+        "call_renderer",
+        new=mocker.AsyncMock(side_effect=native_error),
+    )
+    api = TakumiAPIAdapter(_state())
+
+    with pytest.raises(ProviderExecutionError) as raised:
+        await api.render_animation((), fps=91)
+
+    assert raised.value.operation == "takumi.api.render_animation"
+    assert raised.value.__cause__ is native_error
 
 
 @pytest.mark.parametrize(
