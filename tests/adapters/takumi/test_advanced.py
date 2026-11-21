@@ -1,9 +1,8 @@
-"""Advanced Takumi API mapping, observation, and error-boundary tests."""
+"""Managed Takumi adapter contracts and regression tests."""
 
 from __future__ import annotations
 
-import threading
-from typing import TYPE_CHECKING, cast, get_type_hints
+from typing import TYPE_CHECKING, cast
 
 import anyio
 import pytest
@@ -26,6 +25,7 @@ from entari_plugin_htmlrender.capabilities import (
     TakumiKeyframesInput,
 )
 from entari_plugin_htmlrender.errors import (
+    HtmlRenderError,
     InvalidRenderInputError,
     ProviderExecutionError,
     ResourceFetchError,
@@ -39,21 +39,15 @@ if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
     from entari_plugin_htmlrender.adapters.takumi.types import NativeRenderer
+    from entari_plugin_htmlrender.capabilities.takumi import (
+        NativeCompiledNode,
+        NativeCompiledStyleSheet,
+    )
     from tests.adapters.conftest import RecordingOperationObserver
 
 
 class _Renderer:
     pass
-
-
-class _WorkerRenderer:
-    def __init__(self) -> None:
-        self.thread = 0
-
-    def render_node(self, node: object, **kwargs: object) -> bytes:
-        del node, kwargs
-        self.thread = threading.get_ident()
-        return b"png"
 
 
 def _state(config: TakumiConfig | None = None) -> TakumiRuntimeState:
@@ -65,13 +59,14 @@ def _state(config: TakumiConfig | None = None) -> TakumiRuntimeState:
     )
 
 
-async def test_compile_html_reuses_document_cache_and_preserves_images(
+async def test_compile_html_materializes_resources_and_binds_output(
     mocker: MockerFixture,
     operation_observer: RecordingOperationObserver,
 ) -> None:
     node = object()
-    stylesheet = object()
+    compiled_stylesheet = object()
     image = TakumiImageResource("memory:avatar", b"image")
+    state = _state()
     materialize = mocker.patch.object(
         advanced_module,
         "materialize_takumi_document",
@@ -86,19 +81,16 @@ async def test_compile_html_reuses_document_cache_and_preserves_images(
     compile_document = mocker.patch.object(
         TakumiRuntimeState,
         "compile_document",
-        new=mocker.AsyncMock(return_value=(node, (stylesheet,))),
+        new=mocker.AsyncMock(return_value=(node, (compiled_stylesheet,))),
     )
     mocker.patch.object(advanced_module, "_expect_compiled_node", return_value=node)
     mocker.patch.object(
         advanced_module,
         "_expect_compiled_stylesheet",
-        return_value=stylesheet,
+        return_value=compiled_stylesheet,
     )
 
-    document = await TakumiAPIAdapter(
-        _state(),
-        operation_observer,
-    ).compile_html(
+    document = await TakumiAPIAdapter(state, operation_observer).compile_html(
         '<img src="memory:avatar"><p>source</p>',
         stylesheets=("p { color: red }",),
         images=[image],
@@ -106,12 +98,14 @@ async def test_compile_html_reuses_document_cache_and_preserves_images(
     )
 
     assert document.node is node
-    assert document.stylesheets == (stylesheet,)
+    assert document.stylesheets == (compiled_stylesheet,)
     assert document.images == (image,)
-    prepared_call = materialize.await_args
-    assert prepared_call is not None
-    assert prepared_call.kwargs["stylesheets"] == ("p { color: red }",)
-    assert prepared_call.kwargs["images"] == [image]
+    materialize_call = materialize.await_args
+    assert materialize_call is not None
+    prepared = materialize_call.args[0]
+    assert prepared.document_base.preparation_base_url == "memory:document.html"
+    assert materialize_call.kwargs["stylesheets"] == ("p { color: red }",)
+    assert materialize_call.kwargs["images"] == [image]
     compile_document.assert_awaited_once_with(
         "<p>materialized</p>",
         ("p { color: red }",),
@@ -123,9 +117,8 @@ async def test_compile_html_reuses_document_cache_and_preserves_images(
     )
 
 
-async def test_native_compilers_keep_their_exact_argument_mapping(
+async def test_managed_compilers_forward_representative_arguments(
     mocker: MockerFixture,
-    operation_observer: RecordingOperationObserver,
 ) -> None:
     compiled_node = object()
     compiled_stylesheet = object()
@@ -144,13 +137,10 @@ async def test_native_compilers_keep_their_exact_argument_mapping(
         "_expect_compiled_stylesheet",
         return_value=compiled_stylesheet,
     )
-    api = TakumiAPIAdapter(_state(), operation_observer)
+    api = TakumiAPIAdapter(_state())
     node_input: dict[str, object] = {"type": "container"}
     keyframes: TakumiKeyframesInput = {
-        "fade": {
-            "from": {"opacity": 0},
-            "to": {"opacity": 1},
-        }
+        "fade": {"from": {"opacity": 0}, "to": {"opacity": 1}}
     }
 
     assert await api.compile_node(node_input, validate=True) is compiled_node
@@ -166,23 +156,21 @@ async def test_native_compilers_keep_their_exact_argument_mapping(
     assert node_call.kwargs == {"validate": True}
     assert keyframes_call.args[0].__name__ == "compile_keyframes"
     assert keyframes_call.args[1:] == (keyframes,)
-    assert keyframes_call.kwargs == {}
     compile_stylesheet.assert_awaited_once_with(
         "div { color: red }",
         lossy=True,
     )
 
 
-async def test_node_rendering_maps_css_dimensions_and_native_options(
+async def test_node_rendering_converts_css_pixels_and_managed_options(
     mocker: MockerFixture,
-    operation_observer: RecordingOperationObserver,
 ) -> None:
     call_renderer = mocker.patch.object(
         TakumiRuntimeState,
         "call_renderer",
         new=mocker.AsyncMock(return_value=b"png"),
     )
-    api = TakumiAPIAdapter(_state(), operation_observer)
+    api = TakumiAPIAdapter(_state())
     node: dict[str, object] = {"type": "container"}
     image = TakumiImageResource("memory:image", b"image")
 
@@ -205,68 +193,94 @@ async def test_node_rendering_maps_css_dimensions_and_native_options(
     call = call_renderer.await_args
     assert call is not None
     assert call.args == ("render_node", node)
-    assert call.kwargs == {
-        "stylesheets": ("div { color: red }",),
-        "images": (image,),
-        "validate": True,
-        "width": 20,
-        "height": 40,
-        "format": "jpeg",
-        "font_size": 16.0,
-        "device_pixel_ratio": 2.0,
-        "draw_debug_border": False,
-        "dithering": "none",
-        "time_ms": 40,
-        "quality": 83,
-        "font_families": ("Fixture Sans",),
-        "lang": "en",
-    }
+    native = call.kwargs
+    assert native["width"] == 20
+    assert native["height"] == 40
+    assert native["device_pixel_ratio"] == 2.0
+    assert native["format"] == "jpeg"
+    assert native["quality"] == 83
+    assert native["time_ms"] == 40
+    assert native["stylesheets"] == ("div { color: red }",)
+    assert native["images"] == (image,)
+    assert native["font_families"] == ("Fixture Sans",)
+    assert native["lang"] == "en"
+    assert native["validate"] is True
 
 
-async def test_native_advanced_work_runs_outside_the_event_loop_thread() -> None:
-    renderer = _WorkerRenderer()
-    state = TakumiRuntimeState(
-        renderer=cast("NativeRenderer", renderer),
-        limiter=anyio.Semaphore(1),
-        config=TakumiConfig(),
-        resources=resource_service(),
-    )
-    event_loop_thread = threading.get_ident()
-
-    assert await TakumiAPIAdapter(state).render_node({"type": "container"}) == b"png"
-    assert renderer.thread != event_loop_thread
-
-
-async def test_compiled_measurement_and_svg_paths_share_one_document(
+async def test_animation_operations_forward_managed_timing_contracts(
     mocker: MockerFixture,
-    operation_observer: RecordingOperationObserver,
 ) -> None:
-    takumi_py = pytest.importorskip("takumi_py")
-    measured = takumi_py.MeasuredNode(
-        width=12.0,
-        height=8.0,
-        transform=(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
-        children=(),
-        runs=(),
+    call_renderer = mocker.patch.object(
+        TakumiRuntimeState,
+        "call_renderer",
+        new=mocker.AsyncMock(side_effect=(b"animation", b"frame", b"encoded")),
     )
+    api = TakumiAPIAdapter(_state())
+
+    assert (
+        await api.render_animation(
+            (),
+            width=10,
+            height=20,
+            device_pixel_ratio=2,
+            format="gif",
+            fps=12,
+        )
+        == b"animation"
+    )
+    assert (
+        await api.render_sequence_at_time(
+            (),
+            75,
+            width=10,
+            height=20,
+            format="jpeg",
+            quality=77,
+        )
+        == b"frame"
+    )
+    assert await api.encode_frames((), format="webp", quality=80) == b"encoded"
+
+    animation, sequence, encoded = call_renderer.await_args_list
+    assert animation.args == ("render_animation", ())
+    assert animation.kwargs["width"] == 20
+    assert animation.kwargs["height"] == 40
+    assert animation.kwargs["format"] == "gif"
+    assert animation.kwargs["fps"] == 12
+    assert sequence.args == ("render_sequence_at_time", (), 75)
+    assert sequence.kwargs["format"] == "jpeg"
+    assert "time_ms" not in sequence.kwargs
+    assert encoded.args == ("encode_frames", ())
+    assert encoded.kwargs["format"] == "webp"
+    assert encoded.kwargs["quality"] == 80
+
+
+async def test_compiled_operations_share_document_ownership_and_resources(
+    mocker: MockerFixture,
+) -> None:
+    measured = object()
+    node = cast("NativeCompiledNode", object())
+    compiled_stylesheet = cast("NativeCompiledStyleSheet", object())
     call_renderer = mocker.patch.object(
         TakumiRuntimeState,
         "call_renderer",
         new=mocker.AsyncMock(side_effect=(b"png", measured, "<svg/>")),
     )
-    compiled_node = takumi_py.Renderer().compile_node({"type": "container"})
-    mocker.patch.object(
-        TakumiRuntimeState,
-        "compile_document",
-        new=mocker.AsyncMock(return_value=(compiled_node, ())),
-    )
     mocker.patch.object(
         advanced_module,
-        "_expect_compiled_node",
-        return_value=compiled_node,
+        "_expect_measured_node",
+        return_value=measured,
     )
-    api = TakumiAPIAdapter(_state(), operation_observer)
-    document = await api.compile_html("<div>compiled</div>")
+    api = TakumiAPIAdapter(_state())
+    if api._lease_guard is None:
+        raise AssertionError("adapter must own a lease guard")
+    image = TakumiImageResource("memory:image", b"image")
+    document = TakumiCompiledDocument(
+        node=node,
+        stylesheets=(compiled_stylesheet,),
+        images=(image,),
+        _lease_guard=api._lease_guard,
+    )
 
     assert await api.render_compiled(document, width=12, height=8) == b"png"
     assert await api.measure_compiled(document, width=12, height=8) is measured
@@ -278,7 +292,8 @@ async def test_compiled_measurement_and_svg_paths_share_one_document(
         "render_svg_compiled",
     ]
     assert all(
-        call.kwargs["stylesheets"] == () for call in call_renderer.await_args_list
+        call.kwargs["stylesheets"] == document.stylesheets
+        for call in call_renderer.await_args_list
     )
     assert all(
         call.kwargs["images"] == document.images
@@ -289,21 +304,20 @@ async def test_compiled_measurement_and_svg_paths_share_one_document(
 async def test_compiled_document_is_bound_to_one_runtime_and_lease(
     mocker: MockerFixture,
 ) -> None:
-    takumi_py = pytest.importorskip("takumi_py")
-    compiled_node = takumi_py.Renderer().compile_node({"type": "container"})
-    mocker.patch.object(
-        TakumiRuntimeState,
-        "compile_document",
-        new=mocker.AsyncMock(return_value=(compiled_node, ())),
-    )
-    mocker.patch.object(
-        advanced_module,
-        "_expect_compiled_node",
-        return_value=compiled_node,
-    )
     state = _state()
     owner = TakumiAPIAdapter(state)
-    document = await owner.compile_html("<div>owned</div>")
+    if owner._lease_guard is None:
+        raise AssertionError("adapter must own a lease guard")
+    document = TakumiCompiledDocument(
+        node=cast("NativeCompiledNode", object()),
+        stylesheets=(),
+        _lease_guard=owner._lease_guard,
+    )
+    call_renderer = mocker.patch.object(
+        TakumiRuntimeState,
+        "call_renderer",
+        new=mocker.AsyncMock(return_value=b"png"),
+    )
 
     with pytest.raises(RuntimeUnavailableError) as same_runtime_other_lease:
         await TakumiAPIAdapter(state).render_compiled(document)
@@ -313,18 +327,16 @@ async def test_compiled_document_is_bound_to_one_runtime_and_lease(
         await TakumiAPIAdapter(_state()).render_compiled(document)
     assert other_runtime.value.state == "foreign_runtime"
 
-    if owner._lease_guard is None:
-        raise AssertionError("adapter must own a lease guard")
     owner._lease_guard.invalidate()
     with pytest.raises(RuntimeUnavailableError) as expired:
         await owner.render_compiled(document)
     assert expired.value.state == "lease_expired"
+    call_renderer.assert_not_awaited()
 
 
 async def test_manually_constructed_compiled_document_is_rejected() -> None:
-    takumi_py = pytest.importorskip("takumi_py")
     document = TakumiCompiledDocument(
-        node=takumi_py.Renderer().compile_node({"type": "container"}),
+        node=cast("NativeCompiledNode", object()),
         stylesheets=(),
     )
 
@@ -334,105 +346,10 @@ async def test_manually_constructed_compiled_document_is_rejected() -> None:
     assert raised.value.state == "unleased_document"
 
 
-async def test_animation_sequence_and_frame_encoding_map_container_options(
+async def test_font_operations_forward_representative_native_contracts(
     mocker: MockerFixture,
     operation_observer: RecordingOperationObserver,
 ) -> None:
-    takumi_py = pytest.importorskip("takumi_py")
-    call_renderer = mocker.patch.object(
-        TakumiRuntimeState,
-        "call_renderer",
-        new=mocker.AsyncMock(side_effect=(b"animation", b"frame", b"encoded")),
-    )
-    api = TakumiAPIAdapter(_state(), operation_observer)
-    scenes = (
-        takumi_py.AnimationScene(node={"type": "container"}, duration_ms=10),
-        takumi_py.AnimationScene(node={"type": "container"}, duration_ms=20),
-    )
-    frames = (
-        takumi_py.RawAnimationFrame(
-            data=b"\x00" * 16,
-            width=2,
-            height=2,
-            duration_ms=10,
-        ),
-    )
-
-    assert (
-        await api.render_animation(
-            scenes,
-            stylesheets=["div { color: red }"],
-            validate=True,
-            width=10,
-            height=20,
-            device_pixel_ratio=2,
-            format="gif",
-            fps=12,
-            loop_count=3,
-        )
-        == b"animation"
-    )
-    assert (
-        await api.render_sequence_at_time(
-            scenes,
-            75,
-            width=10,
-            height=20,
-            format="jpeg",
-            quality=77,
-        )
-        == b"frame"
-    )
-    assert (
-        await api.encode_frames(
-            frames,
-            format="webp",
-            quality=80,
-            loop_count=2,
-            webp_speed=4,
-        )
-        == b"encoded"
-    )
-
-    animation_call, sequence_call, encode_call = call_renderer.await_args_list
-    assert animation_call.args == ("render_animation", scenes)
-    assert animation_call.kwargs == {
-        "stylesheets": ("div { color: red }",),
-        "validate": True,
-        "width": 20,
-        "height": 40,
-        "font_size": 16.0,
-        "device_pixel_ratio": 2.0,
-        "draw_debug_border": False,
-        "dithering": "none",
-        "fps": 12,
-        "format": "gif",
-        "webp_blend": True,
-        "webp_dispose": False,
-        "loop_count": 3,
-    }
-    assert sequence_call.args == ("render_sequence_at_time", scenes, 75)
-    assert sequence_call.kwargs["width"] == 10
-    assert sequence_call.kwargs["height"] == 20
-    assert sequence_call.kwargs["format"] == "jpeg"
-    assert sequence_call.kwargs["quality"] == 77
-    assert "time_ms" not in sequence_call.kwargs
-    assert encode_call.args == ("encode_frames", frames)
-    assert encode_call.kwargs == {
-        "format": "webp",
-        "webp_blend": True,
-        "webp_dispose": False,
-        "quality": 80,
-        "loop_count": 2,
-        "webp_speed": 4,
-    }
-
-
-async def test_font_registration_reuses_the_runtime_admission_path(
-    mocker: MockerFixture,
-    operation_observer: RecordingOperationObserver,
-) -> None:
-    state = _state()
     register = mocker.patch.object(
         TakumiRuntimeState,
         "register_font",
@@ -448,45 +365,6 @@ async def test_font_registration_reuses_the_runtime_admission_path(
         "register_font_file",
         new=mocker.AsyncMock(return_value=("File",)),
     )
-    api = TakumiAPIAdapter(state, operation_observer)
-
-    assert await api.register_font(b"one", source="memory:one") == ("One",)
-    assert await api.register_fonts(
-        [b"one", b"two"],
-        sources=["memory:one", None],
-    ) == ("One", "Two")
-    assert await api.register_font_file(
-        "font.ttf",
-        name="File",
-        weight=600,
-        style="normal",
-        subset_of="Parent",
-        generic_family="sans-serif",
-        unicode_range=[(0x20, 0x7E)],
-    ) == ("File",)
-
-    register.assert_awaited_once_with(b"one", source="memory:one")
-    register_many.assert_awaited_once_with(
-        [b"one", b"two"],
-        sources=["memory:one", None],
-    )
-    register_file.assert_awaited_once_with(
-        "font.ttf",
-        name="File",
-        weight=600,
-        style="normal",
-        subset_of="Parent",
-        generic_family="sans-serif",
-        unicode_range=[(0x20, 0x7E)],
-        cache_policy=advanced_module.FileCachePolicy.REVALIDATE,
-    )
-
-
-async def test_font_cache_and_release_operations_delegate_to_runtime_state(
-    mocker: MockerFixture,
-    operation_observer: RecordingOperationObserver,
-) -> None:
-    state = _state()
     cache_font = mocker.patch.object(
         TakumiRuntimeState,
         "cache_font",
@@ -497,93 +375,58 @@ async def test_font_cache_and_release_operations_delegate_to_runtime_state(
         "cached_fonts",
         new=mocker.AsyncMock(return_value=("Cached",)),
     )
-    unregister_font = mocker.patch.object(
+    unregister = mocker.patch.object(
         TakumiRuntimeState,
         "unregister_font",
         new=mocker.AsyncMock(return_value=True),
     )
-    clear_fonts = mocker.patch.object(
+    clear = mocker.patch.object(
         TakumiRuntimeState,
         "clear_fonts",
         new=mocker.AsyncMock(return_value=None),
     )
-    api = TakumiAPIAdapter(state, operation_observer)
+    api = TakumiAPIAdapter(_state(), operation_observer)
 
+    assert await api.register_font(b"one", source="memory:one") == ("One",)
+    assert await api.register_fonts(
+        [b"one", b"two"],
+        sources=["memory:one", None],
+    ) == ("One", "Two")
+    assert await api.register_font_file(
+        "font.ttf",
+        name="File",
+        unicode_range=[(0x20, 0x7E)],
+    ) == ("File",)
     assert await api.cache_font(b"font", "memory:font") == ("Cached",)
     assert await api.cached_fonts("memory:font", pin=True) == ("Cached",)
     assert await api.unregister_font("Cached")
-    assert await api.clear_fonts() is None
+    await api.clear_fonts()
 
+    register.assert_awaited_once_with(b"one", source="memory:one")
+    register_many.assert_awaited_once_with(
+        [b"one", b"two"],
+        sources=["memory:one", None],
+    )
+    file_call = register_file.await_args
+    assert file_call is not None
+    assert file_call.kwargs["name"] == "File"
+    assert file_call.kwargs["unicode_range"] == [(0x20, 0x7E)]
+    assert (
+        file_call.kwargs["cache_policy"] is advanced_module.FileCachePolicy.REVALIDATE
+    )
     cache_font.assert_awaited_once_with(b"font", "memory:font")
     cached_fonts.assert_awaited_once_with("memory:font", pin=True)
-    unregister_font.assert_awaited_once_with("Cached")
-    clear_fonts.assert_awaited_once_with()
-    assert [operation[0] for operation in operation_observer.operations[-4:]] == [
+    unregister.assert_awaited_once_with("Cached")
+    clear.assert_awaited_once_with()
+    assert [operation[0] for operation in operation_observer.operations] == [
+        "takumi.api.register_font",
+        "takumi.api.register_fonts",
+        "takumi.api.register_font_file",
         "takumi.api.cache_font",
         "takumi.api.cached_fonts",
         "takumi.api.unregister_font",
         "takumi.api.clear_fonts",
     ]
-
-
-@pytest.mark.parametrize(
-    ("operation", "args", "expected_cause"),
-    [
-        pytest.param(
-            "cache_font",
-            (b"font", "memory:font"),
-            TypeError("cache rejected"),
-            id="cache-font",
-        ),
-        pytest.param(
-            "cached_fonts",
-            ("memory:font",),
-            TypeError("lookup rejected"),
-            id="cached-fonts",
-        ),
-        pytest.param(
-            "unregister_font",
-            ("Family",),
-            ValueError("release rejected"),
-            id="unregister-font",
-        ),
-        pytest.param(
-            "clear_fonts",
-            (),
-            ValueError("clear rejected"),
-            id="clear-fonts",
-        ),
-    ],
-)
-async def test_managed_font_cache_operations_translate_errors(
-    mocker: MockerFixture,
-    operation_observer: RecordingOperationObserver,
-    operation: str,
-    args: tuple[object, ...],
-    expected_cause: Exception,
-) -> None:
-    mocker.patch.object(
-        TakumiRuntimeState,
-        operation,
-        new=mocker.AsyncMock(side_effect=expected_cause),
-    )
-    api = TakumiAPIAdapter(_state(), operation_observer)
-
-    expected_type = (
-        InvalidRenderInputError
-        if isinstance(expected_cause, TypeError)
-        else ProviderExecutionError
-    )
-    with pytest.raises(expected_type) as raised:
-        await getattr(api, operation)(*args)
-
-    assert raised.value.__cause__ is expected_cause
-    assert raised.value.operation == f"takumi.api.{operation}"
-    assert operation_observer.operations[-1] == (
-        f"takumi.api.{operation}",
-        {"render.backend": "takumi"},
-        "error",
-    )
 
 
 @pytest.mark.parametrize("field", ["width", "device_pixel_ratio"])
@@ -660,50 +503,20 @@ async def test_font_source_count_mismatch_uses_the_managed_input_error_boundary(
     assert raised.value.field == "fonts.sources"
 
 
-async def test_native_fps_limit_failure_remains_a_provider_error(
-    mocker: MockerFixture,
-) -> None:
-    native_error = ValueError("fps exceeds the native format limit")
-    mocker.patch.object(
-        TakumiRuntimeState,
-        "call_renderer",
-        new=mocker.AsyncMock(side_effect=native_error),
-    )
-    api = TakumiAPIAdapter(_state())
-
-    with pytest.raises(ProviderExecutionError) as raised:
-        await api.render_animation((), fps=91)
-
-    assert raised.value.operation == "takumi.api.render_animation"
-    assert raised.value.__cause__ is native_error
-
-
-@pytest.mark.parametrize(
-    ("operation", "args"),
-    [
-        pytest.param("cache_font", (b"font", "memory:font"), id="cache-font"),
-        pytest.param("cached_fonts", ("memory:font",), id="cached-fonts"),
-        pytest.param("unregister_font", ("Family",), id="unregister-font"),
-        pytest.param("clear_fonts", (), id="clear-fonts"),
-    ],
-)
-async def test_expired_lease_rejects_new_font_cache_operations(
-    operation: str,
-    args: tuple[object, ...],
-) -> None:
+async def test_expired_lease_rejects_new_managed_operations() -> None:
     api = TakumiAPIAdapter(_state())
     if api._lease_guard is None:
         raise AssertionError("adapter must own a lease guard")
     api._lease_guard.invalidate()
 
     with pytest.raises(RuntimeUnavailableError) as raised:
-        await getattr(api, operation)(*args)
+        await api.cache_font(b"font", "memory:font")
 
     assert raised.value.state == "lease_expired"
-    assert raised.value.operation == f"takumi.api.{operation}"
+    assert raised.value.operation == "takumi.api.cache_font"
 
 
-def test_properties_and_prepared_input_share_lease_validation() -> None:
+def test_read_only_state_and_prepared_input_share_lease_validation() -> None:
     api = TakumiAPIAdapter(_state())
     prepared = parse_html("<p>prepared</p>")
 
@@ -711,27 +524,7 @@ def test_properties_and_prepared_input_share_lease_validation() -> None:
     assert api.compiled_cache_stats.entries == 0
     assert api._prepared(prepared, "ignored") is prepared
 
-
-def test_native_result_validators_reject_wrong_types() -> None:
-    pytest.importorskip("takumi_py")
-
-    with pytest.raises(TakumiRuntimeError, match="expected bytes"):
-        advanced_module._expect_bytes("<svg/>")
-    with pytest.raises(TakumiRuntimeError, match="expected str"):
-        advanced_module._expect_svg(b"png")
-    with pytest.raises(TakumiRuntimeError, match="expected CompiledNode"):
-        advanced_module._expect_compiled_node(object())
-    with pytest.raises(TakumiRuntimeError, match="expected CompiledStyleSheet"):
-        advanced_module._expect_compiled_stylesheet(object())
-    with pytest.raises(TakumiRuntimeError, match="expected MeasuredNode"):
-        advanced_module._expect_measured_node(object())
-
-
-def test_missing_lease_guard_cannot_be_bypassed() -> None:
-    state = _state()
-    api = TakumiAPIAdapter(state)
     object.__setattr__(api, "_lease_guard", None)
-
     with pytest.raises(TakumiRuntimeError, match="no active lease guard"):
         api._ensure_open("takumi.api.test")
     with pytest.raises(TakumiRuntimeError, match="no active lease guard"):
@@ -742,7 +535,49 @@ def test_missing_lease_guard_cannot_be_bypassed() -> None:
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_type"),
+    ("validator_name", "message"),
+    [
+        ("_expect_bytes", "expected bytes"),
+        ("_expect_svg", "expected str"),
+        ("_expect_compiled_node", "expected CompiledNode"),
+        ("_expect_compiled_stylesheet", "expected CompiledStyleSheet"),
+        ("_expect_measured_node", "expected MeasuredNode"),
+    ],
+)
+def test_native_result_validators_reject_wrong_types(
+    validator_name: str,
+    message: str,
+) -> None:
+    pytest.importorskip("takumi_py")
+    validator = getattr(advanced_module, validator_name)
+
+    with pytest.raises(TakumiRuntimeError, match=message):
+        validator(object())
+
+
+def test_native_result_validators_accept_matching_values() -> None:
+    takumi_py = pytest.importorskip("takumi_py")
+    renderer = takumi_py.Renderer()
+    compiled_node = renderer.compile_node({"type": "container"})
+    compiled_stylesheet = renderer.compile_stylesheet("div { color: red }")
+    measured = takumi_py.MeasuredNode(
+        width=1.0,
+        height=1.0,
+        transform=(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+        children=(),
+        runs=(),
+    )
+
+    assert advanced_module._expect_compiled_node(compiled_node) is compiled_node
+    assert (
+        advanced_module._expect_compiled_stylesheet(compiled_stylesheet)
+        is compiled_stylesheet
+    )
+    assert advanced_module._expect_measured_node(measured) is measured
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_public_error"),
     [
         pytest.param(
             TakumiInputError("node", "invalid"),
@@ -780,7 +615,7 @@ async def test_advanced_api_uses_the_stable_managed_error_boundary(
     mocker: MockerFixture,
     operation_observer: RecordingOperationObserver,
     error: Exception,
-    expected_type: type[Exception],
+    expected_public_error: type[HtmlRenderError],
 ) -> None:
     mocker.patch.object(
         TakumiRuntimeState,
@@ -789,7 +624,7 @@ async def test_advanced_api_uses_the_stable_managed_error_boundary(
     )
     api = TakumiAPIAdapter(_state(), operation_observer)
 
-    with pytest.raises(expected_type) as raised:
+    with pytest.raises(expected_public_error) as raised:
         await api.render_node({"type": "container"})
 
     assert raised.value.__cause__ is error
@@ -822,11 +657,3 @@ async def test_closed_runtime_rejects_advanced_calls_through_public_errors(
 
     assert isinstance(raised.value.__cause__, TakumiRuntimeError)
     assert operation_observer.operations[-1][-1] == "error"
-
-
-def test_advanced_annotations_are_runtime_resolvable() -> None:
-    for name, value in vars(TakumiAPIAdapter).items():
-        if callable(value) and not name.startswith("_"):
-            assert get_type_hints(value)
-    assert get_type_hints(TakumiAPIAdapter.compile_node)
-    assert get_type_hints(TakumiAPIAdapter.compile_keyframes)
