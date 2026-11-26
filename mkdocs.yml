@@ -70,6 +70,22 @@ extra_javascript:
 plugins:
   - search
   - tags
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_root_heading: true
+            show_root_full_path: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            members_order: source
+            inherited_members: false
+            show_source: false
   - llmstxt:
       full_output: llms-full.txt
       # Keep chapter membership and reading order aligned with nav.
