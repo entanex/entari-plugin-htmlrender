@@ -1,94 +1,57 @@
 ---
-title: 贡献指南
-description: 参考 Angular 协作方式整理的本仓库贡献流程
-icon: lucide/users
-status: new
-tags:
-  - Project
-  - Contribution
+title: 参与贡献与本地开发
+description: 本地环境初始化、常用 Make 命令、编码与类型规范、提交消息与 PR 流程
+icon: lucide/git-pull-request
 ---
 
-# 贡献指南
+# 参与贡献与本地开发
 
-本文参考 [angular/angular](https://github.com/angular/angular) 的协作思路，并结合 Python、Entari 与多渲染后端技术栈做了裁剪。具体合并门禁见 [Pull Request 生命周期](pull-requests.md)，实现层约束见 [编码规范](coding-standards.md)。
+欢迎为 `entari-plugin-htmlrender` 提交 Issue 与 Pull Request！本页汇总本地开发环境搭建、代码质量规范与提交流程。
 
-## 你可以贡献什么
+## 快速搭建本地环境
 
-- 修复 bug、补测试、完善文档
-- 新增渲染能力（后端、资源解析、可观测性）
-- 优化 CI、开发体验与示例
-
-## 开始之前
-
-1. Fork 仓库并从最新 `main` 创建短生命周期分支。
-2. 安装依赖并准备本地环境。
-3. 如果变更涉及真实浏览器路径，先安装 Playwright Chromium。
+项目使用 `uv` 管理 Python 依赖（支持 Python **3.11–3.14**，开发锁定的 Entari 版本为 `0.19.4`）：
 
 ```bash
-make sync-all
-make install-prek
-make install-browser   # 仅需要真实浏览器测试时执行
+# 同步全部可选依赖与开发工具，并安装 prek git hooks
+make prepare
 ```
 
-## 分支与变更建议
+## 常用开发命令
 
-- 一个 PR 聚焦一个主题，避免“功能 + 重构 + 格式化”混在一起。
-- 架构变更需同步更新 `docs/extensions/` 中的对应专题。
-- 对外 API 行为变化需同步更新 `docs/reference/`，并按任务影响更新 `docs/guides/`。
-- 依赖和锁文件通过 `uv` 更新，不直接手写依赖解析结果。
-- 项目支持 Python 3.11–3.14；公共代码不得只在单一 Python 版本上验证。
+| 命令 | 作用 |
+| --- | --- |
+| `make check` | 一键执行格式检查、Ruff Lint、Basedpyright（含公共类型完整性）、Ty 与 CI 单元测试 |
+| `make ruff-format` | 使用 Ruff 自动格式化代码 |
+| `make test` | 并行运行 CI 测试集（跳过真实浏览器用例，要求覆盖率 >= 90%） |
+| `make install-browser` | 安装项目本地隔离的 Playwright Chromium（存放于 `.artifacts/playwright-browsers`） |
+| `make test-local` | 串行运行包含真实浏览器的本地测试 |
+| `make remote-smoke` | 通过 Docker Compose 运行远程 Playwright 冒烟测试 |
+| `make docs-serve` | 本地启动文档预览服务器 |
+| `make docs-build` | 以严格模式构建文档站点（`zensical build --strict`） |
 
-## 提交前检查
+## 编码与架构规范
 
-至少跑过以下命令：
+1. **格式与静态检查**：所有改动必须通过 `ruff format --check`、`ruff check`、`basedpyright`（以 Python 3.11 为目标，且公开 API 需满足 **100% 类型完整性** `basedpyright --verifytypes entari_plugin_htmlrender --ignoreexternal`）以及 `ty check`。
+2. **核心层解耦**：`rendering`、`preparation`、`resources`、`graphics`、`runtime` 五个核心包禁止导入 `adapters`、`composition` 或 `entari`。所有可选依赖组（包括 `[all]`）均不得引入 NoneBot。
+3. **异步与状态管理**：上层异步代码统一使用 `anyio`；禁止在模块顶层存放全局可变运行状态。
+4. **测试覆盖率**：每个测试矩阵单元的代码覆盖率不得低于 **90%**。
+5. **Prek 钩子**：提交前可运行 `prek run --all-files` 检查；如果修改了 `.github/workflows/`，还需运行 `prek run actionlint --all-files --hook-stage=manual`。
 
-```bash
-make ruff-format
-make check
-prek run --all-files
-make docs-build          # 文档、配置或文档工具链变更
+## 提交消息规范（Conventional Commits）
+
+仓库使用 Angular 风格的提交规范，并由 `commit-msg` git hook 自动校验：
+
+```text
+<type>(<scope>): <subject>
 ```
 
-根据变更范围追加验证：
+- **允许的 `type`**：`feat`、`fix`、`docs`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`。
+- **`subject` 要求**：使用祈使语气、小写开头、不超过 72 个字符、末尾不加句号。
+- **破坏性变更**：在 `type` 或 `(scope)` 后加 `!`，或在正文底部添加 `BREAKING CHANGE:` 说明。
 
-```bash
-make test-local          # 本地 Playwright / Chromium 行为
-make remote-smoke        # 远程 Playwright 或跨容器资源行为
-make build-artifacts     # 依赖、包结构、元数据或发布逻辑
-prek run actionlint --all-files --hook-stage=manual  # workflow 变更
-```
+## Pull Request 流程
 
-Prek hook 可能自动修改文件；必须检查 diff 并重跑到无新增修改且成功退出。增量开发可以使用 `prek run --files <path>...`，但不能代替 PR 前的 `--all-files`。stage、自动修复与排除规则见[工程协作流程](engineering-workflow.md#prek-gates)。
-
-CI 会在 Python 3.11–3.14 上运行 pytest/coverage 与 Entari 0.19.x 隔离加载矩阵。本地单一版本通过不能替代矩阵结果。
-
-## Pull Request 要求
-
-PR 描述必须包含：
-
-1. 变更动机（为什么要改）
-2. 方案说明（怎么改）
-3. 风险与兼容性（可能影响什么）
-4. 验证结果（跑了哪些命令）
-5. 文档同步情况（是否更新 docs，或为何不适用）
-
-## Review 约定
-
-- Review 重点优先级：正确性 > 回归风险 > 可维护性 > 风格。
-- 对建议项（nit）和阻塞项（must fix）请明确区分。
-- 如评审意见影响公共行为，请在 PR 里补充说明与测试。
-- 实质性更新后重新请求 review，并等待更新后的 checks。
-- 合并前更新到最新 `main`，默认使用 squash merge，合并后删除功能分支。
-
-!!! warning "流程约定尚未由 Ruleset 完整强制"
-    当前仓库审计未发现 `main` 已启用 branch protection / Ruleset。维护者必须人工确认 review 和适用 checks 全部满足，不得把 GitHub 允许点击合并视为门禁已通过。可导入配置和启用顺序见[仓库治理与保护](governance.md)。
-
-## 文档预览与包预览
-
-- 文档相关 PR（包括 fork）会严格构建并部署临时 Pages 预览；受信任的部署 workflow 不把 artifact 当作脚本执行，但 HTML/JavaScript 会在浏览器中执行。预览与正式文档共用 GitHub Pages origin，必须视为不可信内容，不能依赖同源 secret 或可信 `localStorage`。
-- `Publish (TestPyPI)` 仅供维护者手动触发，不在 PR 上自动发布，也不是合并门禁。
-- 正式版本 PR 合并后的 tag 与发布链路见 [发布流程](release.md)。
-
-## 行为准则
-
-参与协作时默认遵守 [Code of Conduct](https://github.com/entanex/entari-plugin-htmlrender/blob/main/CODE_OF_CONDUCT.md)。
+- 从 `main` 切出短期功能分支进行开发。
+- **仅使用 Squash Merge 合并**：PR 标题将直接作为合并后的最终提交消息，请确保 PR 标题同样符合 Conventional Commits 规范。
+- 合并前需满足：分支已同步最新 `main`、至少 1 位非作者维护者批准（新推送会重置旧批准）、所有 Review 评论已解决，且 5 项必过 CI 检查全部通过。合并后自动删除源分支。
