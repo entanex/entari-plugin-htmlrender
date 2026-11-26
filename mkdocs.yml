@@ -125,11 +125,7 @@ plugins:
           - configuration/troubleshooting.md
           - configuration/faq.md
         API 参考:
-          - reference/index.md
-          - reference/runtime.md
-          - reference/preparation.md
-          - reference/rendering.md
-          - reference/capabilities.md
+          - reference/api.md
           - reference/glossary.md
         扩展开发:
           - extensions/index.md
@@ -280,11 +276,7 @@ nav:
           - 故障排查: configuration/troubleshooting.md
           - 常见问题: configuration/faq.md
   - API 参考:
-      - API 参考总览: reference/index.md
-      - Runtime API: reference/runtime.md
-      - Preparation 与资源 API: reference/preparation.md
-      - 渲染 API: reference/rendering.md
-      - Capability 参考: reference/capabilities.md
+      - 公开 API 速查: reference/api.md
       - 术语表: reference/glossary.md
   - 扩展开发:
       - 扩展开发总览: extensions/index.md
