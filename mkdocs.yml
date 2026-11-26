@@ -128,10 +128,8 @@ plugins:
           - reference/api.md
           - reference/glossary.md
         扩展开发:
-          - extensions/index.md
           - reference/architecture.md
-          - extensions/provider-contract.md
-          - extensions/provider-development.md
+          - reference/custom-provider.md
         维护者指南:
           - project/index.md
           - project/contributing.md
@@ -277,12 +275,10 @@ nav:
       - 公开 API 速查: reference/api.md
       - 术语表: reference/glossary.md
   - 扩展开发:
-      - 扩展开发总览: extensions/index.md
       - 运行机制:
           - 架构与运行原理: reference/architecture.md
       - Provider 开发:
-          - Provider 契约: extensions/provider-contract.md
-          - Provider 开发指南: extensions/provider-development.md
+          - 开发自定义 Provider: reference/custom-provider.md
   - 维护者指南:
       - 维护者指南总览: project/index.md
       - 贡献与设计:
