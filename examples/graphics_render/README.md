@@ -96,7 +96,7 @@ await drawings.reload("profile")
 
 ## 固定场景
 
-[`example.py`](example.py) 使用 `GraphicsRenderer.rasterize(scene)` 绘制 backend-neutral 的纯色矩形。固定场景和 Python 绘图使用相同的 `graphics.max_pixels` 上限；`graphics.max_concurrency` 的额度在每个后端内共享，Pillow 与 Skia 分别计数；`graphics.max_commands` 只限制 `RasterScene.commands`。同一场景可以交给 `service.capabilities.pillow` 或 `service.capabilities.skia` 分别执行，但两个后端不保证相同像素或编码字节。完整场景说明见[绘制 RasterScene](../../docs/guides/raster-scenes.md)。
+[`example.py`](example.py) 使用 `GraphicsRenderer.rasterize(scene)` 绘制 backend-neutral 的纯色矩形。固定场景和 Python 绘图使用相同的 `graphics.max_pixels` 上限；`graphics.max_concurrency` 的额度在每个后端内共享，Pillow 与 Skia 分别计数；`graphics.max_commands` 只限制 `RasterScene.commands`。同一场景可以交给 `service.capabilities.pillow` 或 `service.capabilities.skia` 分别执行，但两个后端不保证相同像素或编码字节。完整场景说明见 [Python 绘图指南](../../docs/guides/python-drawing.md#方式二声明式-rasterscene)。
 
 ## 独立运行时
 
@@ -104,6 +104,6 @@ await drawings.reload("profile")
 
 ## 进一步阅读
 
-安装、回调签名、命名配置、输出选项、错误表和独立模式差异见仓库中的 [Python 绘图指南](../../docs/guides/python-drawing.md)。Pillow 与 Skia 的精确画布字段和平台限制见 [Pillow](../../docs/configuration/graphics/pillow.md) 与 [Skia](../../docs/configuration/graphics/skia.md)。HTML Provider 切换、RasterScene capability 与绘图名称的区别见[多引擎与切换](../../docs/guides/switching-engines.md)。
+安装、回调签名、命名配置、输出选项、错误表和独立模式差异见仓库中的 [Python 绘图指南](../../docs/guides/python-drawing.md)。Pillow 与 Skia 的配置项和平台限制见[绘图后端配置](../../docs/configuration/graphics.md)。HTML Provider 切换、能力探测与多后端组合见[浏览器操作与引擎专属能力](../../docs/guides/browser-and-capabilities.md#多引擎组合与运行时切换)。
 
 这些绘图文件是可信本地 Python 代码，没有沙箱。不要把消息或其他不可信输入用作源码路径、模块名或函数名；并发使用模块级状态时需要自行保证可安全访问。
