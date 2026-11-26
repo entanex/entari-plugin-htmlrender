@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
-and versioning follows the [release policy](docs/project/release.md).
+and versioning follows the [release policy](docs/project/release-and-governance.md).
 
 <!-- insertion marker -->
 ## [v0.2.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0) - Unreleased
