@@ -110,9 +110,7 @@ plugins:
           - configuration/overview.md
           - configuration/takumi.md
           - configuration/playwright.md
-          - configuration/graphics/index.md
-          - configuration/graphics/pillow.md
-          - configuration/graphics/skia.md
+          - configuration/graphics.md
           - configuration/resources.md
           - configuration/security.md
           - guides/cache-lifecycle.md
@@ -249,9 +247,7 @@ nav:
           - Takumi 配置与字体: configuration/takumi.md
           - Playwright 与远程部署: configuration/playwright.md
       - 绘图后端:
-          - 绘图后端总览: configuration/graphics/index.md
-          - Pillow: configuration/graphics/pillow.md
-          - Skia: configuration/graphics/skia.md
+          - 绘图后端配置（Pillow / Skia）: configuration/graphics.md
       - 资源与预算:
           - 资源与访问策略: configuration/resources.md
           - 安全须知: configuration/security.md
