@@ -64,6 +64,7 @@ async def render_card(renderer: HtmlRenderer) -> RenderedImage:
 拿到 `RenderedImage` 后，调用 `bytes(image)` 即可获取图片字节流（支持 PNG 与 JPEG）。HTML、纯文本与模板分别对应 `rasterize_html()`、`rasterize_text()` 和 `rasterize_template()`。
 
 > [!NOTE]
+>
 > - 渲染中文前，请先阅读 [Takumi 字体配置](docs/configuration/takumi.md#字体配置)。
 > - 读取本地模板、图片或字体时，请将对应目录加入 [本地路径白名单](docs/configuration/resources-and-security.md#本地文件访问白名单)。
 

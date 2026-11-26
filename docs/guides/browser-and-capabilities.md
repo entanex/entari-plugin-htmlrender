@@ -21,7 +21,6 @@ icon: lucide/sparkles
 from entari_plugin_htmlrender import RenderedImage
 from entari_plugin_htmlrender.entari import HtmlRenderService
 
-
 async def screenshot_element(service: HtmlRenderService, url: str) -> RenderedImage:
     pw = service.capabilities.playwright
     async with pw.lease_page(
@@ -53,7 +52,6 @@ async def screenshot_element(service: HtmlRenderService, url: str) -> RenderedIm
     ```python
     from pathlib import Path
     from entari_plugin_htmlrender.entari import HtmlRenderService
-
 
     async def render_svg(service: HtmlRenderService) -> str:
         async with service.capabilities.takumi.lease_session() as session:
@@ -115,7 +113,6 @@ plugins:
 ```python
 from entari_plugin_htmlrender import RenderOperation
 from entari_plugin_htmlrender.entari import HtmlRenderService
-
 
 async def smart_render(service: HtmlRenderService):
     # 检查当前 HTML 渲染器是否支持某项操作

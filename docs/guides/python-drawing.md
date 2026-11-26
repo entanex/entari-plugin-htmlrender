@@ -53,7 +53,6 @@ plugins:
 
     from entari_plugin_htmlrender.adapters.pillow import PillowCanvas
 
-
     def draw(canvas: PillowCanvas, data: Mapping[str, object]) -> None:
         title = str(data.get("title", "Hello, Pillow"))
         # 绘制圆角背景卡片
@@ -74,7 +73,6 @@ plugins:
     import skia
 
     from entari_plugin_htmlrender.adapters.skia import SkiaCanvas
-
 
     def draw(canvas: SkiaCanvas, data: Mapping[str, object]) -> None:
         paint = skia.Paint(
@@ -101,7 +99,6 @@ from entari_plugin_htmlrender.graphics import (
     RGBAColor,
     RasterEncodeOptions,
 )
-
 
 async def make_card(drawings: DrawingRenderer):
     return await drawings.render(
@@ -141,15 +138,12 @@ from entari_plugin_htmlrender.graphics import (
     RasterScene,
 )
 
-
 async def draw_banner(graphics: GraphicsRenderer):
     scene = RasterScene(
         width=600,
         height=200,
         background=RGBAColor(24, 24, 27, 255),
-        commands=(
-            FillRect(PixelRect(24, 24, 552, 152), RGBAColor(52, 81, 178, 255)),
-        ),
+        commands=(FillRect(PixelRect(24, 24, 552, 152), RGBAColor(52, 81, 178, 255)),),
     )
     return await graphics.rasterize(
         scene,
