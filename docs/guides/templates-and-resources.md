@@ -17,10 +17,9 @@ from pathlib import Path
 
 from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, TemplateRef
 
-
 async def render_profile(renderer: HtmlRenderer, username: str):
     return await renderer.rasterize_template(
-        TemplateRef(Path("templates"), "profile.html"), # (1)!
+        TemplateRef(Path("templates"), "profile.html"),  # (1)!
         {"username": username, "level": 42},
         raster=RasterOptions(width=440),
     )
@@ -38,7 +37,6 @@ async def render_profile(renderer: HtmlRenderer, username: str):
 from pathlib import Path
 
 from entari_plugin_htmlrender import TemplateRef, TemplateRenderer
-
 
 async def build_html(templates: TemplateRenderer) -> str:
     rendered = await templates.render(
@@ -108,20 +106,17 @@ from entari_plugin_htmlrender.resources import (
     ResourceAccess,
 )
 
-
 async def load_assets(resources: ResourceAccess):
     # 读取本地白名单内的文件
     banner = await resources.fetch_bytes(FileResourceRef(Path("assets/banner.png")))
 
     # 读取 Python 包内附带的资源
-    icon = await resources.fetch_bytes(
-        PackageResourceRef("my_plugin", "assets/icon.png")
-    )
+    icon = await resources.fetch_bytes(PackageResourceRef("my_plugin", "assets/icon.png"))
 
     # 读取远程图片（受 remote_access 域名和内网策略保护）
     avatar = await resources.fetch_bytes(
         RemoteResourceRef("https://cdn.example.com/avatar.png"),
-        refresh=False, # 设为 True 可强制重新校验缓存
+        refresh=False,  # 设为 True 可强制重新校验缓存
     )
     return banner, icon, avatar
 ```
@@ -132,7 +127,6 @@ async def load_assets(resources: ResourceAccess):
 
 ```python
 from entari_plugin_htmlrender.resources import InlineResource, ResourceAccess
-
 
 async def publish_temp_image(resources: ResourceAccess, png_bytes: bytes):
     async with resources.publish(
