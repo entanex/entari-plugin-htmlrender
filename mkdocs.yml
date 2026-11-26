@@ -123,8 +123,7 @@ plugins:
           - project/engineering-workflow.md
           - project/coding-standards.md
           - project/semantic-api.md
-          - project/testing.md
-          - project/ci.md
+          - project/testing-and-ci.md
           - project/commit-messages.md
           - project/pull-requests.md
           - project/governance.md
@@ -260,8 +259,7 @@ nav:
           - 编码规范: project/coding-standards.md
           - 语义 API 设计: project/semantic-api.md
       - 检查与提交:
-          - 测试矩阵: project/testing.md
-          - CI Actions: project/ci.md
+          - 测试矩阵与 CI 流水线: project/testing-and-ci.md
           - 提交消息指南: project/commit-messages.md
           - Pull Request 生命周期: project/pull-requests.md
       - 发布与维护:
