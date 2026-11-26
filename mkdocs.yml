@@ -126,9 +126,7 @@ plugins:
           - project/testing-and-ci.md
           - project/commit-messages.md
           - project/pull-requests.md
-          - project/governance.md
-          - project/release.md
-          - project/documentation-versioning.md
+          - project/release-and-governance.md
 
 # Additional configuration
 extra:
@@ -263,6 +261,4 @@ nav:
           - 提交消息指南: project/commit-messages.md
           - Pull Request 生命周期: project/pull-requests.md
       - 发布与维护:
-          - 仓库治理与保护: project/governance.md
-          - 发布流程: project/release.md
-          - 文档版本管理: project/documentation-versioning.md
+          - 发布流程、文档版本与仓库治理: project/release-and-governance.md
