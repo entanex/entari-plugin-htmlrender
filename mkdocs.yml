@@ -120,12 +120,7 @@ plugins:
         维护者指南:
           - project/index.md
           - project/contributing.md
-          - project/engineering-workflow.md
-          - project/coding-standards.md
-          - project/semantic-api.md
           - project/testing-and-ci.md
-          - project/commit-messages.md
-          - project/pull-requests.md
           - project/release-and-governance.md
 
 # Additional configuration
@@ -253,12 +248,7 @@ nav:
       - 维护者指南总览: project/index.md
       - 贡献与设计:
           - 贡献指南: project/contributing.md
-          - 工程协作流程: project/engineering-workflow.md
-          - 编码规范: project/coding-standards.md
-          - 语义 API 设计: project/semantic-api.md
       - 检查与提交:
           - 测试矩阵与 CI 流水线: project/testing-and-ci.md
-          - 提交消息指南: project/commit-messages.md
-          - Pull Request 生命周期: project/pull-requests.md
       - 发布与维护:
           - 发布流程、文档版本与仓库治理: project/release-and-governance.md
