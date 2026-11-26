@@ -21,6 +21,6 @@ plugins:
 
 `example.py` 演示 SVG。需要按来源缓存字体时，可在 `lease_api()` 内调用 `cache_font(font, key)`，再以 `cached_fonts(key)` 检查空间淘汰；`unregister_font()` 与 `clear_fonts()` 用于显式释放。font cache 的字节预算是淘汰依据，不是严格的进程内存峰值上限。
 
-中文等字符需要配置覆盖相应字符的字体，见 [Takumi 字体配置](../../docs/configuration/providers/takumi.md)。默认字体适合先运行本示例的英文内容。
+中文等字符需要配置覆盖相应字符的字体，见 [Takumi 字体配置](../../docs/configuration/takumi.md#字体配置)。默认字体适合先运行本示例的英文内容。
 
-插件当前未接入上游 `Document`、`RasterImage` 与 MathJax API；Markdown 数学公式仍依赖 KaTeX JavaScript，应使用[远程 Playwright](../../docs/configuration/remote-playwright.md)。
+插件当前未接入上游 `Document`、`RasterImage` 与 MathJax API；Markdown 数学公式仍依赖 KaTeX JavaScript，应使用[远程 Playwright](../../docs/configuration/playwright.md)。

@@ -108,7 +108,7 @@ plugins:
           - guides/best-practices.md
         配置与部署:
           - configuration/overview.md
-          - configuration/providers/takumi.md
+          - configuration/takumi.md
           - configuration/playwright.md
           - configuration/graphics/index.md
           - configuration/graphics/pillow.md
@@ -246,7 +246,7 @@ nav:
   - 配置与部署:
       - 配置总览与运行机制: configuration/overview.md
       - HTML Provider:
-          - Takumi: configuration/providers/takumi.md
+          - Takumi 配置与字体: configuration/takumi.md
           - Playwright 与远程部署: configuration/playwright.md
       - 绘图后端:
           - 绘图后端总览: configuration/graphics/index.md
