@@ -95,7 +95,7 @@ plugins:
         开始使用:
           - start/index.md
           - start/quickstart.md
-          - start/choosing-provider.md
+          - start/choosing-backend.md
           - start/migration-v0.2.md
         使用指南:
           - guides/index.md
@@ -221,7 +221,7 @@ nav:
   - 开始使用:
       - 入门路径: start/index.md
       - 快速开始: start/quickstart.md
-      - 选择 Provider: start/choosing-provider.md
+      - 如何选择渲染方案: start/choosing-backend.md
       - 升级到 0.2: start/migration-v0.2.md
   - 使用指南:
       - 指南总览: guides/index.md
