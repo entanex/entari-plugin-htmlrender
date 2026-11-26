@@ -92,17 +92,16 @@ plugins:
       sections:
         首页:
           - index.md
-        开始使用:
-          - start/index.md
+        快速入门:
           - start/quickstart.md
           - start/choosing-backend.md
           - start/migration-v0.2.md
+          - changelog.md
         使用指南:
-          - guides/index.md
           - guides/rendering.md
           - guides/templates-and-resources.md
-          - guides/browser-and-capabilities.md
           - guides/python-drawing.md
+          - guides/browser-and-capabilities.md
           - guides/best-practices.md
         配置与部署:
           - configuration/overview.md
@@ -111,14 +110,13 @@ plugins:
           - configuration/graphics.md
           - configuration/resources-and-security.md
           - configuration/troubleshooting.md
-        API 参考:
+        API 与扩展:
           - reference/api.md
-          - reference/glossary.md
-        扩展开发:
+          - reference/errors.md
           - reference/architecture.md
           - reference/custom-provider.md
-        维护者指南:
-          - project/index.md
+          - reference/glossary.md
+        贡献与维护:
           - project/contributing.md
           - project/testing-and-ci.md
           - project/release-and-governance.md
@@ -213,45 +211,31 @@ validation:
 # Page tree
 nav:
   - 首页: index.md
-  - 开始使用:
-      - 入门路径: start/index.md
+  - 快速入门:
       - 快速开始: start/quickstart.md
       - 如何选择渲染方案: start/choosing-backend.md
-      - 升级到 0.2: start/migration-v0.2.md
+      - 从 0.1 升级到 0.2: start/migration-v0.2.md
+      - 更新日志: changelog.md
   - 使用指南:
-      - 指南总览: guides/index.md
-      - 内容渲染:
-          - 渲染 HTML、Markdown 与文本: guides/rendering.md
-          - 模板与资源: guides/templates-and-resources.md
-          - 浏览器操作与引擎专属能力: guides/browser-and-capabilities.md
-      - Python 与场景绘图:
-          - Python 绘图: guides/python-drawing.md
-      - 组合与集成:
-          - 最佳实践: guides/best-practices.md
+      - 渲染 HTML、Markdown 与文本: guides/rendering.md
+      - Jinja2 模板与资源加载: guides/templates-and-resources.md
+      - Python 绘图（Pillow / Skia）: guides/python-drawing.md
+      - 浏览器操作与引擎专属能力: guides/browser-and-capabilities.md
+      - 生产最佳实践: guides/best-practices.md
   - 配置与部署:
       - 配置总览与运行机制: configuration/overview.md
-      - HTML Provider:
-          - Takumi 配置与字体: configuration/takumi.md
-          - Playwright 与远程部署: configuration/playwright.md
-      - 绘图后端:
-          - 绘图后端配置（Pillow / Skia）: configuration/graphics.md
-      - 资源与预算:
-          - 资源访问、Filehost 与安全: configuration/resources-and-security.md
-      - 诊断与排障:
-          - 故障排查: configuration/troubleshooting.md
-  - API 参考:
+      - Takumi 配置与字体: configuration/takumi.md
+      - Playwright 与远程部署: configuration/playwright.md
+      - 绘图后端配置（Pillow / Skia）: configuration/graphics.md
+      - 资源访问、Filehost 与安全: configuration/resources-and-security.md
+      - 故障排查与常见问题: configuration/troubleshooting.md
+  - API 与扩展:
       - 公开 API 速查: reference/api.md
+      - 错误类型与处理: reference/errors.md
+      - 架构与运行原理: reference/architecture.md
+      - 开发自定义 Provider: reference/custom-provider.md
       - 术语表: reference/glossary.md
-  - 扩展开发:
-      - 运行机制:
-          - 架构与运行原理: reference/architecture.md
-      - Provider 开发:
-          - 开发自定义 Provider: reference/custom-provider.md
-  - 维护者指南:
-      - 维护者指南总览: project/index.md
-      - 贡献与设计:
-          - 贡献指南: project/contributing.md
-      - 检查与提交:
-          - 测试矩阵与 CI 流水线: project/testing-and-ci.md
-      - 发布与维护:
-          - 发布流程、文档版本与仓库治理: project/release-and-governance.md
+  - 贡献与维护:
+      - 参与贡献与本地开发: project/contributing.md
+      - 测试矩阵与 CI 流水线: project/testing-and-ci.md
+      - 发布流程、文档版本与仓库治理: project/release-and-governance.md

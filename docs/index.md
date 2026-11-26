@@ -1,6 +1,6 @@
 ---
 title: entari-plugin-htmlrender
-description: 使用 Takumi 渲染静态内容，按需接入远程 Playwright 与 Python 绘图
+description: 面向 Entari 的图片渲染插件：支持 Takumi 原生渲染、Playwright 浏览器渲染与 Pillow/Skia 绘图
 icon: lucide/image
 hide:
   - navigation
@@ -10,10 +10,10 @@ hide:
 
 <div class="htmlrender-home">
 
-<a class="htmlrender-announcement" href="configuration/providers/takumi/">
-  <strong>新增 Takumi 支持</strong>
-  <span>静态内容渲染，无需浏览器。</span>
-  <span class="htmlrender-announcement__link">了解详情</span>
+<a class="htmlrender-announcement" href="configuration/takumi/">
+  <strong>Takumi 原生渲染</strong>
+  <span>无需安装浏览器，进程内直接将 HTML、Markdown 与模板渲染为图片。</span>
+  <span class="htmlrender-announcement__link">查看配置</span>
 </a>
 
 <section class="htmlrender-hero" aria-labelledby="htmlrender-hero-title">
@@ -54,21 +54,24 @@ hide:
         把内容渲染成图片。
       </h1>
       <p class="htmlrender-hero__lead">
-        为 Entari 渲染 HTML、Markdown、文本与模板，也支持用 Pillow 和 Skia 绘图。
+        为 Entari 提供简洁可靠的图片渲染能力：支持 HTML、Markdown、纯文本与 Jinja2 模板，也内置 Pillow 与 Skia Python 绘图。
       </p>
       <div class="htmlrender-hero__actions">
         <a class="md-button md-button--primary" href="start/quickstart/">
           快速开始
           <span aria-hidden="true">→</span>
         </a>
-        <a class="md-button" href="guides/">
+        <a class="md-button" href="guides/rendering/">
           使用指南
         </a>
+        <a class="md-button" href="configuration/overview/">
+          配置参考
+        </a>
       </div>
-      <ul class="htmlrender-hero__facts" aria-label="项目能力概览">
-        <li><strong>多种内容</strong> HTML · Markdown · Text · Jinja</li>
-        <li><strong>原生排版</strong> Takumi · 无需浏览器</li>
-        <li><strong>图片就绪</strong> PNG · JPEG · 尺寸信息</li>
+      <ul class="htmlrender-hero__facts" aria-label="核心特性概览">
+        <li><strong>多种输入</strong> HTML · Markdown · 纯文本 · Jinja2</li>
+        <li><strong>原生引擎</strong> Takumi 零浏览器 · Playwright 按需扩展</li>
+        <li><strong>独立绘图</strong> Pillow · Skia Python 绘图与热重载</li>
       </ul>
     </div>
 
