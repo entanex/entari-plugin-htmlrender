@@ -111,10 +111,7 @@ plugins:
           - configuration/takumi.md
           - configuration/playwright.md
           - configuration/graphics.md
-          - configuration/resources.md
-          - configuration/security.md
-          - guides/cache-lifecycle.md
-          - configuration/observability.md
+          - configuration/resources-and-security.md
           - configuration/troubleshooting.md
           - configuration/faq.md
         API 参考:
@@ -249,11 +246,8 @@ nav:
       - 绘图后端:
           - 绘图后端配置（Pillow / Skia）: configuration/graphics.md
       - 资源与预算:
-          - 资源与访问策略: configuration/resources.md
-          - 安全须知: configuration/security.md
-          - 缓存组件与调优: guides/cache-lifecycle.md
+          - 资源访问、Filehost 与安全: configuration/resources-and-security.md
       - 诊断与排障:
-          - 可选依赖与可观测性: configuration/observability.md
           - 故障排查: configuration/troubleshooting.md
           - 常见问题: configuration/faq.md
   - API 参考:
