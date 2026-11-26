@@ -129,9 +129,7 @@ plugins:
           - reference/glossary.md
         扩展开发:
           - extensions/index.md
-          - extensions/architecture.md
-          - extensions/entari-lifecycle.md
-          - extensions/resource-pipeline.md
+          - reference/architecture.md
           - extensions/provider-contract.md
           - extensions/provider-development.md
         维护者指南:
@@ -281,9 +279,7 @@ nav:
   - 扩展开发:
       - 扩展开发总览: extensions/index.md
       - 运行机制:
-          - 分层架构: extensions/architecture.md
-          - 插件生命周期与重载: extensions/entari-lifecycle.md
-          - 资源管线: extensions/resource-pipeline.md
+          - 架构与运行原理: reference/architecture.md
       - Provider 开发:
           - Provider 契约: extensions/provider-contract.md
           - Provider 开发指南: extensions/provider-development.md
