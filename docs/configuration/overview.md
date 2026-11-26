@@ -67,7 +67,9 @@ plugins:
         endpoint: ${{ env.PLAYWRIGHT_WS_URL }}
 ```
 
-## 启动策略与生命周期 { #startup-lifecycle }
+<a id="startup-lifecycle"></a>
+
+## 启动策略与生命周期
 
 `startup` 决定了 HTML 渲染引擎在 Entari 启动阶段（Launart `preparing`）的行为：
 
@@ -81,7 +83,9 @@ plugins:
     - **关闭与重载**：进入 `cleanup` 阶段时，插件会先停止接收新请求，等待正在进行的渲染和租约自然结束，再依次关闭绘图、HTML 引擎、模板、资源与 Filehost。
     - **配置出错保护**：在 Entari 热重载中，配置解析、后端检查和绘图源码加载会先在暂存阶段完成，失败时不会破坏正在运行的旧实例。但一旦进入新实例的启动探测阶段失败，需要修复配置后手动再次重载插件。
 
-## HTML 渲染预算 { #html-budget }
+<a id="html-budget"></a>
+
+## HTML 渲染预算
 
 `html` 下的限制同时作用于 Takumi、Playwright 及第三方 HTML 后端，用于防止超大输入或超长页面拖垮服务：
 
