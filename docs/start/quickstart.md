@@ -83,11 +83,10 @@ plugins:
     ```python
     from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
 
-
     async def render_help(renderer: HtmlRenderer) -> RenderedImage:
         return await renderer.rasterize_markdown(
             "# Hello, Entari\n\nRendered by htmlrender.",
-            raster=RasterOptions(width=720), # (1)!
+            raster=RasterOptions(width=720),  # (1)!
         )
     ```
 
@@ -100,7 +99,6 @@ plugins:
     ```python
     from entari_plugin_htmlrender import RasterOptions, RenderedImage
     from entari_plugin_htmlrender.entari import HtmlRenderService
-
 
     async def render_help(service: HtmlRenderService) -> RenderedImage:
         return await service.renderer.rasterize_markdown(
@@ -128,7 +126,7 @@ Takumi 不执行 JavaScript，不支持网页导航或选择器截图，也不�
 
 <div class="grid cards" markdown>
 
--   :lucide-git-compare-arrows: **选择最适合的方案**
+- :lucide-git-compare-arrows: **选择最适合的方案**
 
     ---
 
@@ -136,7 +134,7 @@ Takumi 不执行 JavaScript，不支持网页导航或选择器截图，也不�
 
     [:octicons-arrow-right-24: 如何选择渲染方案](choosing-backend.md)
 
--   :lucide-layout-template: **渲染更多内容类型**
+- :lucide-layout-template: **渲染更多内容类型**
 
     ---
 
@@ -144,7 +142,7 @@ Takumi 不执行 JavaScript，不支持网页导航或选择器截图，也不�
 
     [:octicons-arrow-right-24: 渲染 HTML、Markdown 与文本](../guides/rendering.md)
 
--   :lucide-folder-open: **使用模板与本地资源**
+- :lucide-folder-open: **使用模板与本地资源**
 
     ---
 
@@ -152,7 +150,7 @@ Takumi 不执行 JavaScript，不支持网页导航或选择器截图，也不�
 
     [:octicons-arrow-right-24: Jinja2 模板与资源加载](../guides/templates-and-resources.md)
 
--   :lucide-paintbrush: **用 Python 直接绘图**
+- :lucide-paintbrush: **用 Python 直接绘图**
 
     ---
 

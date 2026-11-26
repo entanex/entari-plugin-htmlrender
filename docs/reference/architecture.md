@@ -72,11 +72,10 @@ from entari_plugin_htmlrender import RasterOptions
 from entari_plugin_htmlrender.composition import build_runtime_plan
 from entari_plugin_htmlrender.config import HtmlRenderConfig
 
-
 async def standalone_render() -> bytes:
     config = HtmlRenderConfig(provider="takumi")
-    plan = build_runtime_plan(config) # (1)!
-    runtime = plan.build_runtime()    # (2)!
+    plan = build_runtime_plan(config)  # (1)!
+    runtime = plan.build_runtime()  # (2)!
 
     hosted_server = plan.hosted_asset_server
     if hosted_server is not None:

@@ -13,9 +13,8 @@ icon: lucide/layout-template
 ```python
 from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
 
-
 async def render_examples(renderer: HtmlRenderer) -> tuple[RenderedImage, ...]:
-    options = RasterOptions(width=720) # (1)!
+    options = RasterOptions(width=720)  # (1)!
 
     html_img = await renderer.rasterize_html(
         "<main><h1>Hello</h1><p>来自 HTML 的内容</p></main>",
@@ -111,12 +110,11 @@ jpeg_options = RasterOptions(
 ```python
 from entari_plugin_htmlrender import HtmlPreparer, HtmlRenderer, RasterOptions
 
-
 async def prepare_then_render(
     preparation: HtmlPreparer,
     renderer: HtmlRenderer,
 ):
-    prepared = await preparation.prepare_markdown("# 一次准备，多次渲染") # (1)!
+    prepared = await preparation.prepare_markdown("# 一次准备，多次渲染")  # (1)!
 
     mobile = await renderer.rasterize_prepared(
         prepared,
