@@ -107,10 +107,7 @@ plugins:
           - guides/switching-engines.md
           - guides/best-practices.md
         配置与部署:
-          - configuration/index.md
-          - configuration/dotenv.md
-          - configuration/lifecycle.md
-          - configuration/providers/index.md
+          - configuration/overview.md
           - configuration/providers/takumi.md
           - configuration/providers/playwright.md
           - configuration/remote-playwright.md
@@ -119,7 +116,6 @@ plugins:
           - configuration/graphics/skia.md
           - configuration/resources.md
           - configuration/security.md
-          - configuration/html-rendering.md
           - guides/cache-lifecycle.md
           - configuration/observability.md
           - configuration/troubleshooting.md
@@ -249,12 +245,8 @@ nav:
           - 多引擎与切换: guides/switching-engines.md
           - 最佳实践: guides/best-practices.md
   - 配置与部署:
-      - 配置与部署总览: configuration/index.md
-      - 基础配置:
-          - 环境变量与配置文件: configuration/dotenv.md
-          - 启动与生命周期: configuration/lifecycle.md
+      - 配置总览与运行机制: configuration/overview.md
       - HTML Provider:
-          - Provider 总览: configuration/providers/index.md
           - Takumi: configuration/providers/takumi.md
           - Playwright: configuration/providers/playwright.md
           - 远程 Playwright: configuration/remote-playwright.md
@@ -265,7 +257,6 @@ nav:
       - 资源与预算:
           - 资源与访问策略: configuration/resources.md
           - 安全须知: configuration/security.md
-          - HTML 渲染预算: configuration/html-rendering.md
           - 缓存组件与调优: guides/cache-lifecycle.md
       - 诊断与排障:
           - 可选依赖与可观测性: configuration/observability.md
