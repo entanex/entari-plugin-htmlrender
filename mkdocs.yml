@@ -101,10 +101,9 @@ plugins:
           - guides/index.md
           - guides/rendering.md
           - guides/templates-and-resources.md
-          - guides/browser-automation.md
+          - guides/browser-and-capabilities.md
           - guides/python-drawing.md
           - guides/raster-scenes.md
-          - guides/switching-engines.md
           - guides/best-practices.md
         配置与部署:
           - configuration/overview.md
@@ -230,12 +229,11 @@ nav:
       - 内容渲染:
           - 渲染 HTML、Markdown 与文本: guides/rendering.md
           - 模板与资源: guides/templates-and-resources.md
-          - 操作浏览器页面: guides/browser-automation.md
+          - 浏览器操作与引擎专属能力: guides/browser-and-capabilities.md
       - Python 与场景绘图:
           - Python 绘图: guides/python-drawing.md
           - 绘制 RasterScene: guides/raster-scenes.md
       - 组合与集成:
-          - 多引擎与切换: guides/switching-engines.md
           - 最佳实践: guides/best-practices.md
   - 配置与部署:
       - 配置总览与运行机制: configuration/overview.md
