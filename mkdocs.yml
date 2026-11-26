@@ -99,7 +99,7 @@ plugins:
           - start/migration-v0.2.md
         使用指南:
           - guides/index.md
-          - guides/rendering-content.md
+          - guides/rendering.md
           - guides/templates-and-resources.md
           - guides/browser-automation.md
           - guides/python-drawing.md
@@ -228,7 +228,7 @@ nav:
   - 使用指南:
       - 指南总览: guides/index.md
       - 内容渲染:
-          - 渲染内容: guides/rendering-content.md
+          - 渲染 HTML、Markdown 与文本: guides/rendering.md
           - 模板与资源: guides/templates-and-resources.md
           - 操作浏览器页面: guides/browser-automation.md
       - Python 与场景绘图:
