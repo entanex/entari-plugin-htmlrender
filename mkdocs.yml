@@ -113,7 +113,6 @@ plugins:
           - configuration/graphics.md
           - configuration/resources-and-security.md
           - configuration/troubleshooting.md
-          - configuration/faq.md
         API 参考:
           - reference/api.md
           - reference/glossary.md
@@ -249,7 +248,6 @@ nav:
           - 资源访问、Filehost 与安全: configuration/resources-and-security.md
       - 诊断与排障:
           - 故障排查: configuration/troubleshooting.md
-          - 常见问题: configuration/faq.md
   - API 参考:
       - 公开 API 速查: reference/api.md
       - 术语表: reference/glossary.md
