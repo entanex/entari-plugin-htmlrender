@@ -1,73 +1,163 @@
 ---
 title: 快速开始
-description: 使用 Takumi 在 Entari 中完成第一次无浏览器渲染
+description: 5 分钟在 Entari 中安装、配置并完成第一次图片渲染
 icon: lucide/zap
 ---
 
 # 快速开始
 
-本页使用 Takumi 渲染静态 Markdown，不需要安装浏览器。HTML、纯文本和 Jinja2 模板也使用同一套接口；需要 JavaScript、网页截图或 Markdown 数学公式时，改用[远程 Playwright](../configuration/remote-playwright.md)。
+本页带你用最轻量的方式跑通第一次渲染：使用 **Takumi** 引擎将 Markdown 转为图片，全程无需安装浏览器。
 
-## 安装
+!!! info "环境要求"
+    - **Python**：`>=3.11, <4.0`
+    - **Entari**：`>=0.19.4, <0.20.0`
 
-```bash
-uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
-```
+## 第一步：安装插件
 
-Python 要求为 `>=3.11,<4.0`，并依赖 Entari `>=0.19.4,<0.20.0`。`[takumi]` 安装 `takumi-py>=0.4.0`，不设上限；有匹配 wheel 的平台不需要 Rust 工具链，具体见 [Takumi 平台约束](../configuration/providers/takumi.md#platform-requirements)。只安装基础包不会安装渲染后端；其他可选依赖按需添加。
+`entari-plugin-htmlrender` 基础包不包含任何渲染后端，需要按场景安装对应的可选依赖：
 
-`0.2.x` 面向 Entari 0.19.x。`0.1.0` 基于 Python 3.10 与 Entari 0.18.x，升级时两项运行时基线都需要同步调整；plugin loader 会加载 `0.2.0` 的 metadata、配置模型与 `HtmlRenderService`，不需要在业务插件中手工构造 runtime。
+=== "Takumi（推荐，无浏览器）"
 
-## Entari 配置
+    适合绝大多数静态卡片、帮助菜单、Markdown 和 Jinja2 模板渲染：
+
+    ```bash
+    uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
+    ```
+
+    主流 Linux / macOS / Windows 平台均提供预编译包，无需安装 Rust 工具链。详情见 [Takumi 平台要求](../configuration/takumi.md#platform-requirements)。
+
+=== "Playwright（完整浏览器）"
+
+    需要执行 JavaScript、截取外部网页或渲染 Markdown 数学公式时使用：
+
+    ```bash
+    uv add "entari-plugin-htmlrender[playwright]>=0.2.0"
+    ```
+
+    - **远程模式（推荐）**：只需安装上述 Python 客户端，浏览器由独立服务提供，无需在机器人宿主机下载浏览器。
+    - **本地模式**：还需执行 `uv run playwright install --with-deps chromium` 安装浏览器二进制文件。
+
+=== "Python 绘图（Pillow / Skia）"
+
+    如果只需要用 Python 代码直接绘图，无需配置任何 HTML 引擎：
+
+    ```bash
+    # 选择 Pillow（通用、零系统库依赖）
+    uv add "entari-plugin-htmlrender[pillow]>=0.2.0"
+
+    # 或选择 Skia（高性能矢量绘图）
+    uv add "entari-plugin-htmlrender[skia]>=0.2.0"
+    ```
+
+=== "组合安装"
+
+    多个可选依赖可以用逗号组合在一起：
+
+    ```bash
+    uv add "entari-plugin-htmlrender[takumi,pillow]>=0.2.0"
+    ```
+
+## 第二步：配置 Entari
+
+在你的 Entari 配置文件中启用 `htmlrender` 插件：
 
 ```yaml
 plugins:
   htmlrender:
-    provider: takumi
-    startup: probe
+    provider: takumi # (1)!
+    startup: probe   # (2)!
 ```
 
-插件短名是 `htmlrender`。`provider` 等字段直接位于这个映射内，没有额外 wrapper。`probe` 在 Launart preparing 阶段启动并探测 Provider；`warmup` 只启动，若只需要模板到 HTML、资源或 graphics，可令 `provider: null` 且保持 `startup: off`。
+1. 指定 HTML 渲染后端。可填 `takumi`、`playwright`，如果只需要模板转 HTML、资源读取或 Python 绘图，可以设为 `null`。
+2. `probe` 会在 Entari 启动阶段初始化引擎并做一次最小可用性检查，配置出错时能第一时间发现。若希望首次调用时再启动，可设为 `off`（默认值）。
 
-第一次调用使用英文示例。需要中文时，请先按 [Takumi 字体配置](../configuration/providers/takumi.md#fonts)添加字体文件及其路径白名单；默认字体不能覆盖所有字符。
+!!! tip "渲染中文需要配置字体"
+    Takumi 默认内置的字体主要面向拉丁字符，直接渲染中文可能会出现缺字或方块。跑通下面的英文示例后，请参考 [Takumi 字体配置](../configuration/takumi.md#fonts) 加载中文字体。
 
-## 调用
+## 第三步：在代码中渲染图片
 
-```python
-from entari_plugin_htmlrender import RasterOptions, RenderedImage
-from entari_plugin_htmlrender.entari import HtmlRenderService
+在你的 Entari 事件处理函数中，直接通过依赖注入接收 `HtmlRenderer`（或接收 `HtmlRenderService` 获取全部能力）：
 
-async def render_help(service: HtmlRenderService) -> RenderedImage:
-    return await service.renderer.rasterize_markdown(
-        "# Hello, Entari\n\nRendered by htmlrender.",
-        raster=RasterOptions(width=720),
-    )
-```
+=== "直接注入 HtmlRenderer（推荐）"
 
-需要把 preparation 与执行分开时，从同一 service 取得 `HtmlPreparer`，再把返回的中立 `PreparedHtml` 交给 renderer：
+    ```python
+    from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
 
-```python
-from entari_plugin_htmlrender import RasterOptions
-from entari_plugin_htmlrender.entari import HtmlRenderService
 
-async def prepare_and_render_help(service: HtmlRenderService):
-    prepared = await service.preparation.prepare_markdown("# Hello")
-    return await service.renderer.rasterize_prepared(
-        prepared,
-        raster=RasterOptions(width=720),
-    )
-```
+    async def render_help(renderer: HtmlRenderer) -> RenderedImage:
+        return await renderer.rasterize_markdown(
+            "# Hello, Entari\n\nRendered by htmlrender.",
+            raster=RasterOptions(width=720), # (1)!
+        )
+    ```
 
-让 Entari DI 把当前插件作用域内的 `HtmlRenderService` 传给 handler。可复用业务函数最好进一步收窄为 `HtmlPreparer`、`HtmlRenderer` 等 caller contract。返回的 `RenderedImage` 可通过 `bytes(image)` 交给消息层；业务代码不需要解析 runtime 或驱动 service 生命周期。
+    1. `RasterOptions` 控制输出宽度、高度、缩放倍率（默认 `device_pixel_ratio=2.0`）和图片格式（默认 PNG）。高度省略时会自动按内容高度撑开。
 
-插件热重载或卸载后，Entari 会替换 plugin-scoped service 并完成 cleanup。不要在模块级变量中缓存旧的 service、renderer 或 capability；这些对象属于一次 plugin lifetime，关闭后不可恢复。
+=== "注入 HtmlRenderService"
 
-模板与本地资源必须位于 `resources.local_access.allowed_paths` 中。下一步可阅读[渲染内容](../guides/rendering-content.md)、[模板与资源](../guides/templates-and-resources.md)与 [Runtime API](../reference/runtime.md)。
+    如果同一个函数里需要用到多个能力（例如同时使用模板、资源和绘图），可以注入 `HtmlRenderService`：
+
+    ```python
+    from entari_plugin_htmlrender import RasterOptions, RenderedImage
+    from entari_plugin_htmlrender.entari import HtmlRenderService
+
+
+    async def render_help(service: HtmlRenderService) -> RenderedImage:
+        return await service.renderer.rasterize_markdown(
+            "# Hello, Entari\n\nRendered by htmlrender.",
+            raster=RasterOptions(width=720),
+        )
+    ```
+
+返回的 `RenderedImage` 包含图片数据和元信息：
+
+- `bytes(image)`：获取可直接发送给消息平台或写入文件的 `bytes`
+- `image.width` / `image.height`：图片的实际像素尺寸
+- `image.format` / `image.media_type`：图片格式（`"png"` / `"jpeg"`）与 MIME 类型
+
+!!! warning "不要把渲染对象存到全局变量"
+    Entari 支持插件热重载与卸载。每次重载后旧的 `HtmlRenderService` 和 `HtmlRenderer` 都会被关闭。请在每次处理事件时通过依赖注入获取，不要缓存在模块级全局变量里。
 
 ## 需要浏览器能力时
 
-Takumi 不执行 JavaScript，也不提供网页导航或选择器截图。Markdown 数学公式仍依赖浏览器中的 KaTeX；交给 Takumi 会抛出 `UnsupportedDocumentFeatureError`。这些需求请使用[远程 Playwright](../configuration/remote-playwright.md)。
+Takumi 不执行 JavaScript，不支持网页导航或选择器截图，也不支持依赖 KaTeX 脚本的 Markdown 数学公式（交给 Takumi 会抛出 `UnsupportedDocumentFeatureError`）。
 
-!!! warning "本地 Playwright 弃用计划"
+如果你的业务需要这些能力，请改用 [Playwright 与远程部署](../configuration/playwright.md)。
 
-    本地 Playwright 浏览器安装、管理与启动将在不久的将来弃用，后续仅保留 remote support。目前本地模式仍可用，尚未确定移除版本或日期。远程模式仍需安装 `[playwright]` Python 客户端，但 Bot 环境不需要执行 `playwright install`。
+## 下一步
+
+<div class="grid cards" markdown>
+
+-   :lucide-git-compare-arrows: **选择最适合的方案**
+
+    ---
+
+    不确定选 Takumi、Playwright 还是 Python 绘图？看流程图一分钟决定。
+
+    [:octicons-arrow-right-24: 如何选择渲染方案](choosing-backend.md)
+
+-   :lucide-layout-template: **渲染更多内容类型**
+
+    ---
+
+    学习渲染 HTML、Markdown、纯文本与 Jinja2 模板，以及分步准备与渲染。
+
+    [:octicons-arrow-right-24: 渲染 HTML、Markdown 与文本](../guides/rendering.md)
+
+-   :lucide-folder-open: **使用模板与本地资源**
+
+    ---
+
+    配置路径白名单，在模板中安全引用本地样式、图片与远程资源。
+
+    [:octicons-arrow-right-24: Jinja2 模板与资源加载](../guides/templates-and-resources.md)
+
+-   :lucide-paintbrush: **用 Python 直接绘图**
+
+    ---
+
+    使用 Pillow 或 Skia 编写绘图函数，支持按模块组织与开发期热重载。
+
+    [:octicons-arrow-right-24: Python 绘图指南](../guides/python-drawing.md)
+
+</div>
