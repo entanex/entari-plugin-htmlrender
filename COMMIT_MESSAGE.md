@@ -8,4 +8,4 @@ type(scope): subject
 
 Full guideline:
 
-- [docs/project/commit-messages.md](docs/project/commit-messages.md)
+- [docs/project/contributing.md](docs/project/contributing.md#提交消息规范conventional-commits)

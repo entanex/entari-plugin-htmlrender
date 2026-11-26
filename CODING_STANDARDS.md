@@ -2,5 +2,4 @@
 
 For coding conventions and engineering rules, see:
 
-- [docs/project/coding-standards.md](docs/project/coding-standards.md)
-- [docs/project/engineering-workflow.md](docs/project/engineering-workflow.md)
+- [docs/project/contributing.md](docs/project/contributing.md)

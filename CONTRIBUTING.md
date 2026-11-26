@@ -4,11 +4,9 @@
 
 感谢你参与改进项目。完整协作契约见：
 
-- [贡献指南](docs/project/contributing.md)
-- [Pull Request 生命周期](docs/project/pull-requests.md)
-- [编码规范](docs/project/coding-standards.md)
-- [测试矩阵](docs/project/testing.md)
-- [CI Actions](docs/project/ci.md)
+- [参与贡献与本地开发](docs/project/contributing.md)
+- [测试矩阵与 CI 流水线](docs/project/testing-and-ci.md)
+- [发布流程、文档版本与仓库治理](docs/project/release-and-governance.md)
 
 ## 准备环境
 
@@ -54,12 +52,12 @@ CI 还会在 Python 3.11–3.14 上运行 pytest/coverage 与 Entari 0.19.x 插�
 
 1. 从最新 `main` 创建一个聚焦单一主题的短生命周期分支。
 2. 同步提交实现、测试以及受到影响的用户或维护者文档。
-3. 使用 [Angular 风格提交消息](docs/project/commit-messages.md)，并让 PR 标题可直接作为 squash commit subject。
+3. 使用 [Angular 风格提交消息](docs/project/contributing.md#提交消息规范conventional-commits)，并让 PR 标题可直接作为 squash commit subject。
 4. 在 PR 描述中写明动机、方案、兼容性、风险和实际验证结果。
 5. 处理 review，更新到最新 `main`，等待所有适用 checks 重新通过。
 6. 默认使用 **Squash and merge**，合并后删除功能分支。
 
-仓库以 `.github/rulesets/protect-main.json` 定义 `main` 的目标约束，但 Ruleset 文件不会自动写入 GitHub 远端。截至 2026-07-14 的审计尚未启用该远端 Ruleset；启用并重新审计前，维护者必须人工核对 checks 与 review 状态。详见 [Pull Request 生命周期](docs/project/pull-requests.md)与[仓库治理与保护](docs/project/governance.md)。
+仓库以 `.github/rulesets/protect-main.json` 定义 `main` 的目标约束，但 Ruleset 文件不会自动写入 GitHub 远端。截至 2026-07-14 的审计尚未启用该远端 Ruleset；启用并重新审计前，维护者必须人工核对 checks 与 review 状态。详见 [参与贡献与本地开发](docs/project/contributing.md)与[发布流程、文档版本与仓库治理](docs/project/release-and-governance.md)。
 
 ## 文档预览与 TestPyPI
 
