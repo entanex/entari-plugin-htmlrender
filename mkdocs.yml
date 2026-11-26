@@ -109,8 +109,7 @@ plugins:
         配置与部署:
           - configuration/overview.md
           - configuration/providers/takumi.md
-          - configuration/providers/playwright.md
-          - configuration/remote-playwright.md
+          - configuration/playwright.md
           - configuration/graphics/index.md
           - configuration/graphics/pillow.md
           - configuration/graphics/skia.md
@@ -248,8 +247,7 @@ nav:
       - 配置总览与运行机制: configuration/overview.md
       - HTML Provider:
           - Takumi: configuration/providers/takumi.md
-          - Playwright: configuration/providers/playwright.md
-          - 远程 Playwright: configuration/remote-playwright.md
+          - Playwright 与远程部署: configuration/playwright.md
       - 绘图后端:
           - 绘图后端总览: configuration/graphics/index.md
           - Pillow: configuration/graphics/pillow.md
