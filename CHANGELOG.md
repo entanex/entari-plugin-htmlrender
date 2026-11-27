@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and versioning follows the [release policy](docs/project/release-and-governance.md).
 
 <!-- insertion marker -->
-## [v0.2.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0) - Unreleased
+## [v0.2.0](https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0) - 2026-11-27
 
 <small>[Compare with v0.1.0](https://github.com/entanex/entari-plugin-htmlrender/compare/v0.1.0...v0.2.0)</small>
 
