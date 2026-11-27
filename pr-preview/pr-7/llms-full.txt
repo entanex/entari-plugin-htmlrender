@@ -341,7 +341,7 @@ Pillow 与 Skia 不再归属于 HTML Provider，而是独立的 `graphics` 配�
 
 本页直接同步自仓库根目录的 `CHANGELOG.md`，版本规范见[发布流程、文档版本与仓库治理](<https://entanex.github.io/entari-plugin-htmlrender/pr-preview/pr-7/project/release-and-governance/index.md>)。
 
-## [v0.2.0](<https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0>) - Unreleased
+## [v0.2.0](<https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0>) - 2026-11-27
 
 [Compare with v0.1.0](<https://github.com/entanex/entari-plugin-htmlrender/compare/v0.1.0...v0.2.0>)
 
