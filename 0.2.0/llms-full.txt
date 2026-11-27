@@ -1,0 +1,2755 @@
+# entari-plugin-htmlrender
+
+> 面向 Entari 的可插拔图片渲染基础设施：使用、配置、API、扩展与维护文档
+
+# 首页
+
+[**Takumi 原生渲染** 无需安装浏览器，进程内直接将 HTML、Markdown 与模板渲染为图片。 查看配置](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/takumi/index.md>)
+
+# 把内容渲染成图片。
+
+为 Entari 提供简洁可靠的图片渲染能力：支持 HTML、Markdown、纯文本与 Jinja2 模板，也内置 Pillow 与 Skia Python 绘图。
+
+[快速开始 →](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/start/quickstart/index.md>) [使用指南](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/guides/rendering/index.md>) [配置参考](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/overview/index.md>)
+
+- **多种输入** HTML · Markdown · 纯文本 · Jinja2
+- **原生引擎** Takumi 零浏览器 · Playwright 按需扩展
+- **独立绘图** Pillow · Skia Python 绘图与热重载
+
+# 快速入门
+
+# 快速开始
+
+本页带你用最轻量的方式跑通第一次渲染：使用 **Takumi** 引擎将 Markdown 转为图片，全程无需安装浏览器。
+
+> [!NOTE]
+>
+> **环境要求**
+>
+> - **Python**：`>=3.11, <4.0`
+> - **Entari**：`>=0.19.4, <0.20.0`
+
+## 第一步：安装插件
+
+`entari-plugin-htmlrender` 基础包不包含任何渲染后端，需要按场景安装对应的可选依赖：
+
+适合绝大多数静态卡片、帮助菜单、Markdown 和 Jinja2 模板渲染：
+
+```bash
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
+```
+
+主流 Linux / macOS / Windows 平台均提供预编译包，无需安装 Rust 工具链。详情见 [Takumi 平台要求](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/takumi/index.md#platform-requirements>)。
+
+需要执行 JavaScript、截取外部网页或渲染 Markdown 数学公式时使用：
+
+```bash
+uv add "entari-plugin-htmlrender[playwright]>=0.2.0"
+```
+
+- **远程模式（推荐）**：只需安装上述 Python 客户端，浏览器由独立服务提供，无需在机器人宿主机下载浏览器。
+- **本地模式**：还需执行 `uv run playwright install --with-deps chromium` 安装浏览器二进制文件。
+
+如果只需要用 Python 代码直接绘图，无需配置任何 HTML 引擎：
+
+```bash
+# 选择 Pillow（通用、零系统库依赖）
+uv add "entari-plugin-htmlrender[pillow]>=0.2.0"
+
+# 或选择 Skia（高性能矢量绘图）
+uv add "entari-plugin-htmlrender[skia]>=0.2.0"
+```
+
+多个可选依赖可以用逗号组合在一起：
+
+```bash
+uv add "entari-plugin-htmlrender[takumi,pillow]>=0.2.0"
+```
+
+## 第二步：配置 Entari
+
+在你的 Entari 配置文件中启用 `htmlrender` 插件：
+
+```yaml
+plugins:
+  htmlrender:
+    provider: takumi # (1)!
+    startup: probe   # (2)!
+```
+
+1. 指定 HTML 渲染后端。可填 `takumi`、`playwright`，如果只需要模板转 HTML、资源读取或 Python 绘图，可以设为 `null`。
+2. `probe` 会在 Entari 启动阶段初始化引擎并做一次最小可用性检查，配置出错时能第一时间发现。若希望首次调用时再启动，可设为 `off`（默认值）。
+
+> [!TIP]
+>
+> **渲染中文需要配置字体**
+>
+> Takumi 默认内置的字体主要面向拉丁字符，直接渲染中文可能会出现缺字或方块。跑通下面的英文示例后，请参考 [Takumi 字体配置](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/takumi/index.md#fonts>) 加载中文字体。
+
+## 第三步：在代码中渲染图片
+
+在你的 Entari 事件处理函数中，直接通过依赖注入接收 `HtmlRenderer`（或接收 `HtmlRenderService` 获取全部能力）：
+
+```python
+from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
+
+async def render_help(renderer: HtmlRenderer) -> RenderedImage:
+    return await renderer.rasterize_markdown(
+        "# Hello, Entari\n\nRendered by htmlrender.",
+        raster=RasterOptions(width=720),  # (1)!
+    )
+```
+
+1. `RasterOptions` 控制输出宽度、高度、缩放倍率（默认 `device_pixel_ratio=2.0`）和图片格式（默认 PNG）。高度省略时会自动按内容高度撑开。
+
+如果同一个函数里需要用到多个能力（例如同时使用模板、资源和绘图），可以注入 `HtmlRenderService`：
+
+```python
+from entari_plugin_htmlrender import RasterOptions, RenderedImage
+from entari_plugin_htmlrender.entari import HtmlRenderService
+
+async def render_help(service: HtmlRenderService) -> RenderedImage:
+    return await service.renderer.rasterize_markdown(
+        "# Hello, Entari\n\nRendered by htmlrender.",
+        raster=RasterOptions(width=720),
+    )
+```
+
+返回的 `RenderedImage` 包含图片数据和元信息：
+
+- `bytes(image)`：获取可直接发送给消息平台或写入文件的 `bytes`
+- `image.width` / `image.height`：图片的实际像素尺寸
+- `image.format` / `image.media_type`：图片格式（`"png"` / `"jpeg"`）与 MIME 类型
+
+> [!WARNING]
+>
+> **不要把渲染对象存到全局变量**
+>
+> Entari 支持插件热重载与卸载。每次重载后旧的 `HtmlRenderService` 和 `HtmlRenderer` 都会被关闭。请在每次处理事件时通过依赖注入获取，不要缓存在模块级全局变量里。
+
+## 需要浏览器能力时
+
+Takumi 不执行 JavaScript，不支持网页导航或选择器截图，也不支持依赖 KaTeX 脚本的 Markdown 数学公式（交给 Takumi 会抛出 `UnsupportedDocumentFeatureError`）。
+
+如果你的业务需要这些能力，请改用 [Playwright 与远程部署](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/playwright/index.md>)。
+
+## 下一步
+
+- **选择最适合的方案**
+
+  ---
+
+  不确定选 Takumi、Playwright 还是 Python 绘图？看流程图一分钟决定。
+- **渲染更多内容类型**
+
+  ---
+
+  学习渲染 HTML、Markdown、纯文本与 Jinja2 模板，以及分步准备与渲染。
+- **使用模板与本地资源**
+
+  ---
+
+  配置路径白名单，在模板中安全引用本地样式、图片与远程资源。
+- **用 Python 直接绘图**
+
+  ---
+
+  使用 Pillow 或 Skia 编写绘图函数，支持按模块组织与开发期热重载。
+
+# 如何选择渲染方案
+
+`entari-plugin-htmlrender` 把 **HTML 网页渲染** 和 **Python 绘图** 分成了两条独立的能力线：
+
+- **HTML 渲染后端（`provider`）**：负责把 HTML、Markdown、纯文本、Jinja2 模板转成图片，可选 **Takumi** 或 **Playwright**（或第三方扩展）。
+- **Python 绘图后端（`graphics`）**：负责用 Python 代码或声明式场景直接绘图，可选 **Pillow** 或 **Skia**，可与任意 HTML 后端同时启用，也可单独使用。
+
+## 选型决策图
+
+```
+flowchart TD
+    A["你需要把什么画成图片？"] --> B{"使用 HTML / Markdown / 模板？"}
+    B -- "是" --> C{"需要 JS、网页截图、数学公式\n或完整浏览器 CSS 特性？"}
+    C -- "不需要（静态内容为主）" --> T["选择 Takumi\n无需浏览器 · 轻量快速"]
+    C -- "需要" --> P["选择 Playwright\n推荐连接远程浏览器服务"]
+    B -- "否（纯 Python 代码绘图）" --> D{"追求高性能矢量/抗锯齿效果\n且环境满足系统库要求？"}
+    D -- "否（追求零额外系统依赖）" --> PIL["选择 Pillow\n开箱即用 · 跨平台省心"]
+    D -- "是" --> SK["选择 Skia\n高性能 2D 矢量引擎"]
+```
+
+## 详细对比
+
+| 方案 | 擅长场景 | 主要限制与代价 | 所需可选依赖 |
+| --- | --- | --- | --- |
+| **Takumi** | 静态卡片、帮助菜单、排行榜、Markdown 文档、Jinja2 模板、SVG、布局测量、动图 | 不执行 JavaScript；不支持 Markdown 数学公式；CSS 特性比浏览器精简；中文需手动配置字体 | `[takumi]` |
+| **Playwright** | 复杂浏览器布局、动态图表（如 ECharts）、外部网页截图、选择器截图、Markdown 数学公式（KaTeX） | 需要运行真实浏览器（生产环境推荐独立部署远程浏览器服务） | `[playwright]` |
+| **Pillow** | 用 Python 代码绘制常规拼图、头像合成、图表、像素级控制 | 不解析 HTML / Markdown | `[pillow]` |
+| **Skia** | 用 Python 代码绘制高质量矢量图形、渐变、圆角、复杂路径 | 不解析 HTML / Markdown；仅提供预编译 wheel，Linux 需特定系统图形库且不支持 Alpine/musl | `[skia]` |
+
+## 常见疑问
+
+> [!NOTE]
+>
+> **已有浏览器模板，能直接切到 Takumi 吗？**
+>
+> 可以尝试，但需要注意三点差异：
+>
+> 1. **样式必须内联**：Takumi 不支持 `<link rel="stylesheet">`、`@import` 和 `@font-face`，请改用 `<style>` 内联（在 Jinja2 中可直接写 `<style>{% include "style.css" %}</style>`）。
+> 2. **中文字体需显式配置**：将字体文件加入本地白名单并在 `provider_config.fonts` 中注册。
+> 3. **排查浏览器专属 CSS 和脚本**：如果模板依赖 JavaScript 或较新的浏览器布局特性，仍应使用 Playwright。
+
+> [!NOTE]
+>
+> **可以同时使用 HTML 渲染和 Python 绘图吗？**
+>
+> 完全可以，而且非常常见。例如用 Takumi 渲染常规 Markdown/模板卡片，同时用 Pillow 或 Skia 绘制头像拼图或数据图：
+>
+> ```yaml
+> plugins:
+>   htmlrender:
+>     provider: takumi
+>     startup: probe
+>     graphics:
+>       backends: [pillow, skia] # 首项 pillow 作为默认 graphics 后端
+> ```
+>
+> 记得同时安装对应依赖：`uv add "entari-plugin-htmlrender[takumi,pillow,skia]"`。
+
+> [!NOTE]
+>
+> **只用 Python 绘图，不想装 HTML 引擎怎么办？**
+>
+> 保持 `provider: null` 和 `startup: off`（默认就是如此），只配置 `graphics` 即可：
+>
+> ```yaml
+> plugins:
+>   htmlrender:
+>     provider: null
+>     graphics:
+>       backend: pillow
+> ```
+
+> [!NOTE]
+>
+> **业务代码依赖 `HtmlRenderer` 时，切换 Takumi 和 Playwright 要改代码吗？**
+>
+> 调用方式不需要改——`rasterize_html()`、`rasterize_markdown()`、`rasterize_text()`、`rasterize_template()` 和 `rasterize_prepared()` 在两个后端上是完全一致的。只需要确认你的模板内容本身符合目标后端的能力范围（例如 Takumi 不支持 JavaScript 与数学公式）。
+
+# 从 0.1 升级到 0.2
+
+`0.2.0` 对底层架构、依赖拆分、网络安全策略与数学公式解析进行了重要重构。请按下方清单逐项核对迁移。
+
+## 升级核对清单
+
+- [ ] 升级运行环境：Python `>=3.11, <4.0`，Entari `>=0.19.4, <0.20.0`
+- [ ] 在安装命令中显式添加所需的渲染后端可选依赖（如 `[takumi]`、`[playwright]`）
+- [ ] 检查配置中的 `resources.remote_access.allow_private_networks`，把布尔值改为 IP/CIDR 列表
+- [ ] 检查 Markdown 数学公式写法（行内 `$x$` 两端不再允许空格，块级 `$$...$$` 需独占段落）
+- [ ] 检查业务代码，不要将 `HtmlRenderService` 或 `HtmlRenderer` 缓存在模块全局变量中
+
+---
+
+## 逐项变更说明
+
+### 1\. 运行环境基线提高
+
+| 项目 | 0.1.x | 0.2.x |
+| --- | --- | --- |
+| Python | `>=3.10` | `>=3.11, <4.0`（使用标准库 `ExceptionGroup`） |
+| Entari | `0.18.x` | `>=0.19.4, <0.20.0` |
+
+### 2\. 渲染后端改为按需安装
+
+在 `0.2.0` 中，基础包不再捆绑任何浏览器或渲染引擎。你需要根据需求显式安装附加依赖：
+
+```bash
+# 静态渲染（推荐迁移目标，无需浏览器）
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
+
+# 需要浏览器能力时
+uv add "entari-plugin-htmlrender[playwright]>=0.2.0"
+```
+
+如果你打算把原有的静态模板从 Playwright 迁移到 Takumi：
+
+1. 将 `provider` 改为 `takumi`，移除原有的 Playwright `provider_config`。
+2. 配置中文字体，并将字体与模板目录加入 `resources.local_access.allowed_paths`。
+3. 将模板中的 `<link rel="stylesheet">` 改为 `<style>` 内联（Jinja2 可用 `<style>{% include "style.css" %}</style>`）。
+
+### 3\. 内网访问控制改为显式 IP/CIDR 列表
+
+`resources.remote_access.allow_private_networks` **不再接受布尔值 `true` / `false`**，必须显式填写允许访问的 IP 或 CIDR 网段（默认为空，拒绝所有内网地址）。
+
+同时，`allow_hosts` 不再自动放行内网 IP。如果某个内网域名既在域名白名单里、又解析到内网地址，必须同时放行对应网段：
+
+```yaml
+plugins:
+  htmlrender:
+    resources:
+      remote_access:
+        allow_hosts:
+          - assets.internal
+        allow_private_networks:
+          - "10.0.0.0/8"
+          - "192.168.1.0/24"
+```
+
+```yaml
+plugins:
+  htmlrender:
+    resources:
+      remote_access:
+        allow_private_networks: true # ❌ 0.2 校验阶段直接拒绝
+```
+
+### 4\. Markdown 数学公式解析收紧
+
+`0.2.0` 固定使用 `pymdownx.arithmatex(generic=True, smart_dollar=True)`：
+
+- **行内公式**：`$x$` 要求美元符号紧贴公式内容，或者改用 `\(x\)`。像 `$ x $` 这样两端带空格的写法在 0.2 中会保留为普通文本（避免误伤价格等带美元符号的文案）。
+- **块级公式**：`$$...$$`、`\[...\]` 和独立的 `\begin{env}...\end{env}` 必须独占段落，行内混写的 `before $$x$$ after` 不再视为块级公式。
+- **KaTeX 作用域**：Playwright 内置的 KaTeX 脚本只渲染由 Markdown 解析器生成的 `.arithmatex[data-htmlrender-arithmatex]` 容器，不会扫描原始 HTML 中手写的 `.arithmatex` 元素。
+- **Takumi 限制**：含数学公式的文档会标记为需要 JavaScript；交给 Takumi 渲染会直接抛出 `UnsupportedDocumentFeatureError`。需要公式渲染请使用 Playwright，或提前将公式预渲染为静态 HTML/SVG。
+
+### 5\. 服务入口与依赖注入
+
+`HtmlRenderService` 现在统一提供 7 个公开属性：`preparation`、`renderer`、`templates`、`resources`、`graphics`、`drawings` 和 `capabilities`。其中前 6 个接口也可以直接通过 Entari 依赖注入获取。
+
+此外新增了 `HtmlPreparer`（`service.preparation`），支持先把 Markdown、模板或文本准备为中立的 `PreparedHtml`，再交给任意渲染后端执行。
+
+### 6\. 独立的 Python 绘图能力
+
+Pillow 与 Skia 不再归属于 HTML Provider，而是独立的 `graphics` 配置项：
+
+- 可通过 `graphics.backends: [pillow, skia]` 同时启用多个绘图后端。
+- 新增 `graphics.drawings`（对应 `DrawingRenderer`），可直接注册和热重载 Python 绘图函数。
+
+### 7\. Takumi 0.4 接口调整
+
+- 依赖升级为 `takumi-py>=0.4.0`。
+- 字体子集配置中，`subset_of` 已弃用，请改用相同的 `name` 配合 `unicode_range` 区间区分不同字集。
+- `lease_api()` 新增编译缓存、布局测量、动图编码（WebP/APNG 最高 90 FPS，GIF 最高 50 FPS）与动态字体缓存接口，并新增 `cache_max_bytes` 和 `font_cache_max_bytes` 配置项。
+
+### 8\. 扩展与底层嵌入变更
+
+如果你开发了自定义 Provider 或绕过 Entari 直接组装运行时，需要注意：
+
+- 第三方 Provider 的 entry point 分组更新为 `entari_plugin_htmlrender.providers.v2`。
+- 直接实例化 `RenderRuntime(...)` 时，现在必须显式传入 `preparer: HtmlPreparer`。
+- 自定义的 `HtmlPreparer`、`TemplateRenderer` 或 `HtmlRenderer` 实现，其模板相关方法必须接受 `filters` 与 `extensions` 关键字参数。
+
+# 更新日志
+
+本页直接同步自仓库根目录的 `CHANGELOG.md`，版本规范见[发布流程、文档版本与仓库治理](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/project/release-and-governance/index.md>)。
+
+## [v0.2.0](<https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.2.0>) - 2026-11-27
+
+[Compare with v0.1.0](<https://github.com/entanex/entari-plugin-htmlrender/compare/v0.1.0...v0.2.0>)
+
+### Added
+
+- expose managed `cache_font`, `cached_fonts`, `unregister_font`, and `clear_fonts` through `TakumiAPI`, and support `unicode_range` in both capability leases and configured fonts.
+- render named Python drawing functions through `DrawingRenderer` and `graphics.drawings`, with native Pillow/Skia canvases and optional source reload.
+- load standalone drawing sources in isolated module generations, and use Entari's plugin system for canonical imports, shared helpers, dependency reloads, and drawing lifecycle ownership.
+- add the plugin-scoped `HtmlPreparer` caller contract through `service.preparation`, with explicit `prepare_html`, `prepare_text`, `prepare_markdown`, and `prepare_template` stages feeding `rasterize_prepared()`.
+- expose complete managed Takumi compile, measure, SVG, node, animation, frame, and font operations through `lease_api()`, with lease and compiled-document ownership guards.
+- support simultaneous Pillow and Skia backends with typed capabilities and independent budgets.
+- expose independent template-variable and URL resolution with immutable, exact URL authorization mappings.
+- forward custom Jinja filters and extensions through template rendering and preparation.
+- inject `HtmlRenderer`, `TemplateRenderer`, `HtmlPreparer`, `ResourceAccess`, `GraphicsRenderer`, and `DrawingRenderer` directly in Entari handlers and refresh them with the plugin lifecycle.
+
+### Changed
+
+- require `takumi-py>=0.4.0` without an upper bound. The 0.4.0 baseline uses Takumi 2.17 rendering behavior and removes upstream's deprecated resource APIs.
+- expose native resource and font-cache budgets through `provider_config.cache_max_bytes` and `provider_config.font_cache_max_bytes`. `null` retains upstream defaults: 64 MiB for resource caching and no limit for the evictable font cache.
+- register font subsets under a shared `name` with inclusive `unicode_range` codepoint pairs. Existing `subset_of` configuration remains compatible and takes precedence over `name`.
+- retain separate native resource, native font, and compiled HTML/CSS caches. Native resource caching includes repeated `data:` URI images; the font-cache budget guides eviction rather than bounding peak memory, and fonts added by the current call or pinned by registration are not evicted for space.
+- retain native Playwright and Takumi static types without eagerly importing optional engines.
+- use Python 3.11 built-in exception groups and string enums.
+- require Python `>=3.11,<4.0` and Entari `>=0.19.4,<0.20.0`, with release validation across Python 3.11–3.14.
+- switch Markdown math to `pymdownx.arithmatex` in generic mode with `smart_dollar=True`; `$x$` and `\(x\)` remain inline, while `$ x $` stays literal and `$$...$$` / `\[...\]` require standalone paragraph or block context for display math.
+- mark only parser-generated Arithmatex containers with `data-htmlrender-arithmatex`, inject KaTeX assets for browser rendering, and reject JavaScript-requiring formula documents through the Takumi source boundary.
+- raise core dependency floors to AnyIO `>=4.13.0`, Markdown `>=3.11.3`, and PyMdown Extensions `>=12.3`.
+- keep `HtmlRenderService` plugin-scoped through Entari DI and Launart stages, including cancellation-safe runtime drain and hosted-resource shutdown.
+- keep the 0.2.0 distribution on a framework-neutral boundary: it does not include a NoneBot framework plugin dependency, initialize another host framework, or ship a migration shim for one.
+- update the third-party provider example, documentation navigation, provider selection matrix, installation ranges, and versioned-docs examples for the 0.2 release line.
+
+### Fixed
+
+- preserve bracketed IPv6 identities when matching published browser-resource authorization, so a host/port pair cannot share credentials with a different IPv6 address.
+- report expired rendering deadlines after cancellation-shielded workers drain, instead of returning a late successful result.
+- decode local file URLs once, retain literal percent-encoded filename characters, and avoid fetching document-local SVG/CSS fragment references.
+- reject further native calls on a poisoned Takumi lease, keep font-family state accurate after partial registration failures, and inherit document bases for prepared stylesheets.
+- classify managed Takumi input validation failures consistently while preserving native execution error semantics.
+- retain filehost listener and temporary-directory ownership until cleanup succeeds, allowing failed or cancelled cleanup to be retried.
+- isolate cancellation between Entari DI callers and release unused drawing module fingerprints without disturbing active or borrowed plugins.
+- guarantee runtime cleanup when Provider conformance checks fail or are cancelled.
+- require real browser-test execution in the Entari compatibility workflow and include that workflow in exact-source release gates and the main protection template.
+- preserve resource URL fragments and decode local URL paths before authorization, while keeping filehost request headers scoped to the exact fragment-free request URL.
+- harden release workflow dispatch ([d224199](<https://github.com/entanex/entari-plugin-htmlrender/commit/d2241991fd2428fa259f685d72982428834766a1>) by Tacrolimus).
+- strengthen distribution metadata and CI contracts for the Python/Entari support matrix and minimum versions for native extras.
+
+### Documentation
+
+- document Takumi 0.4.0's supported wheel platforms, Unicode font subsets, cache and release lifecycles, and animation limits.
+- distinguish published Takumi capabilities from the upstream `dev` previews of `Document`, `RasterImage`, and MathJax. This release still uses Playwright for Markdown formulas.
+- include named drawings, shared-package imports, and initializer-only packages in the 0.2 migration and service documentation.
+
+## [v0.1.0](<https://github.com/entanex/entari-plugin-htmlrender/releases/tag/v0.1.0>) - 2026-08-14
+
+[Compare with first commit](<https://github.com/entanex/entari-plugin-htmlrender/compare/e1e984747b97aa2126a869d595729720d863ddde...v0.1.0>)
+
+### Chore
+
+- inline markdown lint configuration ([8542b67](<https://github.com/entanex/entari-plugin-htmlrender/commit/8542b6714d4c73a6a16f8510b30c4fddc0a2e0e1>) by Tacrolimus).
+- reset package metadata for new repository ([c60dae2](<https://github.com/entanex/entari-plugin-htmlrender/commit/c60dae21440eedd7eac642f91dd60ec7c5574058>) by Tacrolimus).
+- import htmlrender source baseline ([e1e9847](<https://github.com/entanex/entari-plugin-htmlrender/commit/e1e984747b97aa2126a869d595729720d863ddde>) by BalconyJH).
+
+### Continuous Integration
+
+- consolidate build and release workflows ([38dec35](<https://github.com/entanex/entari-plugin-htmlrender/commit/38dec35b4cfce110b4625b41a87dc634578f8dbe>) by Tacrolimus).
+
+### Docs
+
+- reorganize guides around public contracts ([f6db727](<https://github.com/entanex/entari-plugin-htmlrender/commit/f6db727d15c1c963c90f4cf407df21c37ab1bc3f>) by Tacrolimus).
+
+### Bug Fixes
+
+- restore CI compatibility ([dc77635](<https://github.com/entanex/entari-plugin-htmlrender/commit/dc7763555a61e844e12d40ec179ce0f28c17989d>) by Tacrolimus).
+- harden lifecycle and distribution boundaries ([0d78ecf](<https://github.com/entanex/entari-plugin-htmlrender/commit/0d78ecf667f7a4ee4610501a7e9ae97a2abb014a>) by BalconyJH).
+
+### Code Refactoring
+
+- establish semantic rendering architecture ([d3ba187](<https://github.com/entanex/entari-plugin-htmlrender/commit/d3ba187ab6a6e7113d685b177075065c79ba58bf>) by Tacrolimus).
+- port htmlrender to Entari ([718e644](<https://github.com/entanex/entari-plugin-htmlrender/commit/718e644c2c73affccb4e51439da67382a12689c6>) by BalconyJH).
+
+# 使用指南
+
+# 渲染 HTML、Markdown 与文本
+
+`HtmlRenderer` 提供了一组统一的异步接口，可以把 HTML、Markdown、纯文本或 Jinja2 模板直接渲染成图片。无论底层配置的是 Takumi 还是 Playwright，调用方式都保持一致。
+
+## 基础渲染
+
+```python
+from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, RenderedImage
+
+async def render_examples(renderer: HtmlRenderer) -> tuple[RenderedImage, ...]:
+    options = RasterOptions(width=720)  # (1)!
+
+    html_img = await renderer.rasterize_html(
+        "<main><h1>Hello</h1><p>来自 HTML 的内容</p></main>",
+        raster=options,
+    )
+    md_img = await renderer.rasterize_markdown(
+        "# 标题\n\n支持 **加粗**、列表与代码高亮。",
+        raster=options,
+    )
+    text_img = await renderer.rasterize_text(
+        "这是一段纯文本，适合直接输出日志或不可信用户输入。",
+        raster=options,
+    )
+    return html_img, md_img, text_img
+```
+
+1. 常用渲染参数集中在 `RasterOptions` 中，可以在多次调用之间复用。
+
+### 渲染效果预览
+
+[![HTML 渲染示例](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/html2pic.png>)](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/html2pic.png>)
+
+[![Markdown 渲染示例](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/md2pic.png>)](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/md2pic.png>)
+
+[![纯文本渲染示例](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/text2pic.png>)](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/text2pic.png>)
+
+## 控制输出尺寸与格式：`RasterOptions`
+
+`RasterOptions` 用来指定图片的宽度、高度、清晰度与编码格式：
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `width` | `int` | `800` | 视口逻辑宽度（像素） |
+| `height` | `int \\| None` | `None` | 视口高度；为 `None` 时自动按内容高度撑开（受 `html.max_auto_height` 限制） |
+| `device_pixel_ratio` | `float` | `2.0` | 设备像素比（清晰度倍率，默认 2 倍高清图，受 `html.max_device_pixel_ratio` 限制） |
+| `format` | `"png" \\| "jpeg"` | `"png"` | 输出图片格式 |
+| `quality` | `int \\| None` | `None` | 压缩质量（`0..100`），仅在 `format="jpeg"` 时有效 |
+
+```python
+# 输出 900px 宽、1 倍率、质量 85 的 JPEG 图片
+jpeg_options = RasterOptions(
+    width=900,
+    device_pixel_ratio=1.0,
+    format="jpeg",
+    quality=85,
+)
+```
+
+## 读取渲染结果：`RenderedImage`
+
+所有渲染方法都返回不可变的 `RenderedImage` 对象：
+
+- `bytes(image)` 或 `image.data`：获取图片原始字节流，可直接交给消息平台发送或写入文件。
+- `image.width`、`image.height`：根据图片文件头解析出的真实像素宽高。
+- `image.format`、`image.media_type`：格式（`"png"` / `"jpeg"`）及对应 MIME 类型（`"image/png"` / `"image/jpeg"`）。
+
+## Markdown 使用说明
+
+### 传入字符串 vs 传入文件或远程资源
+
+`rasterize_markdown(source, ...)` 的第一个参数区分类型：
+
+- 传入 `str` 时，**永远视为内联 Markdown 文本**，不会尝试当作文件路径去读。
+- 如果要渲染本地文件、包内资源或远程 Markdown，请显式传入 `ResourceRef`（如 `FileResourceRef`、`PackageResourceRef`、`RemoteResourceRef`）。
+
+> [!WARNING]
+>
+> **不可信内容的安全提醒**
+>
+> Markdown 解析默认保留原始 HTML 标签，**不会自动清理 XSS 或恶意标签**。渲染用户或模型生成的不可信文本时，请先按业务规则做 HTML 净化；如果只需要纯文字展示，直接使用 `rasterize_text()` 更安全。
+
+### 数学公式与引擎差异
+
+插件内置 `pymdownx.arithmatex(generic=True, smart_dollar=True)` 支持 LaTeX 数学公式：
+
+- **行内公式**：使用紧贴内容的 `$x$` 或 `\(x\)`。两端带空格的 `$ x $` 会保持为普通文本。
+- **块级公式**：`$$...$$`、`\[...\]` 或独立的 `\begin{env}...\end{env}` 必须独占段落。行内混写的 `before $$x$$ after` 不会按块级公式解析。
+- **代码块豁免**：行内代码与围栏代码块中的 `$` 不会被当作公式。
+
+> [!NOTE]
+>
+> **Takumi 暂不支持 Markdown 数学公式**
+>
+> 含数学公式的 Markdown 在准备阶段会注入 KaTeX 初始化脚本并标记 `DocumentRequirement.JAVASCRIPT`：
+>
+> - **Playwright**：正常执行 KaTeX 完成公式排版（且只渲染解析器生成的 `.arithmatex[data-htmlrender-arithmatex]` 容器）。
+> - **Takumi**：因为不执行 JavaScript，会直接抛出 `UnsupportedDocumentFeatureError`。若必须使用 Takumi 展示公式，请提前把公式预渲染为静态 HTML 或 SVG。
+
+## 进阶：将「内容准备」与「图片渲染」拆开
+
+如果你希望先检查文档元数据（例如是否依赖 JavaScript、包含了哪些样式与资源），或者把同一份准备好的内容多次渲染成不同尺寸，可以先用 `HtmlPreparer` 生成中立的 `PreparedHtml`，再交给 `HtmlRenderer.rasterize_prepared()`：
+
+```python
+from entari_plugin_htmlrender import HtmlPreparer, HtmlRenderer, RasterOptions
+
+async def prepare_then_render(
+    preparation: HtmlPreparer,
+    renderer: HtmlRenderer,
+):
+    prepared = await preparation.prepare_markdown("# 一次准备，多次渲染")  # (1)!
+
+    mobile = await renderer.rasterize_prepared(
+        prepared,
+        raster=RasterOptions(width=420),
+    )
+    desktop = await renderer.rasterize_prepared(
+        prepared,
+        raster=RasterOptions(width=960),
+    )
+    return mobile, desktop
+```
+
+1. `PreparedHtml` 是不可变的值对象，与具体渲染引擎无关；不过 `HtmlPreparer` 和 `HtmlRenderer` 本身仍绑定当前插件生命周期，不要缓存在全局变量里。
+
+如果手头已经是一段完整 HTML 字符串，且不需要读取任何外部模板或文件，也可以使用同步函数 `parse_html(html, base_url=...)` 直接构造 `PreparedHtml`。
+
+# Jinja2 模板与资源加载
+
+在实际插件开发中，卡片、战绩图和榜单通常使用 **Jinja2 模板** 编写，并伴随本地图片、CSS 样式或远程头像。本页介绍如何安全地渲染模板与加载各类资源。
+
+## 渲染 Jinja2 模板
+
+使用 `TemplateRef(root, name)` 指定模板根目录和相对文件名，再传给 `renderer.rasterize_template()`：
+
+```python
+from pathlib import Path
+
+from entari_plugin_htmlrender import HtmlRenderer, RasterOptions, TemplateRef
+
+async def render_profile(renderer: HtmlRenderer, username: str):
+    return await renderer.rasterize_template(
+        TemplateRef(Path("templates"), "profile.html"),  # (1)!
+        {"username": username, "level": 42},
+        raster=RasterOptions(width=440),
+    )
+```
+
+1. `TemplateRef.name` 必须是相对 POSIX 路径（如 `"cards/profile.html"`），不允许包含 `..` 或反斜杠 `\`。
+
+[![模板渲染示例](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/template2pic.png>)](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/template2pic.png>)
+
+### 只生成 HTML 字符串（不出图）
+
+如果只想把 Jinja2 模板渲染成 HTML 字符串（例如调试或交给其他系统），注入 `TemplateRenderer` 即可，甚至不需要配置任何 HTML 渲染后端：
+
+```python
+from pathlib import Path
+
+from entari_plugin_htmlrender import TemplateRef, TemplateRenderer
+
+async def build_html(templates: TemplateRenderer) -> str:
+    rendered = await templates.render(
+        TemplateRef(Path("templates"), "profile.html"),
+        {"username": "Entari"},
+    )
+    return str(rendered)
+```
+
+> [!TIP]
+>
+> **自定义过滤器与扩展**
+>
+> `rasterize_template()` 和 `templates.render()` 都支持传入 `filters={...}` 和 `extensions=(...)`。为了命中 Jinja2 环境缓存，请尽量复用具名函数作为 filter，避免每次调用临时创建 `lambda`。
+
+## 本地文件访问白名单
+
+出于安全考虑，插件\*\*默认禁止读取任何本地文件\*\*。`TemplateRef.root`、当前工作目录或 HTML 中的 `<base>` 都不会自动获得读取权限。
+
+使用本地模板、图片或字体前，必须先把对应目录加入 `resources.local_access.allowed_paths`：
+
+```yaml
+plugins:
+  htmlrender:
+    provider: takumi
+    resources:
+      local_access:
+        allowed_paths:
+          - templates
+          - assets
+```
+
+> [!WARNING]
+>
+> **路径与符号链接校验**
+>
+> 每次读取本地文件（包括 Jinja2 模板里的 `include`、`extends`、`import`）都会解析真实路径并校验符号链接，防止通过软链跳出白名单目录。
+>
+> 如果在模板变量里传入相对 `Path`，它会以模板目录为基准解析；若文件位于同级的 `assets/` 目录，请传入 `.resolve()` 后的绝对路径。
+
+## 样式与图片：Takumi 与 Playwright 的差异
+
+不同引擎对外部样式和图片的处理方式不同，写模板时请留意以下区别：
+
+- **样式**：Takumi **不支持** `<link rel="stylesheet">`、CSS `@import` 与 `@font-face`。请在 Jinja2 中直接内联样式：
+
+```html
+<style>{% include "style.css" %}</style>
+```
+
+- **本地图片**：支持相对路径或 `file:` URL（需在白名单内并启用资源处理，插件会直接把图片字节传给 Takumi，不产生临时文件）。
+- **远程图片**：Takumi 不会在排版时自动发起网络请求。需要先通过 `ResourceAccess.fetch_bytes()` 下载，再以字节变量或 `PreparedAsset` 传入。
+
+- **样式**：完整支持 `<link rel="stylesheet">`、`@import`、`@font-face` 等浏览器标准写法。
+- **本地图片**：由插件按配置策略（内存拦截、`file://` 或内置 Filehost）提供给浏览器，详见 [Playwright 资源传递策略](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/playwright/index.md#resource-delivery>)。
+- **远程图片**：在托管渲染中，所有 HTTP(S) 资源请求都会经由 Bot 侧的受控网络层代为拉取，自动受域名白名单和内网防护策略约束。
+
+## 显式读取与托管资源：`ResourceAccess`
+
+如果业务需要主动拉取本地文件、Python 包内文件或远程图片，可以注入 `ResourceAccess`：
+
+```python
+from pathlib import Path
+
+from entari_plugin_htmlrender.resources import (
+    FileResourceRef,
+    PackageResourceRef,
+    RemoteResourceRef,
+    ResourceAccess,
+)
+
+async def load_assets(resources: ResourceAccess):
+    # 读取本地白名单内的文件
+    banner = await resources.fetch_bytes(FileResourceRef(Path("assets/banner.png")))
+
+    # 读取 Python 包内附带的资源
+    icon = await resources.fetch_bytes(PackageResourceRef("my_plugin", "assets/icon.png"))
+
+    # 读取远程图片（受 remote_access 域名和内网策略保护）
+    avatar = await resources.fetch_bytes(
+        RemoteResourceRef("https://cdn.example.com/avatar.png"),
+        refresh=False,  # 设为 True 可强制重新校验缓存
+    )
+    return banner, icon, avatar
+```
+
+### 临时发布内存资源（`publish`）
+
+当你在使用远程 Playwright 并启用了 Filehost 时，可以通过 `resources.publish()` 把内存中的图片或数据临时发布为一个带租约的 URL：
+
+```python
+from entari_plugin_htmlrender.resources import InlineResource, ResourceAccess
+
+async def publish_temp_image(resources: ResourceAccess, png_bytes: bytes):
+    async with resources.publish(
+        InlineResource(data=png_bytes, media_type="image/png"),
+        suffix=".png",
+    ) as published:
+        # published.url 和 published.request_headers 仅在 async with 块内有效
+        ...
+```
+
+退出 `async with` 后，该临时资源会自动失效并回收；请勿在块外继续使用 `published.url`，也不要将 `published.request_headers` 复用到其他地址。
+
+## 控制资源处理严格度：`ResourceMaterializationPolicy`
+
+调用 `rasterize_*` 或 `prepare_*` 时，可通过 `materialization_policy` 参数指定资源解析与内联/托管的策略：
+
+| 策略 | 行为说明 | 适用场景 |
+| --- | --- | --- |
+| `ResourceMaterializationPolicy.AUTO` | 默认策略：自动处理可读取的资源，遇到无法读取或未授权的引用时容忍跳过 | 大多数常规渲染场景 |
+| `ResourceMaterializationPolicy.STRICT` | 严格模式：任意资源读取或授权失败立即抛出 `ResourceError` | 要求图片/样式绝不能缺失的关键卡片 |
+| `ResourceMaterializationPolicy.OFF` | 关闭处理：不做任何资源抓取、内联或发布 | 纯内联内容，追求极致开销控制 |
+
+# Python 绘图（Pillow / Skia）
+
+如果你习惯直接用 Python 代码画图（例如合成头像、绘制排行榜、拼图或数据图表），`entari-plugin-htmlrender` 内置了独立的 **Pillow** 与 **Skia** 绘图通道。
+
+它完全独立于 HTML 渲染后端——你可以单独使用（`provider: null`），也可以与 Takumi / Playwright 并行启用。
+
+插件提供两种绘图方式：
+
+- **Python 绘图函数（`DrawingRenderer`）**：直接操作原生 Pillow 或 Skia 画布，最灵活，支持按文件或模块注册以及开发期热重载。
+- **声明式矩形场景（`GraphicsRenderer` + `RasterScene`）**：与具体后端解耦的纯数据场景，适合只需要简单纯色矩形合成且希望跨后端复用的场景。
+
+---
+
+## 方式一：Python 绘图函数（推荐）
+
+### 1\. 安装依赖并配置绘图入口
+
+先安装对应的可选依赖（`[pillow]` 或 `[skia]`），然后在 Entari 配置的 `graphics.drawings` 中注册你的绘图函数：
+
+```yaml
+plugins:
+  htmlrender:
+    graphics:
+      drawings:
+        profile_card: # (1)!
+          backend: pillow
+          path: drawings/profile_card.py # (2)!
+          function: draw                 # (3)!
+          reload: true                   # (4)!
+```
+
+1. 自定义绘图名称，后续调用 `drawings.render("profile_card", ...)` 时使用。
+2. 指向 `.py` 文件（相对进程工作目录），或改用 `module: my_drawings.profile_card` 按模块导入（`path` 与 `module` 二选一）。
+3. 模块级绘图函数名，默认为 `"draw"`。
+4. 设为 `true` 后，每次调用 `render()` 前会自动检测源码变更并重新加载。
+
+### 2\. 编写绘图函数
+
+绘图函数必须是一个\*\*普通同步函数\*\*（不能是 `async def`），接收 `(canvas, data)` 两个位置参数，直接修改画布并返回 `None`：
+
+`canvas` 为 `PillowCanvas`，提供 `.image`（RGBA 模式的 `PIL.Image.Image`）、`.draw`（`PIL.ImageDraw.ImageDraw`）、`.width` 和 `.height`：
+
+```python
+from collections.abc import Mapping
+
+from entari_plugin_htmlrender.adapters.pillow import PillowCanvas
+
+def draw(canvas: PillowCanvas, data: Mapping[str, object]) -> None:
+    title = str(data.get("title", "Hello, Pillow"))
+    # 绘制圆角背景卡片
+    canvas.draw.rounded_rectangle(
+        (24, 24, canvas.width - 24, canvas.height - 24),
+        radius=20,
+        fill=(30, 41, 59, 255),
+    )
+    canvas.draw.text((56, 60), title, fill=(248, 250, 252, 255))
+```
+
+`canvas` 为 `SkiaCanvas`，提供 `.canvas`（`skia.Canvas`）、`.surface`（`skia.Surface`）、`.width` 和 `.height`：
+
+```python
+from collections.abc import Mapping
+import skia
+
+from entari_plugin_htmlrender.adapters.skia import SkiaCanvas
+
+def draw(canvas: SkiaCanvas, data: Mapping[str, object]) -> None:
+    paint = skia.Paint(
+        AntiAlias=True,
+        Color=skia.Color(52, 81, 178, 255),
+    )
+    rect = skia.Rect.MakeXYWH(24, 24, canvas.width - 48, canvas.height - 48)
+    canvas.canvas.drawRoundRect(rect, 20, 20, paint)
+```
+
+> [!WARNING]
+>
+> **绘图函数编写约束**
+>
+> - 不要修改画布尺寸，也不要替换 `canvas.image` 对象本身。
+> - 不要把 `canvas` 存到全局变量或传给后台线程——绘图结束后画布会被立即编码并回收。
+> - 多个并发请求可能同时执行同一个绘图模块，请勿在模块全局变量里存放无锁可变状态。
+> - 绘图函数直接运行在当前 Python 进程中，**没有沙箱隔离**，请只加载受信任的本地代码，切勿让用户输入决定 `path`、`module` 或 `function`。
+
+### 3\. 在插件中调用
+
+注入 `DrawingRenderer`（或通过 `service.drawings` 访问），指定绘图名、数据与画布尺寸：
+
+```python
+from entari_plugin_htmlrender.graphics import (
+    DrawingRenderer,
+    RGBAColor,
+    RasterEncodeOptions,
+)
+
+async def make_card(drawings: DrawingRenderer):
+    return await drawings.render(
+        "profile_card",
+        {"title": "Entari 玩家名片"},
+        width=800,
+        height=360,
+        background=RGBAColor(248, 250, 252, 255),
+        output=RasterEncodeOptions(format="png"),
+    )
+```
+
+### 模块化组织与热重载
+
+如果你的绘图代码拆成了多个文件，或有多个绘图函数共用同一套工具模块，按以下方式组织即可让热重载正常工作：
+
+1. **按包组织（推荐）**：把绘图目录放进 Entari 配置的 `basic.external_dirs`（修改后需重启 Entari），在包目录中放置 `__init__.py`，配置时写 `module: my_pkg`（不要写 `my_pkg.__init__`）。
+2. **单文件引入本地辅助模块**：在单文件顶部标注 `# entari: plugin`，让 Entari 接管其依赖模块的热重载。
+3. **触发时机**：
+4. `reload: true` 采用\*\*按需检测\*\*（不是后台文件监听）：每次调用 `render(name)` 前会检查源码哈希，如有变化则触发 Entari 重载关联模块；若自动重载失败会记录日志并回退继续使用旧版本。
+5. 也可以手动调用 `await drawings.reload("profile_card")` 强制重载（即使 `reload: false` 也生效；出错时直接抛异常）。
+6. 如果修改了配置文件本身（新增绘图项、切换后端或改函数名），需要重载 `htmlrender` 插件。
+
+---
+
+## 方式二：声明式 `RasterScene`
+
+如果你的图形非常简单（例如纯色色块拼接、占位图或测试图），且希望代码完全不依赖 `PIL` 或 `skia` 任何第三方库，可以使用 `GraphicsRenderer` + `RasterScene`：
+
+```python
+from entari_plugin_htmlrender.graphics import (
+    FillRect,
+    GraphicsRenderer,
+    PixelRect,
+    RGBAColor,
+    RasterEncodeOptions,
+    RasterScene,
+)
+
+async def draw_banner(graphics: GraphicsRenderer):
+    scene = RasterScene(
+        width=600,
+        height=200,
+        background=RGBAColor(24, 24, 27, 255),
+        commands=(FillRect(PixelRect(24, 24, 552, 152), RGBAColor(52, 81, 178, 255)),),
+    )
+    return await graphics.rasterize(
+        scene,
+        output=RasterEncodeOptions(format="jpeg", quality=90),
+    )
+```
+
+### 输出编码选项：`RasterEncodeOptions`
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `format` | `"png" \\| "jpeg"` | `"png"` | 输出格式 |
+| `quality` | `int \\| None` | `None` | JPEG 质量（`0..100`，默认 `90`），仅 JPEG 可用 |
+| `matte` | `RGBAColor \\| None` | `None` | JPEG 透明底色（必须不透明 `alpha=255`，默认白色），仅 JPEG 可用 |
+
+> [!NOTE]
+>
+> **跨后端说明**
+>
+> Pillow 与 Skia 均支持渲染 `RasterScene`，如果同时启用了两者，可以通过 `service.capabilities.pillow` 和 `service.capabilities.skia` 显式指定执行后端。注意两个后端的编码库不同，**不保证输出字节完全一致**，且后端之间\*\*不会自动降级回退\*\*。
+
+# 浏览器操作与引擎专属能力
+
+`HtmlRenderer` 只提供所有 HTML 引擎都支持的通用出图接口。当你需要使用某个引擎独有的高级特性——比如用 Playwright 打开网页并截取某个元素，或者用 Takumi 生成 SVG、测量布局、输出动图——可以通过 `service.capabilities` 按租约借用对应能力。
+
+> [!WARNING]
+>
+> **租约生命周期规则**
+>
+> 所有 `lease_*()` 方法返回的都是异步上下文管理器（`async with`）。借出的页面、浏览器、会话、编译结果或原生渲染器\*\*只能在 `async with` 块内使用\*\*，绝对不要带出块外或存进全局变量，否则会导致关闭插件时一直等待资源释放。
+
+---
+
+## Playwright：网页导航与选择器截图
+
+当 `provider: playwright` 时，通过 `service.capabilities.playwright` 获取 `PlaywrightCapability`：
+
+```python
+from entari_plugin_htmlrender import RenderedImage
+from entari_plugin_htmlrender.entari import HtmlRenderService
+
+async def screenshot_element(service: HtmlRenderService, url: str) -> RenderedImage:
+    pw = service.capabilities.playwright
+    async with pw.lease_page(
+        viewport={"width": 1280, "height": 720},
+        extra_http_headers={"Accept-Language": "zh-CN"},
+    ) as page:
+        await page.goto(url, wait_until="networkidle")
+        card = page.locator(".profile-card")
+        raw_png = await card.screenshot(type="png")
+        return RenderedImage.from_bytes(raw_png, expected_format="png")
+```
+
+- `lease_page(**options)`：借用一个受托管的原生 Playwright `Page`，退出 `async with` 时自动关闭回收。
+- `lease_browser()`：需要自行管理多个 Context 或复杂会话时，可直接借用原生 `Browser`。
+
+> [!CAUTION]
+>
+> **原生租约的安全责任**
+>
+> 通过 `lease_page()` / `lease_browser()` 直接操作浏览器时，插件\*\*不会\*\*替你拦截页面跳转或校验目标地址，原生 Playwright 异常也会原样抛出。如果你要访问用户提供的 URL，请务必自行做好域名、IP 与重定向白名单校验。
+
+---
+
+## Takumi：SVG、布局测量、动图与动态字体
+
+当 `provider: takumi` 时，通过 `service.capabilities.takumi` 获取 `TakumiCapability`，提供三个层次的租约接口：
+
+适合输出 SVG、动态注册本地字体文件以及查看编译缓存统计：
+
+```python
+from pathlib import Path
+from entari_plugin_htmlrender.entari import HtmlRenderService
+
+async def render_svg(service: HtmlRenderService) -> str:
+    async with service.capabilities.takumi.lease_session() as session:
+        # 查看编译缓存命中统计
+        stats = session.compiled_cache_stats
+        # 直接将 HTML 转为 SVG 字符串
+        return await session.render_svg_html("<div style='color:blue'>Hi</div>")
+```
+
+`TakumiSession` 还提供 `register_font_file(..., unicode_range=...)` 和 `registered_font_families`。
+
+提供编译复用、布局测量、动图帧编码与动态字体缓存：
+
+- **编译复用**：`compile_html(...)` 返回绑定当前租约的 `TakumiCompiledDocument`，可多次测量或渲染。
+- **布局测量**：获取元素实际排版尺寸。
+- **动图与帧编码**：支持输出 WebP、APNG（帧率上限 **90 FPS**）与 GIF（帧率上限 **50 FPS**）；超限会转为 `ProviderExecutionError`。
+- **动态字体缓存**：`cache_font(font, key)`、`cached_fonts(key, pin=False)`、`unregister_font(name)`、`clear_fonts()`。
+
+需要直接调用 `takumi_py.Renderer` 底层接口时，可使用 `async with service.capabilities.takumi.lease_native_renderer() as native:`。注意原生对象为同步接口，调用方需自行管理线程阻塞与异常。
+
+---
+
+## 多引擎组合与运行时切换
+
+### 同时启用多个绘图后端
+
+你可以在配置中同时启用 Pillow 和 Skia，并按需在业务中选择使用哪一个：
+
+```yaml
+plugins:
+  htmlrender:
+    provider: takumi
+    startup: probe
+    graphics:
+      backends: [pillow, skia] # 首项 pillow 作为 service.graphics 的默认实现
+      drawings:
+        avatar_grid:
+          backend: pillow
+          path: drawings/avatar_grid.py
+        vector_badge:
+          backend: skia
+          path: drawings/vector_badge.py
+```
+
+在代码中，你可以：
+
+- 用 `service.graphics` 调用默认绘图后端（此处为 Pillow）渲染 `RasterScene`。
+- 用 `service.capabilities.pillow` 或 `service.capabilities.skia` 显式指定某个后端。
+- 用 `service.drawings.render("avatar_grid", ...)` 或 `render("vector_badge", ...)` 调用各自绑定的绘图函数。
+
+### 运行时安全探测可用能力
+
+如果你的业务插件希望兼容不同用户的配置（有的用户装了 Takumi，有的装了 Playwright），可以先探测再分支，避免直接触发 `CapabilityUnavailableError`：
+
+```python
+from entari_plugin_htmlrender import RenderOperation
+from entari_plugin_htmlrender.entari import HtmlRenderService
+
+async def smart_render(service: HtmlRenderService):
+    # 检查当前 HTML 渲染器是否支持某项操作
+    if service.renderer.supports(RenderOperation.RASTERIZE_MARKDOWN):
+        ...
+
+    # 检查某个专属能力是否已启用
+    if "playwright" in service.capabilities.available_names:
+        pw = service.capabilities.playwright
+        ...
+```
+
+# 生产最佳实践
+
+把 `entari-plugin-htmlrender` 部署到生产环境时，遵循下面几条经验可以避免绝大多数内存泄漏、重载报错和安全隐患。
+
+## 1\. 遵循依赖注入边界，不缓存服务对象
+
+Entari 支持插件热重载与动态禁用/启用。每次重载都会创建新一轮的运行时，并关闭旧的服务实例。
+
+- **推荐做法**：在事件处理函数中通过依赖注入接收细粒度接口（如 `HtmlRenderer`、`TemplateRenderer`、`DrawingRenderer`），或者接收 `HtmlRenderService`。
+- **禁止做法**：不要把 `HtmlRenderService`、`HtmlRenderer`、`HtmlPreparer` 或 `capabilities` 赋值给模块级全局变量。一旦插件重载，旧对象会进入关闭状态，后续调用全部抛出 `RuntimeUnavailableError`。
+
+```python
+# ✅ 推荐：业务函数只声明自己真正需要的接口
+async def render_rank(renderer: HtmlRenderer, rows: list[dict]) -> bytes:
+    img = await renderer.rasterize_template(
+        TemplateRef(Path("templates"), "rank.html"),
+        {"rows": rows},
+    )
+    return bytes(img)
+```
+
+## 2\. 合理配置并发与预算上限
+
+图片渲染属于 CPU / 内存密集型操作，务必结合服务器规格设置限流与像素上限：
+
+```yaml
+plugins:
+  htmlrender:
+    provider: takumi
+    startup: probe
+    html:
+      max_concurrency: 2          # 同时进行的 HTML 渲染数
+      max_pixels: 16777216        # 单图最大像素数（默认 1600 万像素）
+      max_auto_height: 16384      # 自动高度上限（防长图撑爆内存）
+      max_output_bytes: 67108864  # 单图最大体积 64 MiB
+    graphics:
+      max_concurrency: 2          # 每个绘图后端（Pillow / Skia）独立计数
+      max_pixels: 16777216
+```
+
+> [!TIP]
+>
+> **预算超限不会静默截断**
+>
+> 当输出像素、自动高度或文件体积超出预算时，插件会明确抛出 `RenderOutputLimitError`，而不会静默裁剪图片。业务侧可以捕获该异常并提示用户缩小范围或分页展示。
+
+## 3\. 让缓存真正生效
+
+插件内部维护了 4 类独立缓存，均随插件生命周期自动清理：
+
+| 缓存名称（监控标签） | 作用 | 调优建议 |
+| --- | --- | --- |
+| `resource` | 本地/远程资源内容缓存 | 调大 `resources.cache.max_bytes` 减少重复磁盘/网络读取；频繁变动的资源可传 `refresh=True` |
+| `template_environment` | Jinja2 `Environment` 与模板编译缓存 | 尽量复用固定函数作为 `filters`，避免每次传匿名 `lambda` 导致缓存失效 |
+| `filehost` | 远程浏览器用的临时文件托管缓存 | 配置 `prewarm_paths` 预热常用静态素材，按内存调整 `max_bytes`（默认 256 MiB） |
+| `takumi_compiled` | Takumi HTML 编译结果缓存 | 通过 `provider_config.compiled_cache_max_entries`（默认 128）控制条目数 |
+
+此外，Takumi 引擎内部还有独立的资源缓存（`cache_max_bytes`，默认 64 MiB）和字体缓存（`font_cache_max_bytes`）。容器化部署时如果字体文件随镜像只读打包，可以将字体 `cache_policy` 设为 `immutable` 以减少文件变更检查开销。
+
+## 4\. 严守安全与日志脱敏红线
+
+- **白名单最小化**：`resources.local_access.allowed_paths` 只添加确实存放模板、素材和字体的子目录，切勿在生产环境开启 `allow_any_path: true`。
+- **保护内网地址**：保持 `resources.remote_access.allow_private_networks` 为空，仅在明确需要访问特定内网素材服务时填写精确 IP/CIDR，并配合 `allow_hosts` 限制域名。
+- **区分可信与不可信内容**：渲染用户输入时，优先用 `rasterize_text()`；若必须使用 Markdown 或 HTML，请先完成 HTML 净化。
+- **日志脱敏**：不要在日志或错误上报中打印原始 `provider_config`（可能含代理/远程连接令牌）、完整 HTML、模板变量、Filehost 认证头或未经清理的异常上下文（`ErrorCause`）。
+
+## 5\. 上线前核对清单
+
+- [ ] `startup` 已设为 `probe`，确保启动阶段就能发现后端不可用或字体缺失
+- [ ] 使用 Takumi 时已配置中文字体，并实际渲染过中文测试图
+- [ ] 使用 Playwright 时优先部署了独立的远程浏览器服务，且双端 Playwright 版本一致
+- [ ] 所有自定义 `lease_*()` 调用均放在 `async with` 中，没有泄漏到外部作用域
+- [ ] 敏感配置（远程连接地址令牌、Filehost 密钥、Sentry DSN）已通过环境变量注入，未写入仓库
+
+# 配置与部署
+
+# 配置总览与运行机制
+
+插件在 Entari 中的短名为 `htmlrender`。所有配置项都直接写在 `plugins.htmlrender` 下，由 `HtmlRenderConfig` 严格校验——任何未知字段、拼写错误或类型不匹配都会在配置加载阶段立即报错（`extra="forbid"`）。
+
+## 完整配置示例
+
+```yaml
+plugins:
+  htmlrender:
+    provider: takumi # (1)!
+    startup: probe   # (2)!
+    provider_config: # (3)!
+      font_families: ["Noto Sans SC"]
+    html:            # (4)!
+      max_pixels: 16777216
+      max_concurrency: 2
+    graphics:        # (5)!
+      backends: [pillow]
+    resources:       # (6)!
+      local_access:
+        allowed_paths: [templates, assets, fonts]
+      remote_access:
+        allow_hosts: [cdn.example.com]
+    observability:   # (7)!
+      sentry: false
+      prometheus: false
+```
+
+1. HTML 渲染后端 ID：`takumi`、`playwright`、第三方 Provider ID 或 `null`（不启用 HTML 渲染，仅保留模板转 HTML、资源与绘图能力）。
+2. 启动策略：`off`（按需启动）、`warmup`（启动时初始化）、`probe`（启动并做最小探测）。当 `provider: null` 时必须保持 `off`。
+3. 当前所选 `provider` 的专属配置，由对应后端负责校验。当 `provider: null` 时必须为空。
+4. 跨所有 HTML 后端生效的输入、像素、体积与并发预算限制。
+5. 独立的 Pillow / Skia 绘图配置，不依赖 `provider`。
+6. 本地路径白名单、远程请求防护、缓存、模板与 Filehost 设置。
+7. 可选的 Sentry 与 Prometheus 指标上报开关。
+
+## 顶层配置项一览
+
+| 配置键 | 默认值 | 详细文档 |
+| --- | --- | --- |
+| `provider` | `null` | [Takumi](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/takumi/index.md>) · [Playwright](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/playwright/index.md>) |
+| `startup` | `"off"` | 见下方 [启动策略与生命周期](<#startup-lifecycle>) |
+| `provider_config` | `{}` | 由所选后端解析，不可在顶层混写后端专属键 |
+| `html` | 见下方预算表 | 见下方 [HTML 渲染预算](<#html-budget>) |
+| `graphics` | `backends: []` | [绘图后端配置（Pillow / Skia）](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/graphics/index.md>) |
+| `resources` | 默认拒绝本地与内网 | [资源访问、Filehost 与安全](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/resources-and-security/index.md>) |
+| `observability` | 全部关闭 | [可观测性与监控](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/resources-and-security/index.md#observability>) |
+
+## 环境变量与 `.env`
+
+本插件\*\*不会\*\*自行读取 `.env` 文件，也没有专属的整棵配置树环境变量。环境变量的加载与插值完全由 Entari 负责。
+
+推荐把远程浏览器地址、访问令牌、Filehost 密钥、Sentry DSN 等敏感值放到环境变量中，在 Entari 配置里引用：
+
+```yaml
+plugins:
+  htmlrender:
+    provider: playwright
+    provider_config:
+      connect_ws:
+        endpoint: ${{ env.PLAYWRIGHT_WS_URL }}
+```
+
+## 启动策略与生命周期
+
+`startup` 决定了 HTML 渲染引擎在 Entari 启动阶段（Launart `preparing`）的行为：
+
+| 策略 | 启动阶段行为 | 适用场景 |
+| --- | --- | --- |
+| `off`（默认） | 不启动引擎，等到第一次收到渲染请求时再按需初始化 | 仅使用模板/绘图，或开发期想加快机器人启动速度 |
+| `warmup` | 启动阶段直接初始化渲染引擎（如连接远程浏览器或加载字体） | 希望降低第一次渲染的冷启动延迟 |
+| `probe`（生产推荐） | 启动阶段完成初始化，并执行一次最小可用性探测 | 生产环境提前暴露版本不匹配、网络不通或字体缺失问题 |
+
+> [!NOTE]
+>
+> **插件重载与关闭行为**
+>
+> - **关闭与重载**：进入 `cleanup` 阶段时，插件会先停止接收新请求，等待正在进行的渲染和租约自然结束，再依次关闭绘图、HTML 引擎、模板、资源与 Filehost。
+> - **配置出错保护**：在 Entari 热重载中，配置解析、后端检查和绘图源码加载会先在暂存阶段完成，失败时不会破坏正在运行的旧实例。但一旦进入新实例的启动探测阶段失败，需要修复配置后手动再次重载插件。
+
+## HTML 渲染预算
+
+`html` 下的限制同时作用于 Takumi、Playwright 及第三方 HTML 后端，用于防止超大输入或超长页面拖垮服务：
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `max_source_bytes` | `67108864` (64 MiB) | 单次输入 HTML / Markdown / 文本的最大字节数 |
+| `max_pixels` | `16777216` (1600 万像素) | 输出图片的最大总像素数（宽 × 高） |
+| `max_output_bytes` | `67108864` (64 MiB) | 输出图片编码后的最大字节数 |
+| `max_device_pixel_ratio` | `4.0` | 允许传入的最大 `device_pixel_ratio` |
+| `max_auto_height` | `16384` | `height=None` 自动撑开时的最大高度（像素） |
+| `max_concurrency` | `2` | 允许同时执行的 HTML 渲染任务上限 |
+
+参数本身非法时抛出 `InvalidRenderInputError`；实际渲染结果超过像素、高度或体积上限时抛出 `RenderOutputLimitError`（不会静默裁切图片）。
+
+# Takumi 配置与字体
+
+**Takumi** 是基于 Rust (`takumi-py>=0.4.0`) 的进程内原生渲染引擎，不需要安装任何浏览器即可将静态 HTML、Markdown、纯文本与 Jinja2 模板渲染为图片。
+
+```bash
+uv add "entari-plugin-htmlrender[takumi]>=0.2.0"
+```
+
+## 字体配置
+
+Takumi 默认自带的字体仅覆盖基础拉丁字符，**渲染中文、日文或 Emoji 前必须手动配置字体**，并将字体目录加入本地白名单：
+
+```yaml
+plugins:
+  htmlrender:
+    provider: takumi
+    startup: probe
+    resources:
+      local_access:
+        allowed_paths:
+          - fonts      # (1)!
+          - templates
+    provider_config:
+      font_families:   # (2)!
+        - Noto Sans SC
+      fonts:
+        - path: fonts/NotoSansSC-Regular.ttf
+          name: Noto Sans SC
+          weight: 400
+          generic_family: sans-serif
+```
+
+1. 字体文件受本地访问策略保护，所在目录必须列入 `allowed_paths`。系统字体名称不会自动授权或加载。
+2. 设置默认回退字体族列表（也可传逗号分隔的字符串）。
+
+### 多字集（`unicode_range`）配置
+
+如果一个字体家族被拆成了多个子集文件（例如拉丁 + 简体中文 + 符号），给它们配置相同的 `name`，并用 `unicode_range` 指定各自的码点闭区间 `[start, end]`（`0x0` 到 `0x10FFFF`）：
+
+```yaml
+provider_config:
+  fonts:
+    - path: fonts/NotoSansSC-Latin.woff2
+      name: Noto Sans SC
+      unicode_range: [[0x0000, 0x00FF]]
+    - path: fonts/NotoSansSC-CJK.woff2
+      name: Noto Sans SC
+      unicode_range: [[0x4E00, 0x9FFF], [0x3000, 0x303F]]
+```
+
+> [!WARNING]
+>
+> **不要省略 `unicode_range`**
+>
+> 如果两个字体条目同名且字重/样式相同，但未配置 `unicode_range`，后注册的字体会直接覆盖前者。旧字段 `subset_of` 已弃用，请迁移为同名 `name` + `unicode_range`。
+
+### 字体缓存策略
+
+- `font_cache_policy`（默认 `"revalidate"`）：每次构建时校验字体文件变化。如果字体打包在只读容器镜像中，可在全局或单条字体上设为 `"immutable"` 以减少检查开销。
+- 注意：已在运行中的 Takumi 渲染器不会热替换已注册字体，更换字体文件后需要重载插件。
+
+---
+
+## `provider_config` 完整参考
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `load_default_fonts` | `bool` | `true` | 是否加载 Takumi 内置默认字体 |
+| `fonts` | `list` | `[]` | 字体配置列表（每项支持 `path`、`name`、`weight`、`style`、`generic_family`、`unicode_range`、`cache_policy`） |
+| `font_families` | `list[str]` | `[]` | 默认字体族顺序 |
+| `font_cache_policy` | `"revalidate" \\| "immutable"` | `"revalidate"` | 字体文件的默认缓存策略 |
+| `max_concurrency` | `int` | `min(CPU核数, 4)` | Takumi 内部执行并发数（`1..64`） |
+| `compiled_cache_max_entries` | `int` | `128` | 插件层 HTML 编译结果缓存条目上限（`0..4096`） |
+| `compiled_cache_max_source_bytes` | `int` | `33554432` (32 MiB) | 编译缓存允许缓存的 UTF-8 源码总字节上限 |
+| `cache_max_bytes` | `int \\| None` | `None` | Takumi 原生资源缓存上限（`None` 使用上游默认 64 MiB，`0` 表示不保留） |
+| `font_cache_max_bytes` | `int \\| None` | `None` | 动态 `cache_font()` 的 LRU 淘汰预算（`None` 不限制；已固定 `pin` 的字体不计入淘汰） |
+| `default_lang` | `str \\| None` | `None` | 文档默认语言标签（如 `"zh-CN"`） |
+| `html_options` | object | 见下方 | 传递给 Takumi 的 HTML 解析选项 |
+
+`html_options` 子字段：
+
+- `presets`：`"chromium"`（默认）或 `"none"`，控制是否启用类 Chromium 的默认标签样式。
+- `tailwind_property`：`str | None`，自定义 Tailwind 属性名。
+- `max_depth`：`int | None`（`>=1`），限制 DOM 最大嵌套深度。
+
+---
+
+## HTML / CSS 支持边界
+
+Takumi 并非完整浏览器，编写模板时需注意以下限制：
+
+| 特性 | Takumi 支持情况 | 替代方案 |
+| --- | --- | --- |
+| JavaScript | ❌ 不支持 | 改用 [Playwright](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/playwright/index.md>) |
+| Markdown 数学公式 | ❌ 不支持（抛出 `UnsupportedDocumentFeatureError`） | 改用 Playwright 或预渲染为静态 SVG |
+| `<link rel="stylesheet">` / `@import` / `@font-face` | ❌ 不支持 | 使用 `<style>` 内联（Jinja2 可用 `<style>{% include "style.css" %}</style>`）；字体通过 `provider_config.fonts` 注册 |
+| 排版期自动请求网络图片 | ❌ 不支持 | 先用 `ResourceAccess.fetch_bytes()` 下载，再作为模板变量或 `PreparedAsset` 传入 |
+| 上游 `Document` / `RasterImage` / MathJax API | ❌ 未接入 | 使用插件提供的 `HtmlRenderer` 与 `TakumiCapability` |
+
+---
+
+## 平台要求
+
+`takumi-py>=0.4.0` 为 CPython 3.11+ 提供 ABI3 预编译 wheel，主流平台安装时\*\*不需要\*\* Rust 工具链：
+
+- **Linux**：`manylinux2014`（glibc 2.17+）与 `musllinux` 1.2+，支持 `x86_64` 与 `aarch64`
+- **macOS**：macOS 11+ (Apple Silicon) 与 macOS 10.12+ (Intel)
+- **Windows**：`x86_64` 与 `ARM64`
+
+如果在没有对应预编译包的平台上回退到源码编译，需要本机具备 Rust 1.91+、Python 开发头文件及 C/C++ 编译工具链。
+
+# Playwright 与远程部署
+
+当你的业务需要 **JavaScript 执行、复杂浏览器 CSS、外部网页截图、选择器截图或 Markdown 数学公式（KaTeX）** 时，请选择 Playwright 后端。
+
+```bash
+uv add "entari-plugin-htmlrender[playwright]>=0.2.0"
+```
+
+> [!TIP]
+>
+> **生产环境强烈推荐使用「远程模式」**
+>
+> 在机器人宿主机直接运行浏览器会占用大量内存，且容器镜像会变得非常臃肿。将浏览器拆分到独立的 Docker 容器中，机器人只需安装 `[playwright]` Python 客户端并通过 **WebSocket** 连接即可。
+
+## 连接方式对比与配置
+
+通过 Playwright Server 的 WebSocket 端点连接。支持 Chromium / Firefox / WebKit，且会在启动/探测阶段校验客户端与服务端版本。
+
+```yaml
+plugins:
+  htmlrender:
+    provider: playwright
+    startup: probe
+    provider_config:
+      engine: chromium
+      connect_ws:
+        endpoint: ${{ env.PLAYWRIGHT_WS_URL }} # 例如 ws://playwright:3000/
+      remote_local_resource_policy: memory
+```
+
+> [!NOTE]
+>
+> **版本对齐**
+>
+> 请确保机器人侧安装的 `playwright` Python 包版本与远程 Playwright Server 的版本完全一致。
+
+连接已开启 Chrome DevTools Protocol 的 Chromium / Chrome 实例。CDP 不执行 Playwright 版本门禁，建议开启 `startup: probe` 验证连通性：
+
+```yaml
+plugins:
+  htmlrender:
+    provider: playwright
+    startup: probe
+    provider_config:
+      engine: chromium
+      connect_cdp:
+        endpoint: ${{ env.PLAYWRIGHT_CDP_URL }} # 例如 http://chrome:9222
+```
+
+不配置 `connect_ws` 与 `connect_cdp` 时，插件会自动启动本地浏览器。首次使用前需安装对应浏览器二进制与系统依赖：
+
+```bash
+uv run playwright install --with-deps chromium
+```
+
+```yaml
+plugins:
+  htmlrender:
+    provider: playwright
+    startup: probe
+    provider_config:
+      engine: chromium
+      storage_path: .artifacts/playwright-browsers # 建议按环境隔离浏览器目录
+```
+
+- 官方 Firefox / WebKit 不支持 Alpine (musl) 容器。
+- 如果二进制已存在但缺少系统动态库，启动会直接报错，请补装系统依赖。
+
+## 远程 Playwright 服务 Docker 示例
+
+在生产环境中，可以用官方 Playwright 镜像快速起一个独立的浏览器服务（请将镜像标签与你安装的 `playwright` 版本对齐）：
+
+```yaml
+services:
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.60.0-noble
+    command: npx -y playwright@1.60.0 run-server --port 3000 --host 0.0.0.0
+    ipc: host
+    restart: unless-stopped
+```
+
+机器人容器中通过 `PLAYWRIGHT_WS_URL=ws://playwright:3000/` 连接即可，无需在机器人镜像里安装任何浏览器或图形库。
+
+---
+
+## `provider_config` 完整参考
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `engine` | `"chromium" \\| "firefox" \\| "webkit"` | `"chromium"` | 浏览器引擎 |
+| `channel` | `str \\| None` | `None` | Chromium 发行通道（如 `chrome`、`msedge` 等，仅 `engine: chromium` 有效） |
+| `executable_path` | `Path \\| None` | `None` | 手动指定本地浏览器可执行文件路径 |
+| `launch_args` | `str \\| None` | `None` | 本地启动附加参数 |
+| `proxy_server` / `proxy_bypass` | `str \\| None` | `None` | 浏览器代理地址与绕过列表 |
+| `connect_ws.endpoint` | `str \\| None` | `None` | 远程 WebSocket 端点（与 `connect_cdp` 互斥） |
+| `connect_cdp.endpoint` | `str \\| None` | `None` | 远程 CDP 端点（仅 Chromium，与 `connect_ws` 互斥） |
+| `storage_path` | `Path \\| None` | `None` | 本地浏览器下载/存放目录（默认使用插件数据目录） |
+| `install_mirror` / `install_proxy` | `str \\| None` | `None` | 浏览器下载镜像或代理 |
+| `skip_browser_install` | `bool` | `false` | 跳过自动安装检查 |
+| `close_on_exit` | `bool` | `true` | 插件关闭时是否关闭浏览器连接/进程 |
+| `materialization_policy` | `"off" \\| "auto" \\| "strict"` | `"auto"` | 默认资源处理策略 |
+| `remote_local_resource_policy` | `"memory" \\| "passthrough" \\| "filehost" \\| "error"` | `"memory"` | 远程模式下本地资源的传递方式 |
+| `local_local_resource_policy` | `"file" \\| "passthrough" \\| "filehost"` | `"file"` | 本地模式下本地资源的传递方式 |
+
+## 资源传递策略
+
+当模板引用了机器人本机的图片或静态文件时，浏览器如何读取这些文件取决于上述两个策略字段：
+
+- **`memory`（远程模式默认）**：机器人读取本地白名单文件后，在路由拦截中直接把字节返回给远程浏览器。**无需额外开放 HTTP 端口**，配置最简单。
+- **`filehost`**：通过插件内置的独立 HTTP 服务（Filehost）提供大文件或复用资源，需安装 `[filehost]` 并配置 `resources.filehost.public_base_url`，详见 [Filehost 配置](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/resources-and-security/index.md#filehost>)。
+- **`file`（本地模式默认）**：直接让本地浏览器读取白名单内的本地文件路径。
+- **`passthrough`**：原样透传引用，不做额外托管。
+- **`error`**（仅远程模式）：遇到本地资源引用时直接拒绝报错。
+
+## 托管渲染的网络隔离机制
+
+当你通过 `HtmlRenderer`（如 `rasterize_html`、`rasterize_markdown`、`rasterize_template`）调用 Playwright 时，插件会自动开启网络守卫：
+
+1. **受控代拉**：页面里的所有外部资源只允许 HTTP(S) `GET` 请求，且由机器人侧的受控网络客户端代为下载（浏览器本身不直连外部地址）。非 `GET` 请求、WebSocket 和 Service Worker 均被拦截。
+2. **逐跳校验重定向**：每次 HTTP 重定向都会重新核对 `resources.remote_access` 的域名黑/白名单与解析后的 IP/CIDR；禁止静态资源重定向到 `text/html`。
+3. **不泄露凭据**：不会自动转发浏览器 Cookie，Filehost 认证头也严格绑定单个精确 URL，绝不跨重定向转发。
+
+> [!WARNING]
+>
+> **边界说明**
+>
+> 该守卫仅保护托管渲染中的 HTTP(S) 资源拉取，不等同于完整的 Chromium 沙箱隔离。此外，通过 `service.capabilities.playwright.lease_page()` 进行的原生浏览器操作不受此守卫约束，需由业务自行校验 URL。
+
+# 绘图后端配置（Pillow / Skia）
+
+`graphics` 模块完全独立于 HTML 渲染后端：你可以只在机器人里启用绘图（`provider: null`），也可以与 Takumi 或 Playwright 同时启用。
+
+## 配置示例
+
+```yaml
+plugins:
+  htmlrender:
+    graphics:
+      backends: [pillow, skia] # (1)!
+      max_pixels: 16777216     # (2)!
+      max_concurrency: 2       # (3)!
+      max_commands: 100000     # (4)!
+      drawings:
+        avatar_card:
+          backend: pillow
+          path: drawings/avatar_card.py
+          function: draw
+          reload: true
+        badge:
+          backend: skia
+          module: my_drawings.badge
+          function: render_badge
+```
+
+1. 可同时启用多个后端；列表第一项将作为 `service.graphics` 的默认后端。如果只用单个后端，也可以用兼容字段 `backend: pillow`（若与 `backends` 同时填写，`backend` 必须包含在 `backends` 中）。
+2. `RasterScene` 与 Python 绘图共享的单张画布最大像素数（默认 1600 万像素）。
+3. 每个后端独立计数的最大并发数（Pillow 最多 2 个的同时，Skia 也可运行 2 个）。同一后端下的 `RasterScene` 和 `DrawingRenderer` 共享该并发额度。
+4. 仅限制 `RasterScene.commands` 的最大指令数，不影响 Python 绘图函数。
+
+> [!NOTE]
+>
+> **自动启用绘图后端**
+>
+> 在 `graphics.drawings` 中引用的 `backend` 会自动启用对应绘图后端，即使没有显式把它写进 `graphics.backends`。但请确保已经安装了对应的 Python 可选依赖（`[pillow]` 或 `[skia]`），后端之间\*\*不会\*\*自动互相回退。
+
+## `graphics.drawings.<name>` 字段说明
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `backend` | `"pillow" \\| "skia"` | 必填 | 该绘图函数使用的画布后端 |
+| `path` | `Path \\| None` | `None` | `.py` 源码文件路径（相对进程当前目录，与 `module` 二选一） |
+| `module` | `str \\| None` | `None` | Python 模块或包名（如 `my_drawings.card`，与 `path` 二选一） |
+| `function` | `str` | `"draw"` | 模块级同步函数名（不可包含 `.`） |
+| `reload` | `bool` | `false` | 是否在每次 `render()` 前按源码变化自动重载 |
+
+## 平台与系统依赖对比
+
+```bash
+uv add "entari-plugin-htmlrender[pillow]>=0.2.0"
+```
+
+- 依赖 `pillow>=12.0.0`。
+- 主流平台的预编译 wheel 已内置 PNG/JPEG 编解码库，\*\*不需要\*\*额外安装 EGL、OpenGL、Cairo 或 Fontconfig 等系统图形库。
+- 适合追求跨平台省心部署的场景。
+
+```bash
+uv add "entari-plugin-htmlrender[skia]>=0.2.0"
+```
+
+- 依赖 `skia-python>=144.0.post2`。
+- **仅提供预编译 wheel**（无源码包 sdist），**不支持 Alpine / musl** 与 32 位 Windows。
+- **Linux**：要求 `manylinux_2_28`（glibc）以及以下系统共享库：
+- `libegl1` (`libEGL.so.1`)
+- `libgl1` (`libGL.so.1`)
+- `libexpat1` (`libexpat.so.1`)
+- `libstdc++6`、`zlib1g`
+- **macOS**：macOS 11+；**Windows**：x64 / ARM64（Python 3.11–3.14）。
+
+安装后建议用下面命令验证系统库是否齐全：
+
+```bash
+uv run python3 -c "import skia; print(skia.__name__)"
+```
+
+具体绘图函数写法、画布对象属性与模块化热重载指南，见 [Python 绘图指南](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/guides/python-drawing/index.md>)。
+
+# 资源访问、Filehost 与安全
+
+插件默认采用「最小权限」原则：既不允许读取未授权的本地文件，也不允许访问内网 IP。本页介绍如何安全地配置本地/远程资源、内置 Filehost 以及监控指标。
+
+## 本地文件访问白名单
+
+配置路径：`resources.local_access`
+
+```yaml
+plugins:
+  htmlrender:
+    resources:
+      local_access:
+        allow_any_path: false # (1)!
+        allowed_paths:
+          - templates
+          - assets
+          - fonts
+```
+
+1. **强烈建议保持 `false`**。设为 `true` 会允许读取进程可见的任意本地文件，仅限绝对可信的本地测试环境。
+2. 传入 `TemplateRef.root`、当前工作目录或 HTML `<base>` 均\*\*不会\*\*自动授予文件读取权限，必须显式加入 `allowed_paths`。
+3. 每次读取（包括 Jinja2 的 `include` / `extends` / `import`）都会解析符号链接后的真实路径，缓存命中也不会跳过权限校验。
+
+## 远程访问与内网防护
+
+配置路径：`resources.remote_access`
+
+```yaml
+plugins:
+  htmlrender:
+    resources:
+      remote_access:
+        allow_hosts:
+          - cdn.example.com
+        deny_hosts:
+          - blocked.cdn.example.com
+        allow_private_networks: [] # (1)!
+        max_redirects: 5
+        request_timeout_seconds: 30.0
+        max_concurrent_fetches: 8
+```
+
+1. 必须填写具体的 IPv4/IPv6 地址或 CIDR 网段列表（如 `["10.0.0.0/8"]`），不接受布尔值 `true`/`false`。
+
+### 校验规则
+
+- **域名过滤**：`allow_hosts` 为空时不限制域名；非空时只放行列表中的域名及其子域名。`deny_hosts` 优先级永远高于 `allow_hosts`。
+- **内网拦截**：默认拦截所有回环地址（`127.0.0.0/8`、`::1`）、RFC 1918 私网、链路本地地址、CGNAT（`100.64.0.0/10`）及 IPv6 ULA。即使域名在 `allow_hosts` 中，如果解析到内网 IP 仍会被拦截，除非对应网段也列入 `allow_private_networks`。
+- **重定向逐跳校验**：每一跳重定向都会重新检查域名与解析后的真实 IP。
+
+## 内置文件托管（Filehost）
+
+仅当你使用 **远程 Playwright** 且将 `remote_local_resource_policy` 设为 `filehost` 时，才需要启用 Filehost。它会启动一个\*\*独立的 aiohttp HTTP 服务\*\*（不复用 Entari 的 HTTP 路由），专门向远程浏览器提供带租约和认证头的临时文件。
+
+先安装可选依赖：
+
+```bash
+uv add "entari-plugin-htmlrender[filehost]>=0.2.0"
+```
+
+### 关键配置（`resources.filehost`）
+
+```yaml
+plugins:
+  htmlrender:
+    resources:
+      filehost:
+        bind_host: "127.0.0.1"
+        bind_port: 8080
+        public_base_url: "https://assets.example.com/htmlrender" # (1)!
+        request_header_name: "X-HTMLRender-Filehost-Request"
+        request_header_value: ${{ env.FILEHOST_SECRET }}         # (2)!
+        cache_ttl_seconds: 300.0
+        max_entries: 256
+        max_bytes: 268435456 # 256 MiB
+        prewarm_enabled: true
+        prewarm_max_files: 256
+        prewarm_paths: [assets]
+        prewarm_extensions: [".png", ".jpg", ".woff2"]
+```
+
+1. **必填**：启用 Filehost 时必须显式指定远程浏览器可访问的绝对 URL，插件绝不会从监听地址或 `Host` 头自动推断。
+2. 多副本部署或需要轮换密钥时，请显式配置密钥；未设置时会尝试通过 `py-machineid` 派生默认值。
+
+> [!WARNING]
+>
+> **反向代理注意事项**
+>
+> 如果 Filehost 前方有 Nginx / Caddy 等反向代理，务必确保代理把 `request_header_name` 指定的请求头原样转发到 Filehost 后端。此外，Satori 的 `upload.create` 不具备租约、TTL 与确定性清理机制，不能替代 Filehost。
+
+## 缓存与遍历参数
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `max_entries` | `256` | 最大缓存条目数（`>=0`） |
+| `max_bytes` | `67108864` (64 MiB) | 缓存总字节上限 |
+| `max_resource_bytes` | `67108864` (64 MiB) | 允许加载的单个资源最大字节数 |
+| `revalidate_seconds` | `1.0` | 资源重新校验间隔（秒） |
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `environment_cache_max_entries` | `64` | Jinja2 `Environment` 实例缓存数 |
+| `environment_compiled_cache_size` | `256` | 单个环境的已编译模板缓存大小（`0` 表示关闭） |
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `max_nodes` | `10000` | 解析模板变量树时的最大节点数 |
+| `max_depth` | `64` | 最大嵌套层级 |
+| `max_concurrency` | `16` | 并发解析资源的最大协程数 |
+
+## 可观测性与监控
+
+插件支持按需接入 **Prometheus** 指标与 **Sentry** 性能追踪，开启前需安装对应可选依赖（`[prometheus]` 或 `[sentry]`）；若开启开关但未安装依赖，插件会自动降级为空操作并输出提示日志，不会影响正常启动。
+
+```yaml
+plugins:
+  htmlrender:
+    observability:
+      prometheus: true
+      sentry: false
+```
+
+导出指标均采用低基数标签（`op`、`backend`、`status`）：
+
+| 监控项 | Prometheus 指标名 | Sentry 指标名 |
+| --- | --- | --- |
+| 操作次数 | `entari_htmlrender_operations_total` | `entari.htmlrender.count` |
+| 执行耗时 | `entari_htmlrender_duration_seconds` | `entari.htmlrender.duration` |
+| 缓存事件 | `entari_htmlrender_cache_events` | `entari.htmlrender.cache.events` |
+| 缓存条目数 | `entari_htmlrender_cache_entries` | `entari.htmlrender.cache.entries` |
+| 缓存占用字节 | `entari_htmlrender_cache_resident_bytes` | `entari.htmlrender.cache.resident_bytes` |
+
+# 故障排查与常见问题
+
+遇到问题时，先对照下方的异常速查表，再展开对应的详细排查步骤。
+
+## 常见异常速查
+
+| 异常类型 | 典型原因 | 优先排查方向 |
+| --- | --- | --- |
+| `RuntimeUnavailableError` | 缓存了旧的 service/renderer，或插件启动/清理失败 | 改为通过 DI 获取最新实例；检查启动日志并重载插件 |
+| `ProviderNotFoundError` | `provider` 拼写错误或未安装对应 extra | 检查 `provider` 值与是否安装了 `[takumi]` / `[playwright]` |
+| `ProviderUnavailableError` | 浏览器缺失、远程地址不通或版本不匹配 | 查看异常的 `provider_id`、`reason`、`retryable` 字段 |
+| `UnsupportedDocumentFeatureError` | 把含数学公式/JS 的文档交给了 Takumi | 改用 Playwright，或预渲染公式为静态 SVG |
+| `CapabilityUnavailableError` | 访问了未启用的引擎专属能力 | 用 `capabilities.available_names` 先做判断 |
+| `GraphicsBackendUnavailableError` | 缺少 Pillow/Skia 依赖或 Skia 系统共享库 | 运行 `python3 -c "import skia"` 检查系统库 |
+| `ResourceAccessDeniedError` | 本地文件不在白名单，或远程命中内网/黑名单 | 检查 `allowed_paths`、`allow_hosts` 与 `allow_private_networks` |
+| `RenderOutputLimitError` | 输出像素、自动高度或文件体积超预算 | 调大 `html.*` / `graphics.*` 预算或缩小视口/分页 |
+
+---
+
+## 按现象排查
+
+> [!NOTE]
+>
+> **Takumi 渲染中文全是方块或乱码**
+>
+> Takumi 默认内置字体不包含完整中文字形。请同时检查三件事：
+>
+> 1. 字体文件所在目录已加入 `resources.local_access.allowed_paths`。
+> 2. 在 `provider_config.fonts` 中注册了该字体文件。
+> 3. 在 `provider_config.font_families` 或 CSS `font-family` 中使用了注册的字体名称。
+>
+> 详见 [Takumi 字体配置](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/configuration/takumi/index.md#fonts>)。
+
+> [!NOTE]
+>
+> **Takumi 渲染模板时外部 CSS 或网络图片不生效**
+>
+> - Takumi 不支持 `<link rel="stylesheet">`、`@import` 和 `@font-face`，请改用 `<style>{% include "style.css" %}</style>` 内联样式。
+> - Takumi 不会在排版时自动下载网络图片，请先通过 `ResourceAccess.fetch_bytes()` 拉取字节后再传入模板。
+
+> [!NOTE]
+>
+> **Markdown 数学公式没有被渲染，或者直接报错**
+>
+> 1. 检查语法：行内公式 `$x$` 两端\*\*不能有空格\*\*（`$ x $` 会被当作普通文本）；块级 `$$...$$` 必须\*\*独占段落\*\*。
+> 2. 检查引擎：数学公式依赖 KaTeX JavaScript，只有 **Playwright** 支持。交给 Takumi 会直接抛出 `UnsupportedDocumentFeatureError`。
+
+> [!NOTE]
+>
+> **插件热重载后报错 `RuntimeUnavailableError`**
+>
+> 通常是因为业务代码把 `HtmlRenderService`、`HtmlRenderer`、`HtmlPreparer` 或 `capabilities` 存进了模块级全局变量。插件重载后旧的运行时已经关闭，继续调用就会报错。
+>
+> **解决方式**：每次在事件处理函数里通过 Entari 依赖注入获取，不要在模块顶层缓存任何服务对象。
+
+> [!NOTE]
+>
+> **关闭或重载插件时卡住很久**
+>
+> `cleanup` 阶段会等待所有借出的租约归还。如果你在代码中调用了 `lease_page()`、`lease_browser()`、`lease_session()`、`lease_api()`、`lease_native_renderer()` 或 `resources.publish()`，请检查是否有对象逃逸出了 `async with` 作用域或存在未取消的协程一直持有租约。
+
+> [!NOTE]
+>
+> **Linux 上安装 `[skia]` 后无法导入或报缺 `.so`**
+>
+> `skia-python` 依赖宿主机安装以下系统共享库，且不支持 Alpine (musl)：
+>
+> ```bash
+> # Debian / Ubuntu 示例
+> apt-get update && apt-get install -y libegl1 libgl1 libexpat1 libstdc++6 zlib1g
+> ```
+>
+> 安装后运行 `uv run python3 -c "import skia"` 验证。
+
+> [!NOTE]
+>
+> **远程 Playwright 提示版本不兼容或连接失败**
+>
+> 1. 确认远程 Playwright Server 与机器人侧 `playwright` Python 包的版本完全一致。
+> 2. 确认网络可达，且配置的是 `connect_ws.endpoint`（或 Chromium 专用的 `connect_cdp.endpoint`），两者不能同时填写。
+> 3. 如果使用 Filehost 传递本地资源，确保配置了绝对地址 `resources.filehost.public_base_url`，且反代透传了 `X-HTMLRender-Filehost-Request` 请求头。
+
+> [!NOTE]
+>
+> **只用 Python 绘图或模板转 HTML，需要装 Takumi 或 Playwright 吗？**
+>
+> 不需要。保持 `provider: null` 和 `startup: off`，只安装你实际用到的依赖（如 `[pillow]`）即可。
+
+# API 与扩展
+
+# 公开 API 参考
+
+本页由 `mkdocstrings` 根据源码与类型标注自动生成，保证签名与代码始终一致。
+
+- 日常业务调用优先从包根 `entari_plugin_htmlrender` 导入核心接口与值对象。
+- 异常体系与常见触发场景的中文说明见[错误类型与处理](<https://entanex.github.io/entari-plugin-htmlrender/0.2.0/reference/errors/index.md>)。
+
+## 核心入口（`entari_plugin_htmlrender`）
+
+### entari\_plugin\_htmlrender
+
+Caller-first contracts and values for HTMLRender.
+
+The package root deliberately excludes runtime composition, Provider SDK, adapter, and Entari lifecycle types. Ordinary code receives the contracts exported here through constructor or host injection.
+
+#### CapabilityUnavailableError
+
+Bases: `HtmlRenderError`
+
+An optional typed capability is absent from the composition.
+
+#### HtmlRenderError
+
+Bases: `_DetailedError`
+
+Root of every stable failure exposed to HTMLRender callers.
+
+#### InvalidRenderInputError
+
+Bases: `HtmlRenderError`
+
+A caller supplied an invalid value for one rendering operation.
+
+#### ProviderError
+
+Bases: `HtmlRenderError`
+
+Base for failures attributed to one selected render provider.
+
+#### RenderOutputLimitError
+
+Bases: `HtmlRenderError`
+
+A provider result exceeded a configured output safety limit.
+
+#### RenderTimeoutError
+
+Bases: `HtmlRenderError`
+
+A complete public operation exceeded its caller-visible deadline.
+
+#### ResourceError
+
+Bases: `HtmlRenderError`
+
+Base for failures while fetching or publishing one resource.
+
+#### RuntimeUnavailableError
+
+Bases: `HtmlRenderError`
+
+The runtime state does not admit new caller operations.
+
+#### UnsupportedOperationError
+
+Bases: `HtmlRenderError`
+
+The selected composition does not implement a requested operation.
+
+#### DocumentBase
+
+Resolved document-base semantics carried by a prepared document.
+
+`declared_href` is the value of an in-document `<base href>` parsed once by `parse_html`: `None` means no `<base href>` was declared, while an empty string is an explicit `<base href="">` that resolves to the document URL itself. `preparation_base_url` is the base URL the document was prepared with. `resolve` combines them with an optional execution-time fallback so every consumer derives one canonical base instead of re-parsing the markup.
+
+#### DocumentRequirement
+
+Bases: `StrEnum`
+
+Execution features required by prepared content.
+
+#### PreparedAsset
+
+Binary resource addressable by its exact document URL.
+
+#### PreparedHtml
+
+Canonical HTML payload shared by browser and native renderers.
+
+`html` always retains the original browser document. Build instances through :func:`entari_plugin_htmlrender.preparation.parse_html` — the sole place that parses the markup; `document_base` and `structure` are that parse's results and consumers never re-derive them. The resource-resolution root lives in `document_base.preparation_base_url`.
+
+##### document\_base
+
+```python
+document_base: DocumentBase = field(kw_only=True)
+```
+
+Document-base semantics fixed at preparation time.
+
+Consumers call `document_base.resolve(fallback_base_url=...)` instead of re-deriving the base from the markup.
+
+##### structure
+
+```python
+structure: DocumentStructureSnapshot = field(kw_only=True)
+```
+
+Reference and insertion-point facts for the exact `html` string.
+
+#### PreparedStylesheet
+
+One stylesheet with its own resource-resolution base.
+
+#### RasterOptions
+
+Portable raster options shared by HTML-capable engines.
+
+#### TemplateRef
+
+Immutable locator for one filesystem template.
+
+`root` identifies the template collection while `name` is a logical, POSIX-style name inside that collection. The reference carries no renderer, environment, filters, or other Jinja implementation state.
+
+#### HtmlPreparer
+
+Bases: `Protocol`
+
+Prepare reusable HTML documents independently of a rendering provider.
+
+#### RenderedHtml
+
+HTML output of a template-to-html render operation.
+
+#### RenderedImage
+
+PNG or JPEG output with metadata derived from its encoded bytes.
+
+The bounded inspection reads only the container metadata needed for format and dimensions; full pixel decoding remains the renderer's responsibility.
+
+##### from\_bytes
+
+```python
+from_bytes(
+    data: bytes,
+    *,
+    expected_format: RasterImageFormat | None = None,
+) -> RenderedImage
+```
+
+Build an artifact after bounded inspection of encoded metadata.
+
+#### HtmlRenderer
+
+Bases: `Protocol`
+
+Rasterize caller content without exposing provider implementation types.
+
+#### TemplateRenderer
+
+Bases: `Protocol`
+
+Render one logical template into an HTML artifact.
+
+#### RenderOperation
+
+Bases: `StrEnum`
+
+Stable domain identities for renderer operations.
+
+Values describe both the input domain and output artifact. They are not coupled to Python method names, so an implementation can evolve without changing capability identity.
+
+#### ResourceMaterializationPolicy
+
+Bases: `StrEnum`
+
+Whether document-local resources are resolved before execution.
+
+#### parse\_html
+
+```python
+parse_html(
+    html: str,
+    *,
+    base_url: str | None = None,
+    stylesheets: Iterable[str | PreparedStylesheet] = (),
+    assets: Iterable[PreparedAsset] = (),
+) -> PreparedHtml
+```
+
+Build a canonical payload without performing backend-specific transport.
+
+## Entari 集成（`entari_plugin_htmlrender.entari`）
+
+### entari\_plugin\_htmlrender.entari
+
+Explicit Entari integration surface for HTMLRender.
+
+#### HtmlRenderConfig
+
+Bases: `_StrictRenderModel`
+
+Complete configuration accepted by the Entari plugin.
+
+#### RuntimeStartupPolicy
+
+Bases: `StrEnum`
+
+Provider runtime initialization policy.
+
+#### HtmlRenderService
+
+Bases: `Service`
+
+Concrete Entari service exposing only caller-facing render contracts.
+
+##### launch
+
+```python
+launch(manager: Launart) -> None
+```
+
+Participate in Entari startup, blocking, and hot-unload cleanup.
+
+## 配置模型（`entari_plugin_htmlrender.config`）
+
+### entari\_plugin\_htmlrender.config
+
+Framework-neutral configuration for one HTMLRender composition.
+
+#### RuntimeStartupPolicy
+
+Bases: `StrEnum`
+
+Provider runtime initialization policy.
+
+#### CacheSettings
+
+Bases: `_StrictRenderModel`
+
+Sizing of the shared resource cache budget.
+
+#### TemplateSettings
+
+Bases: `_StrictRenderModel`
+
+Sizing of the template environment cache.
+
+##### environment\_compiled\_cache\_size
+
+```python
+environment_compiled_cache_size: int = Field(
+    default=256, ge=0
+)
+```
+
+Compiled-template cache size per Jinja environment; 0 disables it.
+
+#### ResourceTraversalSettings
+
+Bases: `_StrictRenderModel`
+
+Bounds for resolving nested template-variable resources.
+
+#### LocalAccessSettings
+
+Bases: `_StrictRenderModel`
+
+Security policy for local filesystem resource access.
+
+#### RemoteAccessSettings
+
+Bases: `_StrictRenderModel`
+
+Security policy for remote (http/https) resource fetches.
+
+#### FilehostSettings
+
+Bases: `_StrictRenderModel`
+
+Core-owned settings for the optional asset publisher adapter.
+
+##### public\_base\_url
+
+```python
+public_base_url: str | None = Field(default=None)
+```
+
+Externally reachable absolute base of the hosted asset collection.
+
+Required whenever the selected resource strategy uses the filehost transport; deployment configuration mapped by the reverse proxy to the fixed internal mount, never derived from bind addresses, `Host` / `Forwarded` headers, or request context.
+
+#### ObservabilitySettings
+
+Bases: `_StrictRenderModel`
+
+Which observability integrations this plugin exports to.
+
+#### PythonDrawingSettings
+
+Bases: `_StrictRenderModel`
+
+One explicitly configured, trusted Python drawing entry point.
+
+#### GraphicsSettings
+
+Bases: `_StrictRenderModel`
+
+Selection and budgets for backend-neutral graphics renderers.
+
+#### HtmlRenderSettings
+
+Bases: `_StrictRenderModel`
+
+Shared limits for provider-neutral HTML raster operations.
+
+#### ResourceSettings
+
+Bases: `_StrictRenderModel`
+
+Core-validated resource, cache, and security configuration.
+
+#### HtmlRenderConfig
+
+Bases: `_StrictRenderModel`
+
+Complete configuration accepted by the Entari plugin.
+
+## 资源访问（`entari_plugin_htmlrender.resources`）
+
+### entari\_plugin\_htmlrender.resources
+
+Curated resource-domain contract surface.
+
+#### ResourceMaterializationPolicy
+
+Bases: `StrEnum`
+
+Whether document-local resources are resolved before execution.
+
+#### ResourceAccessDeniedError
+
+Bases: `ResourceError`
+
+Policy or remote authorization denied access to the resource.
+
+#### ResourceAuthenticationError
+
+Bases: `ResourceRemoteResponseError`
+
+A remote server rejected the request's authentication or authority.
+
+#### ResourceError
+
+Bases: `HtmlRenderError`
+
+Base for failures while fetching or publishing one resource.
+
+#### ResourceFetchError
+
+Bases: `ResourceError`
+
+A file or network transport failed to fetch resource content.
+
+#### ResourceNetworkError
+
+Bases: `ResourceFetchError`
+
+Name resolution, connection, or TLS transport failed.
+
+#### ResourceNotFoundError
+
+Bases: `ResourceError`
+
+The referenced resource does not exist.
+
+#### ResourcePublishError
+
+Bases: `ResourceError`
+
+A publication transport failed to expose resource content.
+
+#### ResourceRemoteResponseError
+
+Bases: `ResourceFetchError`
+
+A remote server returned a final HTTP response that was not usable.
+
+#### ResourceTimeoutError
+
+Bases: `ResourceFetchError`
+
+A resource operation exceeded its end-to-end deadline.
+
+#### ResourceTooLargeError
+
+Bases: `ResourceError`
+
+A resource exceeded an explicit byte limit.
+
+#### InlineResource
+
+Caller-owned bytes that need no source lookup.
+
+Inline data is deliberately not a :class:`ResourceRef`: references locate content, while this value already *is* content. Keeping it outside the locator union prevents caches and access policies from pretending that an in-memory payload has a filesystem or network identity.
+
+#### PublishedResource
+
+A published asset URL bundled with the exact request authorization.
+
+`request_headers` are the headers a consumer must send to fetch this specific URL. The authorization travels with the URL so callers never infer it from host, path prefix or network location. Both the URL and headers are valid only while the `ResourceAccess.publish()` context that yielded this value remains open.
+
+#### ResourceContent
+
+One immutable resource snapshot.
+
+##### final\_url
+
+```python
+final_url: str | None = None
+```
+
+Final HTTP URL when a fetch followed a redirect; otherwise `None`.
+
+#### ResourceResolution
+
+Bases: `Generic[T]`
+
+A resolved value with exact request authorization for rewritten URLs.
+
+`request_headers_by_url` is keyed by the final HTTP request URL, without a fragment and with its query preserved. Consumers must apply each header set only to that exact URL, rather than inferring access from the host or a path prefix.
+
+#### ResourceRevision
+
+Opaque source revision used by caching readers.
+
+#### ResourceAccess
+
+Bases: `Protocol`
+
+Caller contract for resource access and explicit local staging.
+
+#### ResourceFetcher
+
+Bases: `Protocol`
+
+Fetch content for explicit resource locators.
+
+This source-side port does not accept :class:`InlineResource`, because an inline payload has no source to fetch or revalidate.
+
+##### fetch\_if\_changed
+
+```python
+fetch_if_changed(
+    reference: ResourceRef, revision: ResourceRevision
+) -> ResourceContent | NotModified
+```
+
+Fetch only when the source moved past `revision`.
+
+The caller supplies the revision it already holds; the reader maps it to a source-native conditional read (`If-None-Match` / `If-Modified-Since` for HTTP, a stat compare for files) and returns :class:`NotModified` when the cached bytes are still current. Fetchers keep no validator state of their own.
+
+#### ResourceMaterializer
+
+Bases: `Protocol`
+
+Asynchronously materialize one document-local value.
+
+## Python 绘图（`entari_plugin_htmlrender.graphics`）
+
+### entari\_plugin\_htmlrender.graphics
+
+Backend-neutral raster-scene values and rendering contract.
+
+#### DrawingLoadError
+
+Bases: `GraphicsError`
+
+A configured drawing source could not be loaded or validated.
+
+#### DrawingNotFoundError
+
+Bases: `GraphicsError`
+
+A drawing name is absent from the configured registry.
+
+#### DrawingCanvas
+
+Physical-pixel dimensions and background for one native draw call.
+
+#### DrawingRenderer
+
+Bases: `Protocol`
+
+Render a configured Python drawing using a fresh native canvas.
+
+#### DrawingBackendExecutionError
+
+Bases: `GraphicsError`
+
+A backend-native Python drawing failed during draw or encoding.
+
+#### GraphicsBackendUnavailableError
+
+Bases: `GraphicsError`
+
+The selected in-process graphics backend cannot run.
+
+#### GraphicsError
+
+Bases: `HtmlRenderError`
+
+Base for failures attributed to one configured graphics backend.
+
+#### RasterBackendExecutionError
+
+Bases: `GraphicsError`
+
+A raster-scene backend failed without leaking a native exception type.
+
+#### FillRect
+
+Paint one rectangle using conceptual Porter-Duff source-over.
+
+Native backends control their 8-bit premultiplication and quantization. Cross-backend encoded bytes and exact channel values are not equivalent output contracts.
+
+#### PixelRect
+
+Half-open, integer-pixel rectangle that may extend beyond a scene.
+
+##### clipped\_to
+
+```python
+clipped_to(width: int, height: int) -> PixelRect | None
+```
+
+Intersect this rectangle with a canvas using half-open bounds.
+
+#### RasterEncodeOptions
+
+Backend-neutral PNG/JPEG encoding semantics for a raster scene.
+
+JPEG first composites the complete RGBA scene source-over onto the opaque matte. `quality` is the common encoder input, not a promise that native encoders produce equivalent compression or bytes.
+
+##### jpeg\_quality
+
+```python
+jpeg_quality: int
+```
+
+Resolve the common JPEG encoder input used by every adapter.
+
+##### jpeg\_matte
+
+```python
+jpeg_matte: RGBAColor
+```
+
+Resolve the opaque destination beneath the complete RGBA scene.
+
+#### RasterScene
+
+Physical-pixel scene shared by raster drawing backends.
+
+Commands execute in tuple order, clip to the canvas, and use conceptual source-over composition over 8-bit sRGB inputs. Native premultiplication, channel quantization, and encoders may differ, so scenes do not promise byte-for-byte or pixel-identical output across backends. The first contract intentionally contains only solid, integer-aligned rectangles: it does not pretend to provide HTML layout, text shaping, or backend-native transport.
+
+#### RGBAColor
+
+Straight-alpha, 8-bit sRGB input color.
+
+Adapters may use premultiplied native storage. RGB channels are not observable when alpha is zero and need not survive an encode round trip.
+
+#### GraphicsRenderer
+
+Bases: `Protocol`
+
+Rasterize neutral physical-pixel scenes without exposing backend selection.
+
+## 独立组装（`entari_plugin_htmlrender.composition`）
+
+### entari\_plugin\_htmlrender.composition
+
+Framework-neutral composition root for one complete render runtime.
+
+#### RuntimePlan
+
+Immutable inputs from which the host builds one isolated runtime graph.
+
+##### build\_runtime
+
+```python
+build_runtime(
+    *,
+    drawing_registry_factory: DrawingRegistryFactory
+    | None = None,
+) -> RenderRuntime
+```
+
+Consume this plan to build one graph without external I/O.
+
+#### build\_runtime\_plan
+
+```python
+build_runtime_plan(
+    config: HtmlRenderConfig,
+    *,
+    provider_override: RenderProvider[Any] | None = None,
+) -> RuntimePlan
+```
+
+Resolve and validate only the selected Provider; perform no runtime I/O.
+
+## Provider SDK（`entari_plugin_htmlrender.providers.sdk`）
+
+### entari\_plugin\_htmlrender.providers.sdk
+
+Provider SDK: stable contracts for render-provider composition.
+
+A provider is loaded either from an explicit composition-root override or from the versioned `entari_plugin_htmlrender.providers.v2` entry-point group. Raw mappings cross the boundary once through :meth:`RenderProvider.parse_config`; the resulting provider-owned value flows unchanged through availability, resource planning, and composition.
+
+#### LocalResourceStrategy
+
+Resource transport for a provider running in this process.
+
+#### RemoteResourceStrategy
+
+Resource transport for a provider running across a process boundary.
+
+#### ProviderAvailable
+
+The provider can run with the parsed configuration.
+
+#### ProviderUnavailable
+
+The provider cannot currently run with the parsed configuration.
+
+#### ProviderDependencies
+
+Services the composition root hands to `RenderProvider.compose`.
+
+Providers never read global configuration or construct their own observers; everything they need arrives here.
+
+#### ProviderBinding
+
+Immutable composition value produced by `RenderProvider.compose`.
+
+Only the composition root consumes this; caller code receives the contained lifecycle and executor through constructor injection.
+
+#### RenderProvider
+
+Bases: `Protocol[ConfigT]`
+
+A discoverable implementation of HTML rendering operations.
+
+#### validate\_provider\_id
+
+```python
+validate_provider_id(value: object) -> ProviderId
+```
+
+Validate the stable identifier shared by config and entry points.
+
+# 错误类型与处理
+
+插件定义了一套语义化的异常体系，全部继承自 `HtmlRenderError`（可从 `entari_plugin_htmlrender.errors` 导入），并附带受控长度的错误原因链 `causes: tuple[ErrorCause, ...]`。
+
+## 异常继承关系
+
+```
+flowchart LR
+    BASE["HtmlRenderError"] --> INPUT["InvalidRenderInputError"]
+    BASE --> UNSUP["UnsupportedOperationError"]
+    UNSUP --> UNSUP_OPT["UnsupportedRasterOptionError"]
+    UNSUP --> UNSUP_FEAT["UnsupportedDocumentFeatureError"]
+    BASE --> TIMEOUT["RenderTimeoutError"]
+    BASE --> LIMIT["RenderOutputLimitError"]
+    BASE --> RT["RuntimeUnavailableError"]
+    BASE --> CAP["CapabilityUnavailableError"]
+    BASE --> PROV["ProviderError"]
+    PROV --> P_SEL["ProviderSelectionError\nNotFound / Conflict / Configuration"]
+    PROV --> P_UNAVAIL["ProviderUnavailableError"]
+    PROV --> P_EXEC["ProviderExecutionError"]
+    PROV --> P_LIFE["ProviderLifecycleError"]
+    BASE --> RES["ResourceError"]
+    RES --> R_NF["ResourceNotFoundError"]
+    RES --> R_DENY["ResourceAccessDeniedError"]
+    RES --> R_BIG["ResourceTooLargeError"]
+    RES --> R_FETCH["ResourceFetchError\nNetwork / Timeout / RemoteResponse / Auth"]
+    RES --> R_PUB["ResourcePublishError"]
+    BASE --> GFX["GraphicsError"]
+    GFX --> G_UNAVAIL["GraphicsBackendUnavailableError"]
+    GFX --> G_RASTER["RasterBackendExecutionError"]
+    GFX --> G_DRAW["DrawingBackendExecutionError"]
+```
+
+## 异常分组说明
+
+### 输入、能力与限额
+
+| 异常 | 关键属性 | 常见触发场景 |
+| --- | --- | --- |
+| `InvalidRenderInputError` | `operation`, `field` | 传入非法宽高、非法 `TemplateRef`、`quality` 越界，或对同一 `RuntimePlan` 重复调用 `build_runtime()` |
+| `UnsupportedOperationError` | `operation`, `provider_id` | 当前后端不支持该渲染操作 |
+| `UnsupportedRasterOptionError` | `option`, `value` | 当前后端不支持某个 `RasterOptions` 参数值 |
+| `UnsupportedDocumentFeatureError` | `feature` | 文档包含后端不支持的特性（例如把含数学公式/JS 的文档交给 Takumi） |
+| `RenderTimeoutError` | `operation`, `timeout_seconds` | 渲染超过单次超时时间 |
+| `RenderOutputLimitError` | `operation`, `limit`, `actual`, `maximum` | 输出像素、自动高度或文件体积超出 `html.*` / `graphics.*` 预算 |
+| `RuntimeUnavailableError` | `state`, `operation` | 使用了已关闭/重载失效的服务对象，或插件启动失败 |
+| `CapabilityUnavailableError` | `capability` | 访问未启用的引擎专属能力（如在 Takumi 模式下访问 `capabilities.playwright`） |
+
+### Provider 异常（`ProviderError`）
+
+均带有 `provider_id`、`operation`、`retryable` 属性：
+
+- `ProviderNotFoundError` / `ProviderConflictError` / `ProviderConfigurationError`：配置的 `provider` 未找到、名称冲突或 `provider_config` 校验失败。
+- `ProviderUnavailableError`（含 `reason`）：运行时依赖不可用（如浏览器缺失、远程地址无法连接或版本不匹配）。
+- `ProviderExecutionError`：渲染执行期报错（例如 Takumi 动图帧率超限、底层渲染崩溃）。
+- `ProviderLifecycleError`：启动或清理阶段发生不可恢复的生命周期错误。
+
+### 资源异常（`ResourceError`）
+
+均带有 `reference`、`operation`、`retryable` 属性：
+
+- `ResourceNotFoundError`：本地文件、包资源或模板不存在。
+- `ResourceAccessDeniedError`：路径不在 `allowed_paths` 内、软链越界，或远程地址命中黑名单/内网拦截。
+- `ResourceTooLargeError`（含 `actual_size`, `maximum_size`）：单个资源超过 `resources.cache.max_resource_bytes`。
+- `ResourceFetchError` 及其子类（`ResourceNetworkError`、`ResourceTimeoutError`、`ResourceRemoteResponseError`、`ResourceAuthenticationError`）：远程 HTTP 拉取失败。
+- `ResourcePublishError`：Filehost 临时发布失败。
+
+### 绘图异常（`GraphicsError`）
+
+均带有 `backend`、`operation`、`retryable` 属性，外加绘图定位专用异常：
+
+- `GraphicsBackendUnavailableError`（含 `reason`）：未启用或未安装 Pillow / Skia（或 Skia 缺少系统库）。
+- `RasterBackendExecutionError`：`RasterScene` 执行编码失败。
+- `DrawingNotFoundError` / `DrawingLoadError` / `DrawingBackendExecutionError`：绘图名未配置、源码加载或签名校验失败、绘图函数内部抛错。
+
+# 架构与运行原理
+
+本页帮助进阶开发者理解插件的内部结构、资源流转方式以及在 Entari 之外独立嵌入的方法。
+
+## 分层架构
+
+插件将「对外业务接口」「核心渲染管线」「具体后端适配」与「Entari 集成」清晰解耦：核心层（`preparation`、`rendering`、`resources`、`graphics`、`runtime`）完全不导入 Entari。
+
+```
+flowchart LR
+    ENTARI["Entari 插件入口"] --> CFG["HtmlRenderConfig"]
+    CFG --> PLAN["build_runtime_plan() / RuntimePlan"]
+    PLAN --> RT["RenderRuntime"]
+    RT --> SVC["HtmlRenderService"]
+    SVC --> API["preparation · renderer · templates\nresources · graphics · drawings · capabilities"]
+    PLAN --> PROV["RenderProvider"]
+    PROV --> ADAPTER["Takumi / Playwright / 第三方后端"]
+    PLAN --> GFX["Pillow / Skia\nRasterScene + Python 绘图"]
+```
+
+- **业务接口层**：普通插件只需要依赖 `HtmlRenderer`、`HtmlPreparer`、`TemplateRenderer`、`ResourceAccess`、`GraphicsRenderer`、`DrawingRenderer` 等接口，无需关心底层是哪个引擎。
+- **组装层（`composition`）**：`build_runtime_plan()` 负责解析配置、选择单个 HTML 后端并确定资源策略，此阶段不发起任何网络或进程 I/O。`RuntimePlan` 是一次性对象，`build_runtime()` 只能调用一次（第二次调用会抛出 `InvalidRenderInputError`）。
+- **运行时层（`RenderRuntime`）**：统一管理并发准入、`OPEN` / `CLOSING` / `CLOSED` 状态机以及所有子服务的有序释放。
+
+## 资源处理管线
+
+无论是 HTML、Markdown 还是 Jinja2 模板，进入渲染引擎前都会经过统一的准备与资源安全管线：
+
+```
+flowchart LR
+    IN["输入内容\nHTML / MD / Text / Template"] --> PREP["HtmlPreparer\n解析生成 PreparedHtml"]
+    PREP --> POL["资源策略\n单次 Policy + 引擎 Strategy"]
+    POL --> FETCH["受控 ResourceFetcher\n白名单与内网/重定向校验"]
+    FETCH --> MAT["ResourceMaterializer\n内联字节或交由 Filehost 发布"]
+    MAT --> EXEC["PreparedHtmlExecutor\nTakumi / Playwright 出图"]
+```
+
+- `parse_html` 是唯一的 HTML 标记解析入口。
+- 本地文件校验在每次读取时都会解析符号链接后的真实路径；远程请求在每一跳重定向都会同时核对域名与 DNS 解析后的 IP。
+
+## Entari 生命周期与热重载
+
+在 Entari 中，插件的运行由 Launart 的三个标准阶段驱动：
+
+1. **`preparing`（启动阶段）**：若启用了 Filehost，先启动独立的 aiohttp 服务（即使 `startup: off` 也会启动）；随后按 `startup` 策略执行 `warmup` 或 `probe`。若此处失败，已创建的资源会回滚，该代服务标记为失败。
+2. **`blocking`（运行阶段）**：正常接收来自各业务插件的渲染与绘图请求。
+3. **`cleanup`（关闭阶段）**：将运行时切为 `CLOSING`，拒收新请求并等待在途任务和租约排空，再按顺序关闭绘图、HTML Provider、模板、资源、远程连接与 Filehost（若中途被取消或失败，支持重试并通过 `ExceptionGroup` 聚合错误）。
+
+### 热重载的两个阶段
+
+Entari 热重载 `htmlrender` 时分为两个明确的事务边界：
+
+- **切换前（暂存阶段）**：重新导入模块、校验配置、解析 Provider、构建新运行时并校验 Python 绘图入口。**如果此处失败，旧插件保持原样继续对外服务**，不会中断线上业务。
+- **切换后（生效阶段）**：销毁旧服务、提升新插件，并进入新实例的 `preparing` 阶段（绑定 Filehost、执行 `warmup` / `probe`）。如果此处失败，旧实例不会自动回滚，需要修复后手动再次重载。
+
+对于 `disable` → `enable`：正常禁用并清理完成后，插件会排队一个延迟重建的占位实例，在下次启用进入 `preparing` 时重新构建运行时（不重新读取磁盘配置）。
+
+---
+
+## 高级：脱离 Entari 独立嵌入
+
+如果你希望在其他异步框架或独立脚本中使用本插件，可以直接调用 `entari_plugin_htmlrender.composition.build_runtime_plan()`：
+
+```python
+from entari_plugin_htmlrender import RasterOptions
+from entari_plugin_htmlrender.composition import build_runtime_plan
+from entari_plugin_htmlrender.config import HtmlRenderConfig
+
+async def standalone_render() -> bytes:
+    config = HtmlRenderConfig(provider="takumi")
+    plan = build_runtime_plan(config)  # (1)!
+    runtime = plan.build_runtime()  # (2)!
+
+    hosted_server = plan.hosted_asset_server
+    if hosted_server is not None:
+        await hosted_server.startup()
+    try:
+        await runtime.startup()
+        image = await runtime.renderer.rasterize_markdown(
+            "# Standalone",
+            raster=RasterOptions(width=640),
+        )
+        return bytes(image)
+    finally:
+        await runtime.aclose()
+        if hosted_server is not None:
+            await hosted_server.aclose()
+```
+
+1. 测试或定制集成时，可传入仅关键字参数 `provider_override=my_provider` 注入自定义后端。
+2. 宿主必须自行负责启动和关闭顺序：如果存在 `plan.hosted_asset_server`，先启动它再启动 `runtime`；关闭时先关闭 `runtime` 再关闭 `hosted_asset_server`。
+
+> [!NOTE]
+>
+> **独立模式下的 Python 绘图差异**
+>
+> 在独立模式（无 Entari 宿主）下，`graphics.drawings` 为每个绘图项使用独立的私有模块命名空间并在首次 `render()` 时延迟加载；`reload: true` 仅追踪入口文件及同包相对导入，不跨绘图项同步共享模块。
+
+# 开发自定义 Provider
+
+如果你想把其他 HTML 渲染引擎接入 `entari-plugin-htmlrender`，只需实现 `entari_plugin_htmlrender.providers.sdk.RenderProvider` 协议，并通过 Python 包的 `entry_points` 暴露出来。仓库中提供了完整的最小示例：[examples/echo-provider](<https://github.com/entanex/entari-plugin-htmlrender/tree/main/examples/echo-provider>)。
+
+## 核心契约：`RenderProvider[ConfigT]`
+
+自定义 Provider 需要实现以下属性和方法：
+
+| 成员 | 职责与约束 |
+| --- | --- |
+| `id: ProviderId` | 唯一标识符，仅允许小写 ASCII 字母、数字和 `._-`（首尾需为字母或数字）。`"takumi"` 与 `"playwright"` 为内置保留名。 |
+| `parse_config(raw)` | 严格解析用户的 `provider_config`（拒绝未知键），返回强类型 `ConfigT`。框架会把同一份解析对象原样传递给后续方法。 |
+| `check_availability(config)` | 检查运行条件是否具备，返回 `ProviderAvailable()` 或 `ProviderUnavailable(reason, retryable=False)`。**禁止执行网络或进程 I/O**。 |
+| `resource_strategy(config)` | 声明该后端需要哪种资源传递策略：`LocalResourceStrategy` 或 `RemoteResourceStrategy`。 |
+| `compose(config, dependencies)` | 组装并返回 `ProviderBinding`。**禁止执行 I/O**；通过 `dependencies` 获取框架提供的 `operation_observer`、`operation_admission`、`cache_observer`、`resources` 与可选的 `asset_publisher`。 |
+
+### `ProviderBinding` 与执行器
+
+`compose()` 返回的 `ProviderBinding` 包含三部分：
+
+- `lifecycle: RuntimeLifecycle`：实现 `startup()`、`probe()`、`aclose()` 三个异步方法。
+- `prepared_html_executor: PreparedHtmlExecutor | None`：实现 `async execute(prepared: PreparedHtml, options: RasterOptions, *, operation: RenderOperation, materialization_policy: ResourceMaterializationPolicy | None = None) -> RenderedImage`。
+- `provider_capabilities: CapabilityCatalog | None`：可选，用于向 `service.capabilities` 注册专属能力（配合 `CapabilityKey(name, Protocol)`）。
+
+## 生命周期硬性约束
+
+为保证插件在并发和热重载下的稳定性，自定义 Provider 的 `lifecycle` 必须满足以下要求：
+
+1. **不在 `check_availability` / `compose` 中做 I/O**：真正启动子进程或建立网络连接只能在 `startup()` 或首次获准执行的渲染操作（当 `startup: off` 时）中发生。
+2. **`startup()` 需保证原子性与并发安全**：如果初始化中途失败，必须把已申请的资源清理干净，之后允许重试；若回滚本身失败，应抛出 `ProviderLifecycleError`。
+3. **`probe()` 只做校验，不改变资源所有权**。
+4. **`aclose()` 必须幂等**：无论当前处于未启动、已启动还是部分初始化状态，重复调用 `aclose()` 都不应报错，并需等待活跃任务与租约排空。
+5. **不越界访问宿主**：Provider 不能自行读取 Entari 配置、创建全局监控对象或直接访问宿主的内部服务。
+
+## 注册与发现
+
+在你的自定义 Provider 包的 `pyproject.toml` 中声明 entry point，分组名称必须为 **`entari_plugin_htmlrender.providers.v2`**，且键名与 `provider.id` 完全一致：
+
+```toml
+[project.entry-points."entari_plugin_htmlrender.providers.v2"]
+echo = "echo_provider:create_provider"
+```
+
+安装该包后，用户即可在 Entari 配置中直接写 `provider: echo`。
+
+在单元测试中，也可以不安装 entry point，直接通过 `build_runtime_plan(config, provider_override=my_provider)` 注入并验证你的 Provider。
+
+# 术语表
+
+本页用通俗易懂的方式解释文档与 API 中经常出现的关键概念。
+
+**Provider（HTML 渲染后端）**
+
+负责把准备好的 HTML 真正渲染成图片的引擎实现，例如内置的 **Takumi**、**Playwright**，或通过插件机制接入的第三方渲染器。通过配置中的 `provider` 选择。
+
+**Graphics 后端（绘图后端）**
+
+独立于 HTML 渲染后端的 Python 2D 绘图引擎，内置 **Pillow** 与 **Skia**。既支持调用用户编写的 Python 绘图函数（`DrawingRenderer`），也支持绘制纯数据的 `RasterScene`（`GraphicsRenderer`）。
+
+**Preparation（内容准备）与 `PreparedHtml`**
+
+在真正出图前，先把 Markdown、纯文本或 Jinja2 模板转换成结构化的中立文档 `PreparedHtml`（包含 HTML 字符串、样式表、附带资源与能力需求标记）。这一步不依赖具体渲染引擎。
+
+**资源处理 / 物化（Materialization）**
+
+把 HTML 或模板中引用的本地文件、包资源或远程图片，按安全策略读取并转换成渲染引擎能直接消费的形式（如内存字节、本地路径或 Filehost 临时 URL）。可通过 `ResourceMaterializationPolicy` 控制严格度（`auto` / `strict` / `off`）。
+
+**Capability（引擎专属能力）与租约（Lease）**
+
+某个引擎独有的高级能力，无法抽象到通用 `HtmlRenderer` 中，例如 Playwright 的网页导航与选择器截图、Takumi 的 SVG 与动图编码。通过 `service.capabilities` 获取，并必须使用 `async with ...lease_*()` 按租约借用，离开作用域后自动回收。
+
+**Filehost（内置文件托管服务）**
+
+插件按需启动的独立 aiohttp HTTP 服务，专门用于在远程 Playwright 模式下把机器人本机的大文件或临时资源安全地提供给远端浏览器（带租约 TTL 与认证请求头）。
+
+**`RuntimePlan` 与 `RenderRuntime`**
+
+脱离 Entari 独立使用时的两个底层对象。`build_runtime_plan()` 先根据配置生成一次性的执行计划 `RuntimePlan`（不做 I/O），再调用 `build_runtime()` 构建实际运行并管理生命周期的 `RenderRuntime`。
+
+# 贡献与维护
+
+# 参与贡献与本地开发
+
+欢迎为 `entari-plugin-htmlrender` 提交 Issue 与 Pull Request！本页汇总本地开发环境搭建、代码质量规范与提交流程。
+
+## 快速搭建本地环境
+
+项目使用 `uv` 管理 Python 依赖（支持 Python **3.11–3.14**，开发锁定的 Entari 版本为 `0.19.4`）：
+
+```bash
+# 同步全部可选依赖与开发工具，并安装 prek git hooks
+make prepare
+```
+
+## 常用开发命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `make check` | 一键执行格式检查、Ruff Lint、Basedpyright（含公共类型完整性）、Ty 与 CI 单元测试 |
+| `make ruff-format` | 使用 Ruff 自动格式化代码 |
+| `make test` | 并行运行 CI 测试集（跳过真实浏览器用例，要求覆盖率 \>= 90%） |
+| `make install-browser` | 安装项目本地隔离的 Playwright Chromium（存放于 `.artifacts/playwright-browsers`） |
+| `make test-local` | 串行运行包含真实浏览器的本地测试 |
+| `make remote-smoke` | 通过 Docker Compose 运行远程 Playwright 冒烟测试 |
+| `make docs-serve` | 本地启动文档预览服务器 |
+| `make docs-build` | 以严格模式构建文档站点（`zensical build --strict`） |
+
+## 编码与架构规范
+
+1. **格式与静态检查**：所有改动必须通过 `ruff format --check`、`ruff check`、`basedpyright`（以 Python 3.11 为目标，且公开 API 需满足 **100% 类型完整性** `basedpyright --verifytypes entari_plugin_htmlrender --ignoreexternal`）以及 `ty check`。
+2. **核心层解耦**：`rendering`、`preparation`、`resources`、`graphics`、`runtime` 五个核心包禁止导入 `adapters`、`composition` 或 `entari`。所有可选依赖组（包括 `[all]`）均不得引入 NoneBot。
+3. **异步与状态管理**：上层异步代码统一使用 `anyio`；禁止在模块顶层存放全局可变运行状态。
+4. **测试覆盖率**：每个测试矩阵单元的代码覆盖率不得低于 **90%**。
+5. **Prek 钩子**：提交前可运行 `prek run --all-files` 检查；如果修改了 `.github/workflows/`，还需运行 `prek run actionlint --all-files --hook-stage=manual`。
+
+## 提交消息规范（Conventional Commits）
+
+仓库使用 Angular 风格的提交规范，并由 `commit-msg` git hook 自动校验：
+
+```text
+<type>(<scope>): <subject>
+```
+
+- **允许的 `type`**：`feat`、`fix`、`docs`、`refactor`、`perf`、`test`、`build`、`ci`、`chore`、`revert`。
+- **`subject` 要求**：使用祈使语气、小写开头、不超过 72 个字符、末尾不加句号。
+- **破坏性变更**：在 `type` 或 `(scope)` 后加 `!`，或在正文底部添加 `BREAKING CHANGE:` 说明。
+
+## Pull Request 流程
+
+- 从 `main` 切出短期功能分支进行开发。
+- **仅使用 Squash Merge 合并**：PR 标题将直接作为合并后的最终提交消息，请确保 PR 标题同样符合 Conventional Commits 规范。
+- 合并前需满足：分支已同步最新 `main`、至少 1 位非作者维护者批准（新推送会重置旧批准）、所有 Review 评论已解决，且 5 项必过 CI 检查全部通过。合并后自动删除源分支。
+
+# 测试矩阵与 CI 流水线
+
+仓库把测试按运行代价分为三层，既保证日常开发反馈迅速，也在 CI 中覆盖多版本 Python、多平台与真实浏览器环境。
+
+## 测试分层
+
+| 测试档位 | 触发命令 | 说明 |
+| --- | --- | --- |
+| **CI 单元测试** | `make test` | 设置 `HTMLRENDER_TEST_PROFILE=ci`，通过 `pytest-xdist` 并行执行，跳过 `requires_browser` 标记用例，强制检查覆盖率 `>= 90%` |
+| **本地浏览器测试** | `make install-browser` 后执行 `make test-local` | 设置 `HTMLRENDER_TEST_PROFILE=local`，串行执行并运行真实 Chromium 浏览器用例（使用 `.artifacts/playwright-browsers`） |
+| **远程浏览器冒烟** | `make remote-smoke` / `make remote-smoke-build` | 通过 Docker Compose 启动独立 Playwright Server 容器与渲染端容器，验证真实跨容器通信（清理使用 `make remote-smoke-down`） |
+
+## 5 项必过状态检查（`main` 分支）
+
+任何 PR 合并到 `main` 前，以下 5 项检查必须全部通过：
+
+1. **`Required Checks`**（`ci.yml`）：Ruff 格式与 Lint、Ty、Basedpyright（含公开类型完整性）、构建包校验、Python 3.11 / 3.13 / 3.14 隔离安装 Wheel 冒烟、Docker 远程浏览器冒烟以及 Entari 插件加载测试。
+2. **`Coverage Matrix`**（`coverage.yml`）：在 Python 3.11–3.14 × `x64` / `arm64` 矩阵上运行测试，每个单元格覆盖率均需 `>= 90%`。
+3. **`Entari Compatibility Matrix`**（`entari-compat.yml`）：验证与目标 Entari 版本的隔离安装兼容性、Checker 测试与严格真实 Chromium 测试。
+4. **`Prek`**（`prek.yml`）：运行仓库配置的全部预提交质量检查。
+5. **`Docs Preview`**（`docs-pr-preview.yml`）：以严格模式构建 Zensical 文档站点，确保无断链、无无效锚点。
+
+## 其他 GitHub Actions 工作流
+
+| 工作流文件 | 触发方式与用途 |
+| --- | --- |
+| `docs.yml` | 推送 `main` 时执行严格模式文档构建校验 |
+| `docs-pr-preview*.yml` | 三段式 Fork 安全预览流：构建制品 → 通过 `workflow_run` 部署到 `gh-pages/pr-preview/pr-N/` → PR 关闭后自动清理 |
+| `auto-tag.yml` | `main` 上版本号变更且 5 项必过工作流全部通过后，自动打不可变 annotated tag 并触发发布 |
+| `publish.yml` | 校验 tag/SHA/版本一致性，通过 OIDC 可信发布上传 PyPI、创建 GitHub Release 并部署版本化文档 |
+| `publish-test.yml` | 仅支持手动触发，用于上传构建产物到 TestPyPI 预演 |
+
+> [!NOTE]
+>
+> **供应链安全约束**
+>
+> 仓库所有 GitHub Actions 均固定到完整的 commit SHA，CI 中的 `uv` 版本也固定（如 `uv==0.11.28`）。
+
+# 发布流程、文档版本与仓库治理
+
+本页面向仓库维护者，说明发版流水线、多版本文档发布方式以及分支治理规则。
+
+## 自动化发布流程
+
+项目采用 Pre-1.0 单调递增的 PEP 440 版本号，完整发版由 GitHub Actions 自动串行衔接：
+
+```
+flowchart LR
+    A["创建 release/vX.Y.Z PR\n用 uv version 更新 pyproject.toml"] --> B["Squash Merge 到 main"]
+    B --> C["auto-tag.yml\n等待 5 项必过工作流全部通过"]
+    C --> D["校验版本号递增与打包预检\n创建不可变标签 vX.Y.Z"]
+    D --> E["publish.yml\n构建 · twine 检查 · OIDC 发布 PyPI"]
+    E --> F["校验 PyPI 文件与 SHA-256\n创建 GitHub Release"]
+    F --> G["基于同一标签部署\nMike 版本化文档"]
+```
+
+### 本地预演与打包验证
+
+发版前如需在本地验证 Wheel / Sdist 内容与隔离安装：
+
+```bash
+make build-artifacts # 执行 uv build --no-sources、twine check 与 verify_distribution.py
+```
+
+如需手动向 TestPyPI 预演，在 GitHub Actions 中手动触发 `publish-test.yml`。
+
+> [!CAUTION]
+>
+> **标签不可变原则**
+>
+> 已经发布到 PyPI 的 `v*` 标签\*\*绝对不要移动或删除\*\*。如发现线上问题，请发布新的递增补丁版本。
+
+---
+
+## 文档构建与版本管理
+
+文档站点使用 **Zensical**（`zensical>=0.1.1`，配置文件为 `mkdocs.yml`）构建，并开启内置 `llmstxt` 插件自动生成 `llms.txt`、`llms-full.txt` 与每页 Markdown；Mermaid (`11.16.0`) 采用本地自托管。
+
+多版本文档由 **Mike** 部署到 `gh-pages` 分支：
+
+- **正式版本**：位于 `/<version>/`，同时按 PEP 440 比较结果决定是否更新 `latest` 别名（补发旧版本维护文档时不会把 `latest` 回退到旧版）。
+- **并发保护**：发布脚本通过重新拉取 `gh-pages`、非强制推送与有限次冲突重试来避免覆盖。
+- **PR 预览**：部署在 `/pr-preview/pr-<NUMBER>/`，不写入 Mike 版本索引，PR 关闭后自动清理。
+- **本地命令**：`make docs-deploy VERSION=0.2.0`（本地部署测试）、`make docs-list`（查看已部署版本）。
+
+---
+
+## 仓库治理与分支保护
+
+仓库在 `.github/rulesets/protect-main.json` 中定义了 `main` 分支的目标保护规则（线性提交历史、仅 Squash Merge、至少 1 位非作者维护者审批、推送重置旧审批、解决全部对话、5 项必过状态检查、禁止强推与删除）。
+
+> [!WARNING]
+>
+> **远端 Ruleset 同步提醒**
+>
+> 仓库内的 `.github/rulesets/protect-main.json` 只是规则定义文件，\*\*不会\*\*自动同步到 GitHub 远端设置。在确认 GitHub 仓库已启用对应 Ruleset 并完成核验前，维护者合并 PR 时需人工确认各项检查与审批状态。
